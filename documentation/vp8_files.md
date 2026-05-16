@@ -14,11 +14,11 @@ The lists below have been **verified by an actual build** using:
 make -j28
 ```
 
-Result: 47 codec object files, 537 unit tests pass.
+Result: 44 codec object files, 537 unit tests pass.
 
 ---
 
-## A. Source files (.c) that MUST be compiled (47 total)
+## A. Source files (.c) that MUST be compiled (44 total)
 
 These are exactly the `.o` files that ended up in the minimal VP8-decoder
 build. Every one is mandatory; nothing else is.
@@ -77,14 +77,11 @@ vpx_encoder.c         vpx_codec_enc_*  entry points (built unconditionally; no-o
 vpx_image.c           vpx_img_*  image buffer helpers
 ```
 
-### `vpx_dsp/` — DSP primitives (6)
+### `vpx_dsp/` — DSP primitives (3)
 
 ```
-bitreader.c             arithmetic decoder support for headers
-bitreader_buffer.c      raw byte-aligned bitreader
 intrapred.c             generic intra-predictor reference implementations (referenced via RTCD)
 prob.c                  probability conversion helpers
-skin_detection.c        skin-color block detector (compiled unconditionally, but unused by VP8 decode — see "drop list" below)
 vpx_dsp_rtcd.c          RTCD init shim
 ```
 
@@ -177,17 +174,10 @@ Drop: `vp8cx.h`, `vp9*.h`, `internal/vpx_ratectrl_rtc.h`.
 ### `vpx_dsp/`
 
 ```
-bitreader.h            bitreader_buffer.h
 prob.h
-skin_detection.h       (only because skin_detection.c is built)
 vpx_dsp_common.h
 vpx_filter.h
 ```
-
-6 files. If you also delete `skin_detection.c` (as recommended below),
-you can drop `skin_detection.h`. `variance.h` and `postproc.h` are NOT
-needed (the doc previously claimed otherwise — `skin_detection.c/.h` in
-fact only includes its own header).
 
 ### `vpx_mem/`
 
@@ -315,7 +305,6 @@ docs.mk, *.dox, mainpage.dox, keywords.dox
 If you also accept the "compiled-but-unused" surprises listed in section A:
 
 ```
-vpx_dsp/skin_detection.{c,h}
 vpx_util/vpx_thread.{c,h}, vpx_pthread.h
 vpx_util/vpx_write_yuv_frame.{c,h}
 vpx/src/vpx_encoder.c
@@ -337,13 +326,13 @@ enough — the resulting `libvpx.a` will be a few KB smaller.
 | `vp8/decoder/`                     | 5        | 6        |
 | `vp8/` root + `vp8/common/`        | 25       | 29       |
 | `vpx/` (incl. `src/`, `internal/`) | 4        | 11       |
-| `vpx_dsp/`                         | 6        | 6        |
+| `vpx_dsp/`                         | 3        | 3        |
 | `vpx_mem/`                         | 1        | 2        |
 | `vpx_scale/`                       | 3        | 2        |
 | `vpx_ports/`                       | 0        | 5        |
 | `vpx_util/`                        | 2        | 4        |
 | Generated (`vpx_config.*`, RTCD)   | 1        | 5        |
-| **Total**                          | **47**   | **70**   |
+| **Total**                          | **44**   | **67**   |
 
 Pure C, no SIMD, no postproc, no error-concealment, single-thread.
 Approximately **45–50 K LoC** of source. Verified to pass all 537 VP8
