@@ -25,7 +25,7 @@ use core::ptr;
 
 use crate::types::{
     FragmentData, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame, Vp8Common,
-    Vp8dComp, Vp8dConfig, Yv12BufferConfig, NUM_YV12_BUFFERS,
+    Vp8dComp, Vp8dConfig, VpxResult, Yv12BufferConfig, NUM_YV12_BUFFERS,
 };
 
 // ===========================================================================
@@ -78,6 +78,7 @@ pub struct FrameBuffers<'a> {
 // those sibling modules land.
 // ===========================================================================
 
+use crate::decodeframe::{vp8_decode_frame, vp8cx_init_de_quantizer};
 use crate::vpx_codec::vpx_internal_error;
 use crate::vpx_mem::{vpx_free, vpx_memalign};
 
@@ -95,16 +96,9 @@ extern "Rust" {
     fn vp8_init_loop_filter(cm: *mut Vp8Common);
     fn vp8_loop_filter_init(cm: *mut Vp8Common);
 
-    fn vp8cx_init_de_quantizer(pbi: *mut Vp8dComp<'static>);
     fn vp8_setup_block_dptrs(mb: *mut crate::types::Macroblockd);
-    fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> i32;
 
     fn vp8_yv12_copy_frame(src: *const Yv12BufferConfig, dst: *mut Yv12BufferConfig);
-
-    /// `setjmp` shim against the `jmp_buf` embedded inside
-    /// [`crate::types::VpxInternalErrorInfo`]. Returns 0 on the
-    /// initial call, non-zero when reached via `longjmp`.
-    fn vpx_setjmp(jmp: *mut u8) -> i32;
 }
 
 // ===========================================================================
@@ -133,7 +127,8 @@ unsafe fn remove_decompressor(pbi: *mut Vp8dComp<'static>) {
 }
 
 /// `static struct VP8D_COMP *create_decompressor(VP8D_CONFIG *)` —
-/// `vp8/decoder/onyxd_if.c:66`.
+/// `vp8/decoder/onyxd_if.c:66`. On `Err` the half-initialized instance
+/// is torn down via [`remove_decompressor`].
 unsafe fn create_decompressor(oxcf: *mut Vp8dConfig) -> *mut Vp8dComp<'static> {
     let pbi = vpx_memalign(32, core::mem::size_of::<Vp8dComp<'static>>())
         as *mut Vp8dComp<'static>;
@@ -144,14 +139,20 @@ unsafe fn create_decompressor(oxcf: *mut Vp8dConfig) -> *mut Vp8dComp<'static> {
 
     ptr::write_bytes(pbi as *mut u8, 0, core::mem::size_of::<Vp8dComp<'static>>());
 
-    if vpx_setjmp(&mut (*pbi).common.error.jmp[0] as *mut u8) != 0 {
-        (*pbi).common.error.setjmp = 0;
-        remove_decompressor(pbi);
-        return ptr::null_mut();
+    match create_decompressor_inner(pbi, oxcf) {
+        Ok(()) => pbi,
+        Err(_) => {
+            remove_decompressor(pbi);
+            ptr::null_mut()
+        }
     }
+}
 
-    (*pbi).common.error.setjmp = 1;
-
+/// Body of [`create_decompressor`].
+unsafe fn create_decompressor_inner(
+    pbi: *mut Vp8dComp<'static>,
+    oxcf: *mut Vp8dConfig,
+) -> VpxResult<()> {
     vp8_create_common(&mut (*pbi).common as *mut Vp8Common);
 
     (*pbi).common.current_video_frame = 0;
@@ -163,8 +164,6 @@ unsafe fn create_decompressor(oxcf: *mut Vp8dConfig) -> *mut Vp8dComp<'static> {
     vp8cx_init_de_quantizer(pbi);
 
     vp8_loop_filter_init(&mut (*pbi).common as *mut Vp8Common);
-
-    (*pbi).common.error.setjmp = 0;
 
     // CONFIG_ERROR_CONCEALMENT is disabled on this build.
     let _ = oxcf;
@@ -185,7 +184,7 @@ unsafe fn create_decompressor(oxcf: *mut Vp8dConfig) -> *mut Vp8dComp<'static> {
 
     once(initialize_dec);
 
-    pbi
+    Ok(())
 }
 
 /// `static int get_free_fb(VP8_COMMON *)` — `vp8/decoder/onyxd_if.c:193`.
@@ -342,12 +341,11 @@ unsafe fn check_fragments_for_errors(pbi: *mut Vp8dComp<'static>) -> i32 {
 // ===========================================================================
 
 /// `vp8dx_get_reference` — `vp8/decoder/onyxd_if.c:123`.
-#[no_mangle]
-pub unsafe extern "C" fn vp8dx_get_reference(
+pub unsafe fn vp8dx_get_reference(
     pbi: *mut Vp8dComp<'static>,
     ref_frame_flag: VpxRefFrameType,
     sd: *mut Yv12BufferConfig,
-) -> VpxCodecErr {
+) -> VpxResult<()> {
     let cm: *mut Vp8Common = &mut (*pbi).common;
     let ref_fb_idx: i32;
 
@@ -358,12 +356,7 @@ pub unsafe extern "C" fn vp8dx_get_reference(
     } else if ref_frame_flag == VP8_ALTR_FRAME {
         ref_fb_idx = (*cm).alt_fb_idx;
     } else {
-        vpx_internal_error(
-            &mut (*pbi).common.error,
-            VPX_CODEC_ERROR,
-            c"Invalid reference frame".as_ptr(),
-        );
-        return (*pbi).common.error.error_code;
+        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
     }
 
     let slot: *mut Yv12BufferConfig =
@@ -373,27 +366,20 @@ pub unsafe extern "C" fn vp8dx_get_reference(
         || (*slot).uv_height != (*sd).uv_height
         || (*slot).uv_width != (*sd).uv_width
     {
-        vpx_internal_error(
-            &mut (*pbi).common.error,
-            VPX_CODEC_ERROR,
-            c"Incorrect buffer dimensions".as_ptr(),
-        );
-    } else {
-        vp8_yv12_copy_frame(slot, sd);
+        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
     }
-
-    (*pbi).common.error.error_code
+    vp8_yv12_copy_frame(slot, sd);
+    Ok(())
 }
 
 /// `vp8dx_set_reference` — `vp8/decoder/onyxd_if.c:153`.
-#[no_mangle]
-pub unsafe extern "C" fn vp8dx_set_reference(
+pub unsafe fn vp8dx_set_reference(
     pbi: *mut Vp8dComp<'static>,
     ref_frame_flag: VpxRefFrameType,
     sd: *mut Yv12BufferConfig,
-) -> VpxCodecErr {
+) -> VpxResult<()> {
     let cm: *mut Vp8Common = &mut (*pbi).common;
-    let mut ref_fb_ptr: *mut i32 = ptr::null_mut();
+    let ref_fb_ptr: *mut i32;
     let free_fb: i32;
 
     if ref_frame_flag == VP8_LAST_FRAME {
@@ -403,12 +389,7 @@ pub unsafe extern "C" fn vp8dx_set_reference(
     } else if ref_frame_flag == VP8_ALTR_FRAME {
         ref_fb_ptr = &mut (*cm).alt_fb_idx;
     } else {
-        vpx_internal_error(
-            &mut (*pbi).common.error,
-            VPX_CODEC_ERROR,
-            c"Invalid reference frame".as_ptr(),
-        );
-        return (*pbi).common.error.error_code;
+        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
     }
 
     let slot: *mut Yv12BufferConfig =
@@ -418,40 +399,36 @@ pub unsafe extern "C" fn vp8dx_set_reference(
         || (*slot).uv_height != (*sd).uv_height
         || (*slot).uv_width != (*sd).uv_width
     {
-        vpx_internal_error(
-            &mut (*pbi).common.error,
-            VPX_CODEC_ERROR,
-            c"Incorrect buffer dimensions".as_ptr(),
-        );
-    } else {
-        // Find an empty frame buffer.
-        free_fb = get_free_fb(cm);
-        // Decrease fb_idx_ref_cnt since it will be increased again in
-        // ref_cnt_fb() below.
-        (*cm).fb_idx_ref_cnt[free_fb as usize] -= 1;
-
-        // Manage the reference counters and copy image.
-        ref_cnt_fb((*cm).fb_idx_ref_cnt.as_mut_ptr(), ref_fb_ptr, free_fb);
-        vp8_yv12_copy_frame(
-            sd,
-            &mut (*cm).yv12_fb[*ref_fb_ptr as usize] as *mut Yv12BufferConfig,
-        );
+        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
     }
+    // Find an empty frame buffer.
+    free_fb = get_free_fb(cm);
+    // Decrease fb_idx_ref_cnt since it will be increased again in
+    // ref_cnt_fb() below.
+    (*cm).fb_idx_ref_cnt[free_fb as usize] -= 1;
 
-    (*pbi).common.error.error_code
+    // Manage the reference counters and copy image.
+    ref_cnt_fb((*cm).fb_idx_ref_cnt.as_mut_ptr(), ref_fb_ptr, free_fb);
+    vp8_yv12_copy_frame(
+        sd,
+        &mut (*cm).yv12_fb[*ref_fb_ptr as usize] as *mut Yv12BufferConfig,
+    );
+    Ok(())
 }
 
 /// `vp8dx_receive_compressed_data` — `vp8/decoder/onyxd_if.c:305`.
-#[no_mangle]
-pub unsafe extern "C" fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> i32 {
+pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     let cm: *mut Vp8Common = &mut (*pbi).common;
-    let mut retcode: i32 = -1;
 
     (*pbi).common.error.error_code = VPX_CODEC_OK;
 
-    retcode = check_fragments_for_errors(pbi);
-    if retcode <= 0 {
-        return retcode;
+    let frag_status = check_fragments_for_errors(pbi);
+    if frag_status <= 0 {
+        // No fragments to decode (the C source signals this with
+        // `return 0` / `return -1` *without* throwing). We mirror that
+        // by reporting success — the caller checks `(*cm).show_frame`
+        // and `error_code` separately.
+        return Ok(());
     }
 
     (*cm).new_fb_idx = get_free_fb(cm);
@@ -466,33 +443,27 @@ pub unsafe extern "C" fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'stati
     (*pbi).dec_fb_ref[ALTREF_FRAME] =
         &mut (*cm).yv12_fb[(*cm).alt_fb_idx as usize] as *mut Yv12BufferConfig;
 
-    retcode = vp8_decode_frame(pbi);
-
-    if retcode < 0 {
+    if let Err(e) = vp8_decode_frame(pbi) {
+        // Drop the just-allocated new_fb refcount and propagate the
+        // per-MB error_code up to the common error info.
         if (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] > 0 {
             (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] -= 1;
         }
 
         (*pbi).common.error.error_code = VPX_CODEC_ERROR;
-        // Propagate the error info.
         if (*pbi).mb.error_info.error_code != VPX_CODEC_OK {
             (*pbi).common.error.error_code = (*pbi).mb.error_info.error_code;
-            ptr::copy_nonoverlapping(
-                (*pbi).mb.error_info.detail.as_ptr(),
-                (*pbi).common.error.detail.as_mut_ptr(),
-                (*pbi).mb.error_info.detail.len(),
-            );
         }
         // goto decode_exit;
         vpx_clear_system_state();
-        return retcode;
+        return Err(e);
     }
 
     if swap_frame_buffers(cm) != 0 {
         (*pbi).common.error.error_code = VPX_CODEC_ERROR;
         // goto decode_exit;
         vpx_clear_system_state();
-        return retcode;
+        return Err(VPX_CODEC_ERROR);
     }
 
     vpx_clear_system_state();
@@ -508,7 +479,7 @@ pub unsafe extern "C" fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'stati
 
     // decode_exit:
     vpx_clear_system_state();
-    retcode
+    Ok(())
 }
 
 /// `vp8dx_get_raw_frame` — `vp8/decoder/onyxd_if.c:376`.

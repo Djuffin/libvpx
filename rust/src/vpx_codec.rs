@@ -17,7 +17,7 @@ use core::ffi::{c_int, c_void};
 use core::ptr;
 
 use crate::vpx_api::*;
-use crate::types::VpxInternalErrorInfo;
+use crate::types::{VpxInternalErrorInfo, VpxResult};
 
 // ===========================================================================
 // `vpx_version.h` macros (generated at configure time). Stubs for the
@@ -232,65 +232,12 @@ pub unsafe extern "C" fn vpx_codec_control_(
 // Internal error path (vpx_codec.c:116–134).
 // ===========================================================================
 
-unsafe extern "C" {
-    /// `setjmp` / `longjmp` live in libc; the Rust side calls `longjmp`
-    /// through this FFI declaration. `jmp_buf` is platform-defined; we
-    /// pass the address of the opaque byte array in
-    /// `VpxInternalErrorInfo::jmp`.
-    fn longjmp(env: *mut c_void, val: c_int) -> !;
-}
-
-/// `vpx_internal_error` (vpx_codec.c:116).
-///
-/// The C source uses `vsnprintf` against a `va_list` to format the
-/// optional detail message. Rust does not have a stable equivalent for
-/// `va_list`; this translation accepts an already-formatted byte slice
-/// in place of the C `(fmt, ...)` pair. Callers that need printf-style
-/// formatting should format on their side and hand the result to this
-/// function.
-///
-/// `fmt` is left as `*const c_char` to match the C ABI; when non-NULL it
-/// is treated as a NUL-terminated C string copied verbatim into
-/// `info->detail`.
-///
-/// Note: `VpxInternalErrorInfo` is sourced from `crate::types`, whose
-/// `error_code` field is `i32` (decoder-internal placeholder). We cast
-/// `error` to `i32` for that assignment.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_internal_error(
+/// Records `error` into `info` and returns it as `Err`.
+#[inline]
+pub unsafe fn vpx_internal_error<T>(
     info: *mut VpxInternalErrorInfo,
     error: VpxCodecErr,
-    fmt: *const core::ffi::c_char,
-    // C varargs (`...`) elided — see doc above.
-) {
+) -> VpxResult<T> {
     (*info).error_code = error;
-    (*info).has_detail = 0;
-
-    if !fmt.is_null() {
-        let sz = core::mem::size_of_val(&(*info).detail);
-
-        (*info).has_detail = 1;
-        // C: vsnprintf(info->detail, sz - 1, fmt, ap);
-        // Without va_list support we copy `fmt` directly (assuming the
-        // caller has already done any formatting).
-        let mut n: usize = 0;
-        let src = fmt as *const u8;
-        while n < sz - 1 {
-            let b = *src.add(n);
-            if b == 0 {
-                break;
-            }
-            (*info).detail[n] = b;
-            n += 1;
-        }
-        (*info).detail[n] = 0;
-        (*info).detail[sz - 1] = 0;
-    }
-
-    if (*info).setjmp != 0 {
-        longjmp(
-            (*info).jmp.as_mut_ptr() as *mut c_void,
-            (*info).error_code as c_int,
-        );
-    }
+    Err(error)
 }

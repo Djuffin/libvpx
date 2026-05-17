@@ -402,18 +402,14 @@ pub enum VpxCodecErr {
 
 pub use VpxCodecErr::*;
 
-/// Placeholder for `vpx_internal_error_info` (longjmp target + error
-/// code + message buffer). Translated in detail when error handling
-/// lands.
+/// Pervasive result type for fallible decoder operations.
+pub type VpxResult<T> = Result<T, VpxCodecErr>;
+
+/// Last-error code stash, embedded in [`Vp8Common`] and [`Macroblockd`].
+/// Inspectable after a failed `VpxResult`.
 #[repr(C)]
 pub struct VpxInternalErrorInfo {
     pub error_code: VpxCodecErr,
-    pub has_detail: i32,
-    pub detail: [u8; 80],
-    pub setjmp: i32,
-    // `jmp_buf` is platform-dependent and provided by a separate FFI
-    // shim; we leave it opaque here.
-    pub jmp: [u8; 256],
 }
 
 /// `MACROBLOCKD` (`blockd.h`) — the working state for one macroblock

@@ -25,7 +25,7 @@ use crate::tables::{
 use crate::types::{
     Blockd, BoolDecoder, ClampType, EntropyContextPlanes, FrameType, LoopFilterType, Macroblockd,
     MbLevelFeature, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame, TokenPartition,
-    Vp8Common, Vp8Reader, Vp8dComp, Yv12BufferConfig, MAX_MB_SEGMENTS, MAX_MODE_LF_DELTAS,
+    Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig, MAX_MB_SEGMENTS, MAX_MODE_LF_DELTAS,
     MAX_REF_FRAMES, MAX_REF_LF_DELTAS, MB_FEATURE_TREE_PROBS, MB_LVL_MAX,
 };
 
@@ -970,17 +970,13 @@ unsafe fn read_available_partition_size(
     fragment_end: *const u8,
     i: c_int,
     num_part: c_int,
-) -> c_uint {
+) -> VpxResult<c_uint> {
     let pc: *mut Vp8Common = &mut (*pbi).common;
     let partition_size_ptr: *const u8 = token_part_sizes.offset((i * 3) as isize);
     let mut partition_size: c_uint = 0;
     let bytes_left: isize = (fragment_end as isize) - (fragment_start as isize);
     if bytes_left < 0 {
-        vpx_internal_error(
-            &mut (*pc).error,
-            VPX_CODEC_CORRUPT_FRAME,
-            c"Truncated packet or corrupt partition. No bytes left.".as_ptr(),
-        );
+        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
     }
     /* Calculate the length of this partition. */
     if i < num_part - 1 {
@@ -989,11 +985,7 @@ unsafe fn read_available_partition_size(
         } else if (*pbi).ec_active != 0 {
             partition_size = bytes_left as c_uint;
         } else {
-            vpx_internal_error(
-                &mut (*pc).error,
-                VPX_CODEC_CORRUPT_FRAME,
-                c"Truncated partition size data".as_ptr(),
-            );
+            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
         }
     } else {
         partition_size = bytes_left as c_uint;
@@ -1004,14 +996,10 @@ unsafe fn read_available_partition_size(
         if (*pbi).ec_active != 0 {
             partition_size = bytes_left as c_uint;
         } else {
-            vpx_internal_error(
-                &mut (*pc).error,
-                VPX_CODEC_CORRUPT_FRAME,
-                c"Truncated packet or corrupt partition length".as_ptr(),
-            );
+            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
         }
     }
-    partition_size
+    Ok(partition_size)
 }
 
 // ---------------------------------------------------------------------------
@@ -1019,7 +1007,10 @@ unsafe fn read_available_partition_size(
 // ---------------------------------------------------------------------------
 
 /// `setup_token_decoder` (vp8/decoder/decodeframe.c:728). Static helper.
-unsafe fn setup_token_decoder(pbi: *mut Vp8dComp<'static>, token_part_sizes: *const u8) {
+unsafe fn setup_token_decoder(
+    pbi: *mut Vp8dComp<'static>,
+    token_part_sizes: *const u8,
+) -> VpxResult<()> {
     let mut bool_decoder: *mut Vp8Reader<'static> = &mut (*pbi).mbc[0] as *mut Vp8Reader<'static>;
     let mut partition_idx: c_uint;
     let mut fragment_idx: c_uint;
@@ -1054,10 +1045,9 @@ unsafe fn setup_token_decoder(pbi: *mut Vp8dComp<'static>, token_part_sizes: *co
                 - ((*pbi).fragments.ptrs[0] as isize)
                 + (3 * (num_token_partitions as isize - 1));
             if (fragment_size as isize) < ext_first_part_size {
-                vpx_internal_error(
+                return vpx_internal_error(
                     &mut (*pbi).common.error,
                     VPX_CODEC_CORRUPT_FRAME,
-                    c"Corrupted fragment size".as_ptr(),
                 );
             }
             fragment_size = (fragment_size as isize - ext_first_part_size) as c_uint;
@@ -1079,13 +1069,12 @@ unsafe fn setup_token_decoder(pbi: *mut Vp8dComp<'static>, token_part_sizes: *co
                 fragment_end,
                 fragment_idx as c_int - 1,
                 num_token_partitions as c_int,
-            );
+            )?;
             (*pbi).fragments.sizes[fragment_idx as usize] = partition_size;
             if fragment_size < partition_size {
-                vpx_internal_error(
+                return vpx_internal_error(
                     &mut (*pbi).common.error,
                     VPX_CODEC_CORRUPT_FRAME,
-                    c"Corrupted fragment size".as_ptr(),
                 );
             }
             fragment_size -= partition_size;
@@ -1122,10 +1111,9 @@ unsafe fn setup_token_decoder(pbi: *mut Vp8dComp<'static>, token_part_sizes: *co
             (*pbi).decrypt_state,
         ) != 0
         {
-            vpx_internal_error(
+            return vpx_internal_error(
                 &mut (*pbi).common.error,
                 VPX_CODEC_MEM_ERROR,
-                c"Failed to allocate bool decoder".as_ptr(),
             );
         }
 
@@ -1134,6 +1122,7 @@ unsafe fn setup_token_decoder(pbi: *mut Vp8dComp<'static>, token_part_sizes: *co
     }
 
     // CONFIG_MULTITHREAD branch is intentionally omitted (minimal build).
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1217,7 +1206,7 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
 // ---------------------------------------------------------------------------
 
 /// `vp8_decode_frame` (vp8/decoder/decodeframe.c:879). Public entry point.
-pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
+pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     let bc: *mut Vp8Reader<'static> = &mut (*pbi).mbc[8] as *mut Vp8Reader<'static>;
     let pc: *mut Vp8Common = &mut (*pbi).common;
     let xd: *mut Macroblockd = &mut (*pbi).mb;
@@ -1242,10 +1231,9 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
 
     if (data_end as isize) - (data as isize) < 3 {
         if (*pbi).ec_active == 0 {
-            vpx_internal_error(
+            return vpx_internal_error(
                 &mut (*pc).error,
                 VPX_CODEC_CORRUPT_FRAME,
-                c"Truncated packet".as_ptr(),
             );
         }
 
@@ -1280,10 +1268,9 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
             >> 5) as c_int;
 
         if (*pbi).ec_active == 0 && first_partition_length_in_bytes == 0 {
-            vpx_internal_error(
+            return vpx_internal_error(
                 &mut (*pc).error,
                 VPX_CODEC_CORRUPT_FRAME,
-                c"Corrupt partition 0 length".as_ptr(),
             );
         }
 
@@ -1296,10 +1283,9 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
             if (data_end as isize) - (data as isize) >= 7 {
                 /* vet via sync code */
                 if *clear.add(0) != 0x9d || *clear.add(1) != 0x01 || *clear.add(2) != 0x2a {
-                    vpx_internal_error(
+                    return vpx_internal_error(
                         &mut (*pc).error,
                         VPX_CODEC_UNSUP_BITSTREAM,
-                        c"Invalid frame sync code".as_ptr(),
                     );
                 }
 
@@ -1311,10 +1297,9 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
                 (*pc).vert_scale = (*clear.add(6) >> 6) as c_int;
                 data = data.add(7);
             } else if (*pbi).ec_active == 0 {
-                vpx_internal_error(
+                return vpx_internal_error(
                     &mut (*pc).error,
                     VPX_CODEC_CORRUPT_FRAME,
-                    c"Truncated key frame header".as_ptr(),
                 );
             } else {
                 /* Error concealment is active, clear the frame. */
@@ -1330,16 +1315,17 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
         }
     }
     if (*pbi).decoded_key_frame == 0 && (*pc).frame_type != KEY_FRAME {
-        return -1;
+        // C source returns -1 here without populating common.error;
+        // the caller maps that to VPX_CODEC_ERROR.
+        return Err(crate::vpx_api::VPX_CODEC_ERROR);
     }
 
     if (*pbi).ec_active == 0
         && ((data_end as isize) - (data as isize)) < first_partition_length_in_bytes as isize
     {
-        vpx_internal_error(
+        return vpx_internal_error(
             &mut (*pc).error,
             VPX_CODEC_CORRUPT_FRAME,
-            c"Truncated packet or corrupt partition 0 length".as_ptr(),
         );
     }
 
@@ -1358,10 +1344,9 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
         (*pbi).decrypt_state,
     ) != 0
     {
-        vpx_internal_error(
+        return vpx_internal_error(
             &mut (*pc).error,
             VPX_CODEC_MEM_ERROR,
-            c"Failed to allocate bool decoder 0".as_ptr(),
         );
     }
     if (*pc).frame_type == KEY_FRAME {
@@ -1484,7 +1469,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
         }
     }
 
-    setup_token_decoder(pbi, data.offset(first_partition_length_in_bytes as isize));
+    setup_token_decoder(pbi, data.offset(first_partition_length_in_bytes as isize))?;
 
     (*xd).current_bc = &mut (*pbi).mbc[0] as *mut Vp8Reader<'static> as *mut c_void;
 
@@ -1613,10 +1598,9 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
         if (*pc).frame_type == KEY_FRAME && (*yv12_fb_new).corrupted == 0 {
             (*pbi).decoded_key_frame = 1;
         } else {
-            vpx_internal_error(
+            return vpx_internal_error(
                 &mut (*pbi).common.error,
                 VPX_CODEC_CORRUPT_FRAME,
-                c"A stream must start with a complete key frame".as_ptr(),
             );
         }
     }
@@ -1630,5 +1614,5 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> c_int {
     // C branches (kept here for completeness):
     let _ = DEFAULT_COEF_PROBS;
 
-    0
+    Ok(())
 }

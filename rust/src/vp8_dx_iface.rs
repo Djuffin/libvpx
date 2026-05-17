@@ -17,6 +17,7 @@ use core::ptr;
 use crate::types::{FragmentData, Vp8dConfig, Vp8dComp, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, VP8_BORDER_IN_PIXELS};
 use crate::vpx_api::*;
 use crate::vpx_codec::vpx_internal_error;
+use crate::onyxd_if::{vp8dx_get_reference, vp8dx_set_reference};
 
 // ===========================================================================
 // Local types — adapter-private, not part of the public libvpx API.
@@ -244,32 +245,28 @@ pub struct Vp8AlgPriv<'a> {
 
 use crate::vpx_mem::{vpx_calloc, vpx_free};
 
-unsafe extern "Rust" {
+// From `vp8/decoder/onyxd_if.rs`. The `*_inner` adapter calls below
+// import the new-style `VpxResult`-returning helpers directly.
+use crate::onyxd_if::{
+    vp8dx_get_quantizer, vp8dx_receive_compressed_data, vp8dx_references_buffer,
+};
 
-    // From `vp8/decoder/onyxd_if.rs`.
+unsafe extern "Rust" {
+    // `vp8_create_decoder_instances` / `vp8_remove_decoder_instances` /
+    // `vp8dx_get_raw_frame` are still wired through an extern decl
+    // because their parameter types (`FrameBuffers`, `Vp8PpFlags`) are
+    // re-declared inside this module and the two definitions differ
+    // by module path; the C ABI lets us treat them as compatible.
     fn vp8_create_decoder_instances(
         fb: *mut FrameBuffers<'static>,
         oxcf: *mut Vp8dConfig,
-    ) -> VpxCodecErr;
-    fn vp8_remove_decoder_instances(fb: *mut FrameBuffers<'static>) -> VpxCodecErr;
-    fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> i32;
+    ) -> i32;
+    fn vp8_remove_decoder_instances(fb: *mut FrameBuffers<'static>) -> i32;
     fn vp8dx_get_raw_frame(
         pbi: *mut Vp8dComp<'static>,
         sd: *mut Yv12BufferConfig,
         flags: *mut Vp8PpFlags,
     ) -> i32;
-    fn vp8dx_set_reference(
-        pbi: *mut Vp8dComp<'static>,
-        frame_type: i32,
-        sd: *mut Yv12BufferConfig,
-    ) -> VpxCodecErr;
-    fn vp8dx_get_reference(
-        pbi: *mut Vp8dComp<'static>,
-        frame_type: i32,
-        sd: *mut Yv12BufferConfig,
-    ) -> VpxCodecErr;
-    fn vp8dx_get_quantizer(pbi: *mut Vp8dComp<'static>) -> i32;
-    fn vp8dx_references_buffer(oci: *mut crate::types::Vp8Common, ref_frame: i32) -> i32;
 
     // From `vp8/common/alloccommon.rs`.
     fn vp8_alloc_frame_buffers(
@@ -471,9 +468,9 @@ pub unsafe fn vp8_get_si(
 
 /// `update_error_state` — `vp8/vp8_dx_iface.c:199`.
 ///
-/// `VpxInternalErrorInfo::error_code` is `i32` (decoder-internal
-/// placeholder in `types.rs`); we transmute back to `VpxCodecErr` on
-/// the return path since both are repr(i32)-compatible.
+/// The C source also propagated a formatted `err_detail` string out of
+/// `VpxInternalErrorInfo`; that field is gone in the Rust port, so we
+/// simply clear `err_detail` and return the error code.
 unsafe fn update_error_state(
     ctx: *mut Vp8AlgPriv<'static>,
     error: *const VpxInternalErrorInfo,
@@ -481,11 +478,7 @@ unsafe fn update_error_state(
     let code: VpxCodecErr = (*error).error_code;
 
     if code != VPX_CODEC_OK {
-        (*ctx).base.err_detail = if (*error).has_detail != 0 {
-            (*error).detail.as_ptr() as *const core::ffi::c_char
-        } else {
-            ptr::null()
-        };
+        (*ctx).base.err_detail = ptr::null();
     }
 
     code
@@ -587,12 +580,6 @@ unsafe fn update_fragments(
 }
 
 /// `vp8_decode` — `vp8/vp8_dx_iface.c:285`. Vtable `dec.decode` slot.
-///
-/// Note: the C source uses `setjmp`/`longjmp` for error handling across
-/// the heavyweight bitstream parser. Rust does not have direct setjmp
-/// support; the translation calls the bitstream parser directly and
-/// returns its result code (the FFI shim around `vpx_internal_error`
-/// is what makes the jumps disappear).
 pub unsafe fn vp8_decode(
     ctx: *mut Vp8AlgPriv<'static>,
     data: *const u8,
@@ -647,14 +634,8 @@ pub unsafe fn vp8_decode(
     {
         let pbi = (*ctx).yv12_frame_buffers.pbi[0];
         assert!(!pbi.is_null());
-        assert!((*pbi).common.error.setjmp == 0);
-        res = VPX_CODEC_CORRUPT_FRAME;
-        vpx_internal_error(
-            &mut (*pbi).common.error,
-            res,
-            b"Keyframe / intra-only frame required to reset decoder state\0".as_ptr()
-                as *const core::ffi::c_char,
-        );
+        let _ = vpx_internal_error::<()>(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
+        return VPX_CODEC_CORRUPT_FRAME;
     }
 
     if (*ctx).si.h != h || (*ctx).si.w != w {
@@ -685,7 +666,8 @@ pub unsafe fn vp8_decode(
             (*ctx).postproc_cfg.noise_level = 0;
         }
 
-        res = vp8_create_decoder_instances(&mut (*ctx).yv12_frame_buffers, &mut oxcf);
+        let rc = vp8_create_decoder_instances(&mut (*ctx).yv12_frame_buffers, &mut oxcf);
+        res = if rc == VPX_CODEC_OK as i32 { VPX_CODEC_OK } else { VPX_CODEC_ERROR };
         if res == VPX_CODEC_OK {
             (*ctx).decoder_init = 1;
         } else {
@@ -711,81 +693,82 @@ pub unsafe fn vp8_decode(
         let pbi = (*ctx).yv12_frame_buffers.pbi[0];
         let pc = &mut (*pbi).common as *mut crate::types::Vp8Common;
         if resolution_change != 0 {
-            let xd = &mut (*pbi).mb as *mut crate::types::Macroblockd;
             (*pc).width = (*ctx).si.w as i32;
             (*pc).height = (*ctx).si.h as i32;
-            {
-                // The C source arms `setjmp` around this block; the Rust
-                // translation lets `vpx_internal_error` propagate as `!`
-                // and relies on the FFI shim to translate to a `-1` return.
-                (*pbi).common.error.setjmp = 1;
-
-                if (*pc).width <= 0 {
-                    (*pc).width = w as i32;
-                    vpx_internal_error(
-                        &mut (*pc).error,
-                        VPX_CODEC_CORRUPT_FRAME,
-                        b"Invalid frame width\0".as_ptr() as *const core::ffi::c_char,
-                    );
+            match vp8_decode_resolution_change(pbi, w, h) {
+                Ok(()) => {}
+                Err(_) => {
+                    res = update_error_state(ctx, &(*pbi).common.error);
+                    (*ctx).fragments.count = 0;
+                    return res;
                 }
-
-                if (*pc).height <= 0 {
-                    (*pc).height = h as i32;
-                    vpx_internal_error(
-                        &mut (*pc).error,
-                        VPX_CODEC_CORRUPT_FRAME,
-                        b"Invalid frame height\0".as_ptr() as *const core::ffi::c_char,
-                    );
-                }
-
-                if vp8_alloc_frame_buffers(pc, (*pc).width, (*pc).height) != 0 {
-                    vpx_internal_error(
-                        &mut (*pc).error,
-                        VPX_CODEC_MEM_ERROR,
-                        b"Failed to allocate frame buffers\0".as_ptr() as *const core::ffi::c_char,
-                    );
-                }
-
-                // xd->pre = pc->yv12_fb[pc->lst_fb_idx];
-                ptr::copy_nonoverlapping(
-                    &(*pc).yv12_fb[(*pc).lst_fb_idx as usize] as *const Yv12BufferConfig,
-                    &mut (*xd).pre as *mut Yv12BufferConfig,
-                    1,
-                );
-                // xd->dst = pc->yv12_fb[pc->new_fb_idx];
-                ptr::copy_nonoverlapping(
-                    &(*pc).yv12_fb[(*pc).new_fb_idx as usize] as *const Yv12BufferConfig,
-                    &mut (*xd).dst as *mut Yv12BufferConfig,
-                    1,
-                );
-
-                vp8_build_block_doffsets(&mut (*pbi).mb);
-
-                // CONFIG_ERROR_CONCEALMENT / CONFIG_MULTITHREAD blocks
-                // omitted in the minimal build.
             }
-
-            (*pbi).common.error.setjmp = 0;
 
             // required to get past the first get_free_fb() call
             (*pbi).common.fb_idx_ref_cnt[0] = 0;
         }
 
-        (*pbi).common.error.setjmp = 1;
-
         // update the pbi fragment data
         (*pbi).fragments = (*ctx).fragments;
         (*ctx).user_priv = user_priv;
-        if vp8dx_receive_compressed_data(pbi) != 0 {
+        if let Err(_) = vp8dx_receive_compressed_data(pbi) {
+            (*pc).yv12_fb[(*pc).lst_fb_idx as usize].corrupted = 1;
+            if (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] > 0 {
+                (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] -= 1;
+            }
             res = update_error_state(ctx, &(*pbi).common.error);
         }
 
         // get ready for the next series of fragments
         (*ctx).fragments.count = 0;
-        (*pbi).common.error.setjmp = 0;
     }
 
     res
+}
+
+/// Resolution-change branch of `vp8_decode` (`vp8/vp8_dx_iface.c:402`).
+/// Returns `Err` if any width/height validation or `vp8_alloc_frame_buffers`
+/// fails.
+unsafe fn vp8_decode_resolution_change(
+    pbi: *mut Vp8dComp<'static>,
+    w: u32,
+    h: u32,
+) -> VpxResult<()> {
+    let pc = &mut (*pbi).common as *mut crate::types::Vp8Common;
+    let xd = &mut (*pbi).mb as *mut crate::types::Macroblockd;
+
+    if (*pc).width <= 0 {
+        (*pc).width = w as i32;
+        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+    }
+
+    if (*pc).height <= 0 {
+        (*pc).height = h as i32;
+        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+    }
+
+    if vp8_alloc_frame_buffers(pc, (*pc).width, (*pc).height) != 0 {
+        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_MEM_ERROR);
+    }
+
+    // xd->pre = pc->yv12_fb[pc->lst_fb_idx];
+    ptr::copy_nonoverlapping(
+        &(*pc).yv12_fb[(*pc).lst_fb_idx as usize] as *const Yv12BufferConfig,
+        &mut (*xd).pre as *mut Yv12BufferConfig,
+        1,
+    );
+    // xd->dst = pc->yv12_fb[pc->new_fb_idx];
+    ptr::copy_nonoverlapping(
+        &(*pc).yv12_fb[(*pc).new_fb_idx as usize] as *const Yv12BufferConfig,
+        &mut (*xd).dst as *mut Yv12BufferConfig,
+        1,
+    );
+
+    vp8_build_block_doffsets(&mut (*pbi).mb);
+
+    // CONFIG_ERROR_CONCEALMENT / CONFIG_MULTITHREAD blocks
+    // omitted in the minimal build.
+    Ok(())
 }
 
 /// `vp8_get_frame` — `vp8/vp8_dx_iface.c:531`. Vtable `dec.get_frame` slot.
@@ -863,7 +846,14 @@ pub unsafe fn vp8_set_reference(
             return VPX_CODEC_CORRUPT_FRAME;
         }
 
-        vp8dx_set_reference((*ctx).yv12_frame_buffers.pbi[0], (*frame).frame_type, &mut sd)
+        match vp8dx_set_reference(
+            (*ctx).yv12_frame_buffers.pbi[0],
+            (*frame).frame_type,
+            &mut sd,
+        ) {
+            Ok(()) => VPX_CODEC_OK,
+            Err(e) => e,
+        }
     } else {
         VPX_CODEC_INVALID_PARAM
     }
@@ -886,7 +876,14 @@ pub unsafe fn vp8_get_reference(
             return VPX_CODEC_CORRUPT_FRAME;
         }
 
-        vp8dx_get_reference((*ctx).yv12_frame_buffers.pbi[0], (*frame).frame_type, &mut sd)
+        match vp8dx_get_reference(
+            (*ctx).yv12_frame_buffers.pbi[0],
+            (*frame).frame_type,
+            &mut sd,
+        ) {
+            Ok(()) => VPX_CODEC_OK,
+            Err(e) => e,
+        }
     } else {
         VPX_CODEC_INVALID_PARAM
     }

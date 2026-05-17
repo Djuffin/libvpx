@@ -25,9 +25,9 @@ use core::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 // ===========================================================================
 
 pub use crate::types::{
-    VpxCodecErr, VPX_CODEC_ABI_MISMATCH, VPX_CODEC_CORRUPT_FRAME, VPX_CODEC_ERROR,
-    VPX_CODEC_INCAPABLE, VPX_CODEC_INVALID_PARAM, VPX_CODEC_LIST_END, VPX_CODEC_MEM_ERROR,
-    VPX_CODEC_OK, VPX_CODEC_UNSUP_BITSTREAM, VPX_CODEC_UNSUP_FEATURE,
+    VpxCodecErr, VpxResult, VPX_CODEC_ABI_MISMATCH, VPX_CODEC_CORRUPT_FRAME,
+    VPX_CODEC_ERROR, VPX_CODEC_INCAPABLE, VPX_CODEC_INVALID_PARAM, VPX_CODEC_LIST_END,
+    VPX_CODEC_MEM_ERROR, VPX_CODEC_OK, VPX_CODEC_UNSUP_BITSTREAM, VPX_CODEC_UNSUP_FEATURE,
 };
 
 pub type VpxCodecErrT = VpxCodecErr;
