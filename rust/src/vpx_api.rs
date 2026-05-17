@@ -624,4 +624,4 @@ pub use crate::vpx_image::{
     vpx_img_alloc, vpx_img_flip, vpx_img_free, vpx_img_set_rect, vpx_img_wrap,
 };
 
-pub use crate::vp8_dx_iface::{vpx_codec_vp8_dx, Vp8DxIface};
+pub use crate::vp8_dx_iface::vpx_codec_vp8_dx;

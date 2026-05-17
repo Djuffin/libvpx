@@ -11,7 +11,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
-use core::ffi::c_void;
+use core::ffi::{c_char, c_uint, c_void};
 use core::ptr;
 
 use crate::types::{FragmentData, FrameBuffers, Vp8dConfig, Vp8dComp, Vp8PpFlags, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, MAX_FB_MT_DEC, VP8_BORDER_IN_PIXELS};
@@ -131,74 +131,6 @@ impl VaList {
         self.raw as i32
     }
 }
-
-// Local iface-shaped types matching the iface populated by the static
-// `VPX_CODEC_VP8_DX_ALGO`. They are distinct from the canonical types
-// in `vpx_api` because the function-pointer signatures here use plain
-// `unsafe fn` rather than `unsafe extern "C" fn` — the VP8 decoder
-// implementations are translated as ordinary Rust functions and never
-// cross the C ABI directly. A future cleanup pass can collapse these
-// into the canonical types once trampolines are added.
-
-pub type Vp8DxCtrlFn = unsafe fn(*mut Vp8AlgPriv<'static>, VaList) -> VpxCodecErr;
-
-#[repr(C)]
-pub struct Vp8DxCtrlFnMap {
-    pub ctrl_id: i32,
-    pub fn_: Option<Vp8DxCtrlFn>,
-}
-
-pub type Vp8DxInitFn =
-    unsafe fn(*mut VpxCodecCtx, *mut VpxCodecPrivEncMrCfg) -> VpxCodecErr;
-pub type Vp8DxDestroyFn = unsafe fn(*mut Vp8AlgPriv<'static>) -> VpxCodecErr;
-pub type Vp8DxPeekSiFn =
-    unsafe fn(*const u8, u32, *mut VpxCodecStreamInfo) -> VpxCodecErr;
-pub type Vp8DxGetSiFn =
-    unsafe fn(*mut Vp8AlgPriv<'static>, *mut VpxCodecStreamInfo) -> VpxCodecErr;
-pub type Vp8DxDecodeFn =
-    unsafe fn(*mut Vp8AlgPriv<'static>, *const u8, u32, *mut c_void) -> VpxCodecErr;
-pub type Vp8DxFrameGetFn =
-    unsafe fn(*mut Vp8AlgPriv<'static>, *mut VpxCodecIter) -> *mut VpxImage;
-pub type Vp8DxSetFbFn = unsafe fn() -> VpxCodecErr;
-
-#[repr(C)]
-pub struct Vp8DxIfaceDec {
-    pub peek_si: Option<Vp8DxPeekSiFn>,
-    pub get_si: Option<Vp8DxGetSiFn>,
-    pub decode: Option<Vp8DxDecodeFn>,
-    pub frame_get: Option<Vp8DxFrameGetFn>,
-    pub set_fb_fn: Option<Vp8DxSetFbFn>,
-}
-
-#[repr(C)]
-pub struct Vp8DxIfaceEnc {
-    pub cfg_map_count: i32,
-    pub cfg_maps: *mut c_void,
-    pub encode: *mut c_void,
-    pub get_cx_data: *mut c_void,
-    pub cfg_set: *mut c_void,
-    pub get_global_headers: *mut c_void,
-    pub get_preview_frame: *mut c_void,
-    pub mr_get_mem_loc: *mut c_void,
-    pub mr_free_mem_loc: *mut c_void,
-}
-
-/// VP8-decoder-specific `vpx_codec_iface_t` layout — function-pointer
-/// types use the local plain-Rust shapes above. Distinct from
-/// `vpx_api::VpxCodecIface` (which uses `extern "C"` signatures).
-#[repr(C)]
-pub struct Vp8DxIface {
-    pub name: *const u8,
-    pub abi_version: i32,
-    pub caps: VpxCodecCaps,
-    pub init: Option<Vp8DxInitFn>,
-    pub destroy: Option<Vp8DxDestroyFn>,
-    pub ctrl_maps: *mut Vp8DxCtrlFnMap,
-    pub dec: Vp8DxIfaceDec,
-    pub enc: Vp8DxIfaceEnc,
-}
-
-unsafe impl Sync for Vp8DxIface {}
 
 /// `vpx_codec_alg_priv_t` for the VP8 decoder (`vp8_dx_iface.c:44-64`).
 /// Concrete adapter-private state — distinct from `vpx_api::VpxCodecAlgPriv`
@@ -965,60 +897,161 @@ pub unsafe fn vp8_set_decryptor(
 }
 
 // ===========================================================================
+// extern "C" trampolines — bridge the plain-Rust impl fns above to the
+// canonical `VpxCodecIface` slot signatures (which use `extern "C"` and
+// the opaque `*mut VpxCodecAlgPriv` pointer type).
+// ===========================================================================
+
+unsafe extern "C" fn vp8_init_c(
+    ctx: *mut VpxCodecCtx,
+    data: *mut VpxCodecPrivEncMrCfg,
+) -> VpxCodecErr {
+    vp8_init(ctx, data)
+}
+
+unsafe extern "C" fn vp8_destroy_c(ctx: *mut VpxCodecAlgPriv) -> VpxCodecErr {
+    vp8_destroy(ctx as *mut Vp8AlgPriv<'static>)
+}
+
+unsafe extern "C" fn vp8_peek_si_c(
+    data: *const u8,
+    data_sz: c_uint,
+    si: *mut VpxCodecStreamInfo,
+) -> VpxCodecErr {
+    vp8_peek_si(data, data_sz, si)
+}
+
+unsafe extern "C" fn vp8_get_si_c(
+    ctx: *mut VpxCodecAlgPriv,
+    si: *mut VpxCodecStreamInfo,
+) -> VpxCodecErr {
+    vp8_get_si(ctx as *mut Vp8AlgPriv<'static>, si)
+}
+
+unsafe extern "C" fn vp8_decode_c(
+    ctx: *mut VpxCodecAlgPriv,
+    data: *const u8,
+    data_sz: c_uint,
+    user_priv: *mut c_void,
+) -> VpxCodecErr {
+    vp8_decode(ctx as *mut Vp8AlgPriv<'static>, data, data_sz, user_priv)
+}
+
+unsafe extern "C" fn vp8_get_frame_c(
+    ctx: *mut VpxCodecAlgPriv,
+    iter: *mut VpxCodecIter,
+) -> *mut VpxImage {
+    vp8_get_frame(ctx as *mut Vp8AlgPriv<'static>, iter)
+}
+
+unsafe extern "C" fn vp8_set_reference_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_set_reference(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+unsafe extern "C" fn vp8_get_reference_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_get_reference(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+unsafe extern "C" fn vp8_set_postproc_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_set_postproc(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+unsafe extern "C" fn vp8_get_last_ref_updates_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_get_last_ref_updates(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+unsafe extern "C" fn vp8_get_frame_corrupted_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_get_frame_corrupted(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+unsafe extern "C" fn vp8_get_last_ref_frame_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_get_last_ref_frame(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+unsafe extern "C" fn vp8_get_quantizer_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_get_quantizer(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+unsafe extern "C" fn vp8_set_decryptor_c(
+    ctx: *mut VpxCodecAlgPriv,
+    ap: *mut c_void,
+) -> VpxCodecErr {
+    vp8_set_decryptor(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
+}
+
+// ===========================================================================
 // Vtable and control map — `vp8_dx_iface.c:723-765`
 // ===========================================================================
 
 /// `vp8_ctf_maps` — `vp8/vp8_dx_iface.c:723`.
-pub static mut VP8_CTF_MAPS: [Vp8DxCtrlFnMap; 9] = [
-    Vp8DxCtrlFnMap { ctrl_id: VP8_SET_REFERENCE, fn_: Some(vp8_set_reference) },
-    Vp8DxCtrlFnMap { ctrl_id: VP8_COPY_REFERENCE, fn_: Some(vp8_get_reference) },
-    Vp8DxCtrlFnMap { ctrl_id: VP8_SET_POSTPROC, fn_: Some(vp8_set_postproc) },
-    Vp8DxCtrlFnMap { ctrl_id: VP8D_GET_LAST_REF_UPDATES, fn_: Some(vp8_get_last_ref_updates) },
-    Vp8DxCtrlFnMap { ctrl_id: VP8D_GET_FRAME_CORRUPTED, fn_: Some(vp8_get_frame_corrupted) },
-    Vp8DxCtrlFnMap { ctrl_id: VP8D_GET_LAST_REF_USED, fn_: Some(vp8_get_last_ref_frame) },
-    Vp8DxCtrlFnMap { ctrl_id: VPXD_GET_LAST_QUANTIZER, fn_: Some(vp8_get_quantizer) },
-    Vp8DxCtrlFnMap { ctrl_id: VPXD_SET_DECRYPTOR, fn_: Some(vp8_set_decryptor) },
-    Vp8DxCtrlFnMap { ctrl_id: -1, fn_: None },
+pub static mut VP8_CTF_MAPS: [VpxCodecCtrlFnMap; 9] = [
+    VpxCodecCtrlFnMap { ctrl_id: VP8_SET_REFERENCE, fn_: Some(vp8_set_reference_c) },
+    VpxCodecCtrlFnMap { ctrl_id: VP8_COPY_REFERENCE, fn_: Some(vp8_get_reference_c) },
+    VpxCodecCtrlFnMap { ctrl_id: VP8_SET_POSTPROC, fn_: Some(vp8_set_postproc_c) },
+    VpxCodecCtrlFnMap { ctrl_id: VP8D_GET_LAST_REF_UPDATES, fn_: Some(vp8_get_last_ref_updates_c) },
+    VpxCodecCtrlFnMap { ctrl_id: VP8D_GET_FRAME_CORRUPTED, fn_: Some(vp8_get_frame_corrupted_c) },
+    VpxCodecCtrlFnMap { ctrl_id: VP8D_GET_LAST_REF_USED, fn_: Some(vp8_get_last_ref_frame_c) },
+    VpxCodecCtrlFnMap { ctrl_id: VPXD_GET_LAST_QUANTIZER, fn_: Some(vp8_get_quantizer_c) },
+    VpxCodecCtrlFnMap { ctrl_id: VPXD_SET_DECRYPTOR, fn_: Some(vp8_set_decryptor_c) },
+    VpxCodecCtrlFnMap { ctrl_id: -1, fn_: None },
 ];
 
 /// `vpx_codec_vp8_dx_algo` — `vp8/vp8_dx_iface.c:738-765`.
-pub static mut VPX_CODEC_VP8_DX_ALGO: Vp8DxIface = Vp8DxIface {
-    name: b"WebM Project VP8 Decoder\0".as_ptr(),
+pub static mut VPX_CODEC_VP8_DX_ALGO: VpxCodecIface = VpxCodecIface {
+    name: b"WebM Project VP8 Decoder\0".as_ptr() as *const c_char,
     abi_version: VPX_CODEC_INTERNAL_ABI_VERSION,
     caps: VPX_CODEC_CAP_DECODER
         | VP8_CAP_POSTPROC
         | VP8_CAP_ERROR_CONCEALMENT
         | VPX_CODEC_CAP_INPUT_FRAGMENTS,
-    init: Some(vp8_init),
-    destroy: Some(vp8_destroy),
+    init: Some(vp8_init_c),
+    destroy: Some(vp8_destroy_c),
     ctrl_maps: ptr::null_mut(), // populated by `vpx_codec_vp8_dx` lazily
-    dec: Vp8DxIfaceDec {
-        peek_si: Some(vp8_peek_si),
-        get_si: Some(vp8_get_si),
-        decode: Some(vp8_decode),
-        frame_get: Some(vp8_get_frame),
+    dec: VpxCodecDecIface {
+        peek_si: Some(vp8_peek_si_c),
+        get_si: Some(vp8_get_si_c),
+        decode: Some(vp8_decode_c),
+        get_frame: Some(vp8_get_frame_c),
         set_fb_fn: None,
     },
-    enc: Vp8DxIfaceEnc {
+    enc: VpxCodecEncIface {
         cfg_map_count: 0,
-        cfg_maps: ptr::null_mut(),
-        encode: ptr::null_mut(),
-        get_cx_data: ptr::null_mut(),
-        cfg_set: ptr::null_mut(),
-        get_global_headers: ptr::null_mut(),
-        get_preview_frame: ptr::null_mut(),
-        mr_get_mem_loc: ptr::null_mut(),
-        mr_free_mem_loc: ptr::null_mut(),
+        cfg_maps: ptr::null(),
+        encode: None,
+        get_cx_data: None,
+        cfg_set: None,
+        get_glob_hdrs: None,
+        get_preview: None,
+        mr_get_mem_loc: None,
+        mr_free_mem_loc: None,
     },
 };
 
 /// `vpx_codec_vp8_dx` — `vp8/vp8_dx_iface.c:738` (via `CODEC_INTERFACE`).
 ///
-/// Returns a pointer into the static `Vp8DxIface` block. Callers that
-/// expect a canonical `vpx_api::VpxCodecIface*` should cast — the two
-/// layouts overlap in the leading fields (`name`, `abi_version`,
-/// `caps`) but the function-pointer slots differ.
-pub unsafe fn vpx_codec_vp8_dx() -> *mut Vp8DxIface {
+/// Returns a pointer to the canonical `VpxCodecIface` block for VP8.
+pub unsafe fn vpx_codec_vp8_dx() -> *mut VpxCodecIface {
     if VPX_CODEC_VP8_DX_ALGO.ctrl_maps.is_null() {
         VPX_CODEC_VP8_DX_ALGO.ctrl_maps = VP8_CTF_MAPS.as_mut_ptr();
     }

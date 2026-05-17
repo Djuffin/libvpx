@@ -27,22 +27,13 @@ type IntraPredFn = unsafe extern "C" fn(
     left: *const u8,
 );
 
-// ---------------------------------------------------------------------------
-// Foreign per-mode kernels (vpx_dsp/intrapred.c). Resolved at link time via
-// the RTCD layer to whatever the host CPU supports.
-// ---------------------------------------------------------------------------
-extern "C" {
-    fn vpx_dc_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_tm_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_ve_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_he_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_d45e_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_d135_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_d117_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_d63e_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_d153_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_d207_predictor_4x4(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-}
+// Per-mode 4x4 kernels live in `vpx_dsp::intrapred`; the RTCD aliases
+// (without the `_c` suffix) come from `vpx_dsp_rtcd`.
+use crate::vpx_dsp_rtcd::{
+    vpx_d117_predictor_4x4, vpx_d135_predictor_4x4, vpx_d153_predictor_4x4,
+    vpx_d207_predictor_4x4, vpx_d45e_predictor_4x4, vpx_d63e_predictor_4x4,
+    vpx_dc_predictor_4x4, vpx_he_predictor_4x4, vpx_tm_predictor_4x4, vpx_ve_predictor_4x4,
+};
 
 // ---------------------------------------------------------------------------
 // `static intra_pred_fn pred[10];` (reconintra4x4.c:24).
