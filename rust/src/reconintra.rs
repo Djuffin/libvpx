@@ -8,9 +8,7 @@
 //!     populator.
 //!
 //! The actual pixel kernels live in `vpx_dsp/intrapred.c` and are
-//! reached by raw function pointer through the `pred` / `dc_pred`
-//! tables. Those kernels are declared `extern "Rust"` until their host
-//! module is translated.
+//! reached by raw function pointer through the `pred` / `dc_pred` tables.
 
 #![allow(non_upper_case_globals)]
 
@@ -67,7 +65,7 @@ static mut dc_pred: [[[Option<IntraPredFn>; NUM_SIZES]; 2]; 2] =
 /// Populates both file-local dispatch tables for the two whole-MB sizes
 /// (16 and 8) and chains into the per-4x4 initializer so a single
 /// `once()` call covers both layers of VP8 intra prediction.
-unsafe extern "Rust" fn vp8_init_intra_predictors_internal() {
+unsafe fn vp8_init_intra_predictors_internal() {
     unsafe {
         // INIT_SIZE(16);
         pred[MbPredictionMode::VPred as usize][SIZE_16] = Some(vpx_v_predictor_16x16);

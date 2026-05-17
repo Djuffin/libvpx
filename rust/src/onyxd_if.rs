@@ -52,13 +52,7 @@ pub const GOLDEN_FRAME: usize = MvReferenceFrame::Golden as usize;
 pub const ALTREF_FRAME: usize = MvReferenceFrame::Altref as usize;
 
 // ===========================================================================
-// `extern "Rust"` cross-translation-unit dependencies.
-//
-// These all live in sibling files (`alloccommon.rs`, `loopfilter.rs`,
-// `decodeframe.rs`, `mbpitch.rs`, `reconintra.rs`, `yv12extend.rs`,
-// `quant_common.rs`, error-info shims) that have not been translated
-// yet. They are declared `extern "Rust"` so the compiler is happy until
-// those sibling modules land.
+// Cross-translation-unit dependencies.
 // ===========================================================================
 
 use crate::decodeframe::{vp8_decode_frame, vp8cx_init_de_quantizer};
@@ -82,7 +76,7 @@ use crate::vpx_scale_rtcd::vp8_yv12_copy_frame;
 /// Process-wide one-shot init. Invoked through `once()` from
 /// [`create_decompressor`]; the `volatile` guard is defensive — the
 /// real serialization happens in `once()`.
-unsafe extern "Rust" fn initialize_dec() {
+unsafe fn initialize_dec() {
     static mut INIT_DONE: i32 = 0;
 
     if INIT_DONE == 0 {

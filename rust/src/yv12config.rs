@@ -29,8 +29,7 @@ use core::ptr;
 use crate::types::Yv12BufferConfig;
 
 // ---------------------------------------------------------------------------
-// External dependencies — declared as `extern "Rust"` per the translation
-// rules. These functions live in `vpx_mem.rs` (to be filled in).
+// Cross-translation-unit dependencies.
 // ---------------------------------------------------------------------------
 
 use crate::vpx_mem::{vpx_free, vpx_memalign};
@@ -47,7 +46,7 @@ use crate::vpx_mem::{vpx_free, vpx_memalign};
 /// If `buffer_alloc_sz > 0`, `buffer_alloc` must point to memory
 /// previously returned by `vpx_memalign`.
 #[no_mangle]
-pub unsafe extern "Rust" fn vp8_yv12_de_alloc_frame_buffer(ybf: *mut Yv12BufferConfig) -> i32 {
+pub unsafe fn vp8_yv12_de_alloc_frame_buffer(ybf: *mut Yv12BufferConfig) -> i32 {
     if !ybf.is_null() {
         // If libvpx is using frame buffer callbacks then buffer_alloc_sz
         // must not be set.
@@ -79,7 +78,7 @@ pub unsafe extern "Rust" fn vp8_yv12_de_alloc_frame_buffer(ybf: *mut Yv12BufferC
 /// whose `buffer_alloc` (if non-null) is either NULL or a
 /// `vpx_memalign`-produced allocation of at least `buffer_alloc_sz` bytes.
 #[no_mangle]
-pub unsafe extern "Rust" fn vp8_yv12_realloc_frame_buffer(
+pub unsafe fn vp8_yv12_realloc_frame_buffer(
     ybf: *mut Yv12BufferConfig,
     width: i32,
     height: i32,
@@ -175,7 +174,7 @@ pub unsafe extern "Rust" fn vp8_yv12_realloc_frame_buffer(
 /// Same requirements as [`vp8_yv12_de_alloc_frame_buffer`] and
 /// [`vp8_yv12_realloc_frame_buffer`].
 #[no_mangle]
-pub unsafe extern "Rust" fn vp8_yv12_alloc_frame_buffer(
+pub unsafe fn vp8_yv12_alloc_frame_buffer(
     ybf: *mut Yv12BufferConfig,
     width: i32,
     height: i32,

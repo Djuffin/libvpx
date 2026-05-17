@@ -20,10 +20,7 @@ use crate::types::{
 };
 
 // ---------------------------------------------------------------------------
-// External dependencies — declared as `extern "Rust"` per the translation
-// rules. These functions live in other translation units (yv12config.c,
-// vpx_mem.c, entropymode.c, systemdependent.c) and will be filled in by
-// the corresponding Rust modules.
+// Cross-translation-unit dependencies.
 // ---------------------------------------------------------------------------
 
 use crate::entropymode::{vp8_default_bmode_probs, vp8_init_mbmode_probs};

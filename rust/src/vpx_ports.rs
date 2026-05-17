@@ -33,7 +33,7 @@ pub fn vpx_clear_system_state() {}
 /// `vp8_init_intra4x4_predictors_internal`), so the cost is trivial.
 ///
 /// Safety: `func` must be safe to call from any thread.
-pub unsafe fn once(func: unsafe extern "Rust" fn()) {
+pub unsafe fn once(func: unsafe fn()) {
     use std::collections::HashMap;
     use std::sync::Mutex;
     use std::sync::OnceLock;

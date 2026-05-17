@@ -11,9 +11,8 @@
 //!     mirror the C `mi - mis`, `mi - 1`, `mi - mis - 1` neighbour
 //!     lookups (column −1 / row −1 sentinels are set up elsewhere);
 //!   - helper functions translated from `findnearmv.h` /
-//!     `entropymv.h` / `treereader.h` are declared `extern "Rust"` at
-//!     the top, to be linked against translations that live in other
-//!     source files.
+//!     `entropymv.h` / `treereader.h` are imported from their host
+//!     modules at the top.
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
@@ -54,19 +53,10 @@ const RIGHT_BOTTOM_MARGIN: i32 = 16 << 3;
 /// `vp8_prob_half` — used by `vp8_read_bit`. Mirrors `treecoder.h`.
 const VP8_PROB_HALF: i32 = 128;
 
-// ===========================================================================
-// `extern "Rust"` declarations of helpers translated in other source files.
-// ===========================================================================
-
 use crate::dboolhuff::{vp8_decode_value, vp8dx_bool_error, vp8dx_decode_bool};
 
 // ===========================================================================
 // Local re-implementations of trivial `treereader.h` wrappers / helpers.
-//
-// These are macros in C (`#define vp8_read vp8dx_decode_bool`) and a tiny
-// `static INLINE` for `vp8_treed_read`. They are kept here rather than
-// declared `extern "Rust"` because they are pure source-level transliter-
-// ations of inline code and have no body in any other translation unit.
 // ===========================================================================
 
 /// `vp8_read` (`treereader.h:24`) — `#define vp8_read vp8dx_decode_bool`.

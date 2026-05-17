@@ -3,8 +3,7 @@
 //! Module layout mirrors the C source tree (`vp8/common/`, `vp8/decoder/`,
 //! `vpx/src/`, `vpx_dsp/`, `vpx_mem/`, `vpx_scale/`, `vpx_util/`). Each
 //! module is a literal transliteration of one `.c` file; cross-file
-//! references are stitched via `extern "Rust"` declarations until the
-//! whole tree is wired up.
+//! references are stitched via plain `use crate::module::name;` imports.
 
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
