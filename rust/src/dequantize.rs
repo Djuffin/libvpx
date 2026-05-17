@@ -12,25 +12,8 @@
 
 use core::ptr;
 
+use crate::idctllm::vp8_short_idct4x4llm_c;
 use crate::types::Blockd;
-
-// ---------------------------------------------------------------------------
-// extern dependencies (translated in other modules)
-// ---------------------------------------------------------------------------
-
-extern "Rust" {
-    /// `vp8_short_idct4x4llm_c` (vp8/common/idctllm.c) — reference 4x4
-    /// inverse DCT + accumulate. Reads coefficients from `input`,
-    /// reads the predictor from `pred` (stride `pitch`), writes the
-    /// reconstructed pels to `dst` (stride `stride`).
-    fn vp8_short_idct4x4llm_c(
-        input: *mut i16,
-        pred: *mut u8,
-        pitch: i32,
-        dst: *mut u8,
-        stride: i32,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Public kernels

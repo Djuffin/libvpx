@@ -16,30 +16,8 @@
 
 use core::ptr;
 
-// ---------------------------------------------------------------------------
-// extern dependencies (translated in other modules)
-// ---------------------------------------------------------------------------
-
-extern "Rust" {
-    /// `vp8_dequant_idct_add_c` (vp8/common/dequantize.c) — fused
-    /// dequant + 4x4 IDCT + accumulate onto `dest`.
-    fn vp8_dequant_idct_add_c(
-        input: *mut i16,
-        dq: *mut i16,
-        dest: *mut u8,
-        stride: i32,
-    );
-
-    /// `vp8_dc_only_idct_add_c` (vp8/common/idctllm.c) — DC-only
-    /// shortcut for the 4x4 IDCT + accumulate.
-    fn vp8_dc_only_idct_add_c(
-        input_dc: i16,
-        pred_ptr: *mut u8,
-        pred_stride: i32,
-        dst_ptr: *mut u8,
-        dst_stride: i32,
-    );
-}
+use crate::dequantize::vp8_dequant_idct_add_c;
+use crate::idctllm::vp8_dc_only_idct_add_c;
 
 // ---------------------------------------------------------------------------
 // Public kernels

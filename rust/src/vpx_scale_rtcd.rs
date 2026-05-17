@@ -28,6 +28,14 @@ static SCALE_RTCD_ONCE: Once = Once::new();
 // vpx_scale/generic/yv12extend.c, so there is nothing to assign.
 fn setup_rtcd_internal() {}
 
+// RTCD aliases from the generated `vpx_scale_rtcd.h` — on the
+// generic-gnu build each `#define X X_c` collapses to a re-export.
+pub use crate::yv12extend::{
+    vp8_yv12_copy_frame_c as vp8_yv12_copy_frame,
+    vp8_yv12_extend_frame_borders_c as vp8_yv12_extend_frame_borders,
+    vpx_yv12_copy_y_c as vpx_yv12_copy_y,
+};
+
 /// Public entry point of the YV12 dispatch subsystem.
 ///
 /// Safe to call from any thread at any time; idempotent. Must be

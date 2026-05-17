@@ -251,12 +251,19 @@ use crate::onyxd_if::{
     vp8dx_get_quantizer, vp8dx_receive_compressed_data, vp8dx_references_buffer,
 };
 
+use crate::alloccommon::vp8_alloc_frame_buffers;
+use crate::mbpitch::vp8_build_block_doffsets;
+use crate::rtcd::vp8_rtcd;
+use crate::vpx_dsp_rtcd::vpx_dsp_rtcd;
+use crate::vpx_scale_rtcd::vpx_scale_rtcd;
+
+use crate::vpx_ports::vpx_clear_system_state;
+
+// FIXME: parameter types (`FrameBuffers`, `Vp8PpFlags`) are re-declared
+// in this module and differ by module path from the canonical
+// definitions in `onyxd_if.rs`. Remove the extern block once the
+// duplicate types are unified.
 unsafe extern "Rust" {
-    // `vp8_create_decoder_instances` / `vp8_remove_decoder_instances` /
-    // `vp8dx_get_raw_frame` are still wired through an extern decl
-    // because their parameter types (`FrameBuffers`, `Vp8PpFlags`) are
-    // re-declared inside this module and the two definitions differ
-    // by module path; the C ABI lets us treat them as compatible.
     fn vp8_create_decoder_instances(
         fb: *mut FrameBuffers<'static>,
         oxcf: *mut Vp8dConfig,
@@ -267,23 +274,6 @@ unsafe extern "Rust" {
         sd: *mut Yv12BufferConfig,
         flags: *mut Vp8PpFlags,
     ) -> i32;
-
-    // From `vp8/common/alloccommon.rs`.
-    fn vp8_alloc_frame_buffers(
-        oci: *mut crate::types::Vp8Common,
-        width: i32,
-        height: i32,
-    ) -> i32;
-
-    // From `vp8/common/mbpitch.rs`.
-    fn vp8_build_block_doffsets(x: *mut crate::types::Macroblockd);
-
-    fn vpx_clear_system_state();
-
-    // RTCD initializers.
-    fn vp8_rtcd();
-    fn vpx_dsp_rtcd();
-    fn vpx_scale_rtcd();
 }
 
 // ===========================================================================

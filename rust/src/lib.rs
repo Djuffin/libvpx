@@ -53,6 +53,10 @@ pub mod decodeframe;
 pub mod decodemv;
 pub mod detokenize;
 pub mod onyxd_if;
+pub mod treereader;
+
+// ---- vp8_only/ generated RTCD ----
+pub mod vp8_rtcd;
 
 // ---- vp8/ (codec interface) ----
 pub mod vp8_dx_iface;
@@ -80,6 +84,9 @@ pub mod yv12extend;
 // ---- vpx_util/ ----
 pub mod vpx_thread;
 pub mod vpx_write_yuv_frame;
+
+// ---- vpx_ports/ (header-only shims) ----
+pub mod vpx_ports;
 
 // ---- generated ----
 pub mod vpx_config;

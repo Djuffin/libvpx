@@ -70,143 +70,30 @@ use crate::vpx_api::{VPX_CODEC_CORRUPT_FRAME, VPX_CODEC_MEM_ERROR, VPX_CODEC_UNS
 // External functions implemented in sibling translation units.
 // ---------------------------------------------------------------------------
 
-extern "Rust" {
-    // -- dboolhuff.c --
-    fn vp8_read_bit(bc: *mut Vp8Reader<'static>) -> c_int;
-    fn vp8_read_literal(bc: *mut Vp8Reader<'static>, bits: c_int) -> c_int;
-    fn vp8_read(bc: *mut Vp8Reader<'static>, prob: c_int) -> c_int;
-    // vp8dx_bool_error — imported via `use crate::dboolhuff::vp8dx_bool_error;` above.
-    fn vp8dx_start_decode(
-        bc: *mut Vp8Reader<'static>,
-        source: *const u8,
-        source_sz: c_uint,
-        decrypt_cb: *mut c_void,
-        decrypt_state: *mut c_void,
-    ) -> c_int;
+use crate::alloccommon::vp8_setup_version;
+use crate::decodemv::vp8_decode_mode_mvs;
+use crate::detokenize::{vp8_decode_mb_tokens, vp8_reset_mb_tokens_context};
+use crate::entropy::vp8_default_coef_probs;
+use crate::entropymode::vp8_init_mbmode_probs;
+use crate::extend::vp8_extend_mb_row;
+use crate::quant_common::{
+    vp8_ac2quant, vp8_ac_uv_quant, vp8_ac_yquant, vp8_dc2quant, vp8_dc_quant, vp8_dc_uv_quant,
+};
+use crate::reconinter::vp8_build_inter_predictors_mb;
+use crate::reconintra::{vp8_build_intra_predictors_mbuv_s, vp8_build_intra_predictors_mby_s};
+use crate::reconintra4x4::{intra_prediction_down_copy, vp8_intra4x4_predict};
+use crate::setupintrarecon::{setup_intra_recon_left, vp8_setup_intra_recon_top_line};
+use crate::vp8_loopfilter::{
+    vp8_loop_filter_frame_init, vp8_loop_filter_row_normal, vp8_loop_filter_row_simple,
+};
 
-    // -- decodemv.c --
-    fn vp8_decode_mode_mvs(pbi: *mut Vp8dComp<'static>);
-
-    // -- detokenize.c --
-    fn vp8_decode_mb_tokens(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd) -> c_int;
-    fn vp8_reset_mb_tokens_context(xd: *mut Macroblockd);
-
-    // -- vp8/common/quant_common.c --
-    fn vp8_dc_quant(qindex: c_int, delta: c_int) -> c_int;
-    fn vp8_dc2quant(qindex: c_int, delta: c_int) -> c_int;
-    fn vp8_dc_uv_quant(qindex: c_int, delta: c_int) -> c_int;
-    fn vp8_ac_yquant(qindex: c_int) -> c_int;
-    fn vp8_ac2quant(qindex: c_int, delta: c_int) -> c_int;
-    fn vp8_ac_uv_quant(qindex: c_int, delta: c_int) -> c_int;
-
-    // -- vp8/common/reconinter.c --
-    fn vp8_build_inter_predictors_mb(xd: *mut Macroblockd);
-
-    // -- vp8/common/reconintra.c --
-    fn vp8_build_intra_predictors_mby_s(
-        xd: *mut Macroblockd,
-        yabove_row: *mut u8,
-        yleft: *mut u8,
-        left_stride: c_int,
-        ypred_ptr: *mut u8,
-        y_stride: c_int,
-    );
-    fn vp8_build_intra_predictors_mbuv_s(
-        xd: *mut Macroblockd,
-        uabove_row: *mut u8,
-        vabove_row: *mut u8,
-        uleft: *mut u8,
-        vleft: *mut u8,
-        left_stride: c_int,
-        upred_ptr: *mut u8,
-        vpred_ptr: *mut u8,
-        pred_stride: c_int,
-    );
-
-    // -- vp8/common/reconintra4x4.c --
-    fn vp8_intra4x4_predict(
-        above: *mut u8,
-        yleft: *mut u8,
-        left_stride: c_int,
-        b_mode: c_int,
-        dst: *mut u8,
-        dst_stride: c_int,
-        top_left: u8,
-    );
-    fn intra_prediction_down_copy(xd: *mut Macroblockd, above_right_src: *mut u8);
-
-    // -- vp8/common/idct_blk.c / idctllm.c --
-    fn vp8_dequantize_b(b: *mut Blockd, dequant: *mut i16);
-    fn vp8_short_inv_walsh4x4(input: *mut i16, mb_dqcoeff: *mut i16);
-    fn vp8_short_inv_walsh4x4_1(input: *mut i16, mb_dqcoeff: *mut i16);
-    fn vp8_dequant_idct_add(input: *mut i16, dq: *mut i16, dest: *mut u8, stride: c_int);
-    fn vp8_dc_only_idct_add(
-        input_dc: i16,
-        pred_ptr: *mut u8,
-        pred_stride: c_int,
-        dst_ptr: *mut u8,
-        dst_stride: c_int,
-    );
-    fn vp8_dequant_idct_add_y_block(
-        q: *mut i16,
-        dq: *mut i16,
-        dst: *mut u8,
-        stride: c_int,
-        eobs: *mut i8,
-    );
-    fn vp8_dequant_idct_add_uv_block(
-        q: *mut i16,
-        dq: *mut i16,
-        dst_u: *mut u8,
-        dst_v: *mut u8,
-        stride: c_int,
-        eobs: *mut i8,
-    );
-
-    // -- vp8/common/vp8_loopfilter.c --
-    fn vp8_loop_filter_frame_init(cm: *mut Vp8Common, xd: *mut Macroblockd, default_filt_lvl: c_int);
-    fn vp8_loop_filter_row_normal(
-        cm: *mut Vp8Common,
-        mode_info_context: *mut ModeInfo,
-        mb_row: c_int,
-        post_y_stride: c_int,
-        post_uv_stride: c_int,
-        y_ptr: *mut u8,
-        u_ptr: *mut u8,
-        v_ptr: *mut u8,
-    );
-    fn vp8_loop_filter_row_simple(
-        cm: *mut Vp8Common,
-        mode_info_context: *mut ModeInfo,
-        mb_row: c_int,
-        post_y_stride: c_int,
-        y_ptr: *mut u8,
-    );
-
-    // -- vp8/common/entropymode.c --
-    fn vp8_init_mbmode_probs(cm: *mut Vp8Common);
-    fn vp8_default_coef_probs(cm: *mut Vp8Common);
-
-    // -- vp8/common/setupintrarecon.c --
-    fn vp8_setup_intra_recon_top_line(ybf: *mut Yv12BufferConfig);
-    fn setup_intra_recon_left(
-        yleft: *mut u8,
-        uleft: *mut u8,
-        vleft: *mut u8,
-        y_stride: c_int,
-        uv_stride: c_int,
-    );
-
-    // -- vp8/common/extend.c --
-    fn vp8_extend_mb_row(ybf: *mut Yv12BufferConfig, ydst: *mut u8, udst: *mut u8, vdst: *mut u8);
-
-    // -- vp8/common/onyx.c --
-    fn vp8_setup_version(cm: *mut Vp8Common);
-
-    // vpx_internal_error — imported via `use crate::vpx_codec::vpx_internal_error;` above.
-}
-
-use crate::dboolhuff::vp8dx_bool_error;
+use crate::dboolhuff::{vp8dx_bool_error, vp8dx_start_decode};
+use crate::treereader::{vp8_read, vp8_read_bit, vp8_read_literal};
+use crate::vp8_rtcd::{
+    vp8_dc_only_idct_add, vp8_dequant_idct_add, vp8_dequant_idct_add_uv_block,
+    vp8_dequant_idct_add_y_block, vp8_dequantize_b, vp8_short_inv_walsh4x4,
+    vp8_short_inv_walsh4x4_1,
+};
 use crate::vpx_codec::vpx_internal_error;
 
 // ---------------------------------------------------------------------------
@@ -346,13 +233,13 @@ unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _
                 // Extract the 4x4 intra mode from the BModeInfo enum at this
                 // sub-block slot. In C this is `bmi[i].as_mode` — a plain
                 // `B_PREDICTION_MODE`.
-                let b_mode_val: c_int = match (*(*xd).mode_info_context).bmi[i as usize] {
-                    crate::types::BModeInfo::Intra(m) => m as c_int,
+                let b_mode_val: crate::types::BPredictionMode = match (*(*xd).mode_info_context).bmi[i as usize] {
+                    crate::types::BModeInfo::Intra(m) => m,
                     // SPLITMV path stores an Mv here; in B_PRED context this
                     // branch should be unreachable, but mirror C's behaviour
                     // (which would just read garbage from the union) by
                     // treating it as DC_PRED.
-                    crate::types::BModeInfo::Mv(_) => 0,
+                    crate::types::BModeInfo::Mv(_) => crate::types::BPredictionMode::DcPred,
                 };
                 let above: *mut u8 = dst.offset(-(dst_stride as isize));
                 let yleft: *mut u8 = dst.offset(-1);
@@ -1098,17 +985,11 @@ unsafe fn setup_token_decoder(
         // for the C-style start_decode signature. The closure stays owned
         // by `pbi`; we punt on the precise FFI wiring here and just pass
         // null when no callback is set (parity with libvpx's NULL path).
-        let cb_ptr: *mut c_void = if (*pbi).decrypt_cb.is_some() {
-            (*pbi).decrypt_cb.as_mut().unwrap() as *mut _ as *mut c_void
-        } else {
-            ptr::null_mut()
-        };
         if vp8dx_start_decode(
             bool_decoder,
             (*pbi).fragments.ptrs[partition_idx as usize],
             (*pbi).fragments.sizes[partition_idx as usize],
-            cb_ptr,
-            (*pbi).decrypt_state,
+            None,
         ) != 0
         {
             return vpx_internal_error(
@@ -1138,7 +1019,7 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
         /* Various keyframe initializations */
         (*pc).fc.mvc = VP8_DEFAULT_MV_CONTEXT;
 
-        vp8_init_mbmode_probs(pc);
+        vp8_init_mbmode_probs(&mut *pc);
 
         vp8_default_coef_probs(pc);
 
@@ -1331,17 +1212,11 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
 
     init_frame(pbi);
 
-    let cb_ptr: *mut c_void = if (*pbi).decrypt_cb.is_some() {
-        (*pbi).decrypt_cb.as_mut().unwrap() as *mut _ as *mut c_void
-    } else {
-        ptr::null_mut()
-    };
     if vp8dx_start_decode(
         bc,
         data,
         ((data_end as isize) - (data as isize)) as c_uint,
-        cb_ptr,
-        (*pbi).decrypt_state,
+        None,
     ) != 0
     {
         return vpx_internal_error(

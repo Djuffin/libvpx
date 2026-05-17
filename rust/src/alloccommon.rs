@@ -26,36 +26,10 @@ use crate::types::{
 // the corresponding Rust modules.
 // ---------------------------------------------------------------------------
 
+use crate::entropymode::{vp8_default_bmode_probs, vp8_init_mbmode_probs};
+use crate::systemdependent::vp8_machine_specific_config;
 use crate::vpx_mem::{vpx_calloc, vpx_free, vpx_memalign};
-
-extern "Rust" {
-
-    /// `vpx_scale/yv12config.h` — allocate one YV12 buffer slot with the
-    /// given visible dimensions and per-side `border` guard band.
-    /// Returns 0 on success, negative on failure.
-    fn vp8_yv12_alloc_frame_buffer(
-        ybf: *mut Yv12BufferConfig,
-        width: i32,
-        height: i32,
-        border: i32,
-    ) -> i32;
-
-    /// `vpx_scale/yv12config.h` — release a YV12 buffer slot. NULL-safe
-    /// internally (the C implementation checks `buffer_alloc`).
-    fn vp8_yv12_de_alloc_frame_buffer(ybf: *mut Yv12BufferConfig) -> i32;
-
-    /// `vp8/common/systemdependent.h` — RTCD probe / function-pointer
-    /// table setup. Runs once per decoder instance.
-    fn vp8_machine_specific_config(oci: *mut Vp8Common);
-
-    /// `vp8/common/entropymode.h` — seed `fc.ymode_prob`,
-    /// `fc.uv_mode_prob`, and `fc.sub_mv_ref_prob` with RFC 6386 defaults.
-    fn vp8_init_mbmode_probs(oci: *mut Vp8Common);
-
-    /// `vp8/common/entropymode.h` — seed the 4x4 sub-mode tree prob array
-    /// with RFC 6386 defaults.
-    fn vp8_default_bmode_probs(p: *mut u8);
-}
+use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buffer};
 
 // ---------------------------------------------------------------------------
 // Public entry points (mirrors `alloccommon.h:20-24`).
@@ -233,8 +207,8 @@ pub unsafe fn vp8_setup_version(cm: *mut Vp8Common) {
 pub unsafe fn vp8_create_common(oci: *mut Vp8Common) {
     vp8_machine_specific_config(oci);
 
-    vp8_init_mbmode_probs(oci);
-    vp8_default_bmode_probs((*oci).fc.bmode_prob.as_mut_ptr());
+    vp8_init_mbmode_probs(&mut *oci);
+    vp8_default_bmode_probs(&mut (*oci).fc.bmode_prob);
 
     (*oci).mb_no_coeff_skip = 1;
     (*oci).no_lpf = 0;

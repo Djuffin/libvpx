@@ -82,24 +82,13 @@ use crate::decodeframe::{vp8_decode_frame, vp8cx_init_de_quantizer};
 use crate::vpx_codec::vpx_internal_error;
 use crate::vpx_mem::{vpx_free, vpx_memalign};
 
-extern "Rust" {
-    fn vpx_dsp_rtcd();
-    fn vpx_clear_system_state();
-
-    /// One-shot initializer primitive (`vpx_ports/vpx_once.h`).
-    fn once(func: unsafe extern "Rust" fn());
-
-    fn vp8_create_common(cm: *mut Vp8Common);
-    fn vp8_remove_common(cm: *mut Vp8Common);
-
-    fn vp8_init_intra_predictors();
-    fn vp8_init_loop_filter(cm: *mut Vp8Common);
-    fn vp8_loop_filter_init(cm: *mut Vp8Common);
-
-    fn vp8_setup_block_dptrs(mb: *mut crate::types::Macroblockd);
-
-    fn vp8_yv12_copy_frame(src: *const Yv12BufferConfig, dst: *mut Yv12BufferConfig);
-}
+use crate::alloccommon::{vp8_create_common, vp8_remove_common};
+use crate::mbpitch::vp8_setup_block_dptrs;
+use crate::reconintra::vp8_init_intra_predictors;
+use crate::vp8_loopfilter::vp8_loop_filter_init;
+use crate::vpx_dsp_rtcd::vpx_dsp_rtcd;
+use crate::vpx_ports::{once, vpx_clear_system_state};
+use crate::vpx_scale_rtcd::vp8_yv12_copy_frame;
 
 // ===========================================================================
 // Static helpers

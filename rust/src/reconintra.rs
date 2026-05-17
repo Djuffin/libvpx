@@ -20,17 +20,14 @@ use crate::types::{Macroblockd, MbPredictionMode};
 // extern dependencies (translated in other modules)
 // ---------------------------------------------------------------------------
 
+use crate::reconintra4x4::vp8_init_intra4x4_predictors_internal;
+use crate::vpx_ports::once;
+
+// FIXME: the 14 vpx_*_predictor_8x8 / _16x16 kernels are macro
+// instantiations in `vpx_dsp/intrapred.c` that the initial translation
+// only delivered for 4x4. Stamp them out (same templates, different
+// size) and then this block can go away.
 unsafe extern "Rust" {
-    /// One-shot initializer primitive (`vpx_ports/vpx_once.h`).
-    fn once(func: unsafe extern "Rust" fn());
-
-    /// Per-4x4 intra predictor dispatch-table populator
-    /// (`vp8/common/reconintra4x4.c`). The whole-MB initializer chains
-    /// into this so a single `once()` covers both.
-    fn vp8_init_intra4x4_predictors_internal();
-
-    // VP8 intra prediction kernels — generated through `vpx_dsp_rtcd.h`
-    // from `vpx_dsp/intrapred.c`. All share the `IntraPredFn` shape.
     fn vpx_v_predictor_16x16(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
     fn vpx_h_predictor_16x16(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
     fn vpx_tm_predictor_16x16(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);

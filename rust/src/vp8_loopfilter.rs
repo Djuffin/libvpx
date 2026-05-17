@@ -50,73 +50,11 @@ const PARTIAL_FRAME_FRACTION: i32 = 8;
 // symbols directly.
 // ---------------------------------------------------------------------------
 
-unsafe extern "Rust" {
-    /// `vp8_loop_filter_mbv_c` (vp8/common/loopfilter_filters.c:321).
-    fn vp8_loop_filter_mbv_c(
-        y_ptr: *mut u8,
-        u_ptr: *mut u8,
-        v_ptr: *mut u8,
-        y_stride: i32,
-        uv_stride: i32,
-        lfi: *mut LoopFilterInfo,
-    );
-
-    /// `vp8_loop_filter_bv_c` (vp8/common/loopfilter_filters.c:371).
-    fn vp8_loop_filter_bv_c(
-        y_ptr: *mut u8,
-        u_ptr: *mut u8,
-        v_ptr: *mut u8,
-        y_stride: i32,
-        uv_stride: i32,
-        lfi: *mut LoopFilterInfo,
-    );
-
-    /// `vp8_loop_filter_mbh_c` (vp8/common/loopfilter_filters.c:303).
-    fn vp8_loop_filter_mbh_c(
-        y_ptr: *mut u8,
-        u_ptr: *mut u8,
-        v_ptr: *mut u8,
-        y_stride: i32,
-        uv_stride: i32,
-        lfi: *mut LoopFilterInfo,
-    );
-
-    /// `vp8_loop_filter_bh_c` (vp8/common/loopfilter_filters.c:339).
-    fn vp8_loop_filter_bh_c(
-        y_ptr: *mut u8,
-        u_ptr: *mut u8,
-        v_ptr: *mut u8,
-        y_stride: i32,
-        uv_stride: i32,
-        lfi: *mut LoopFilterInfo,
-    );
-
-    /// `vp8_loop_filter_simple_vertical_edge_c`
-    /// (vp8/common/loopfilter_filters.c:289). Aliased by RTCD as
-    /// `vp8_loop_filter_simple_mbv`.
-    fn vp8_loop_filter_simple_vertical_edge_c(
-        y_ptr: *mut u8,
-        y_stride: i32,
-        blimit: *const u8,
-    );
-
-    /// `vp8_loop_filter_bvs_c` (vp8/common/loopfilter_filters.c:392).
-    /// Aliased by RTCD as `vp8_loop_filter_simple_bv`.
-    fn vp8_loop_filter_bvs_c(y_ptr: *mut u8, y_stride: i32, blimit: *const u8);
-
-    /// `vp8_loop_filter_simple_horizontal_edge_c`
-    /// (vp8/common/loopfilter_filters.c:273). Aliased by RTCD as
-    /// `vp8_loop_filter_simple_mbh`.
-    fn vp8_loop_filter_simple_horizontal_edge_c(
-        y_ptr: *mut u8,
-        y_stride: i32,
-        blimit: *const u8,
-    );
-
-    /// `vp8_loop_filter_bhs_c` (vp8/common/loopfilter_filters.c:360).
-    /// Aliased by RTCD as `vp8_loop_filter_simple_bh`.
-    fn vp8_loop_filter_bhs_c(y_ptr: *mut u8, y_stride: i32, blimit: *const u8);
-}
+use crate::loopfilter_filters::{
+    vp8_loop_filter_bh_c, vp8_loop_filter_bhs_c, vp8_loop_filter_bv_c, vp8_loop_filter_bvs_c,
+    vp8_loop_filter_mbh_c, vp8_loop_filter_mbv_c, vp8_loop_filter_simple_horizontal_edge_c,
+    vp8_loop_filter_simple_vertical_edge_c,
+};
 
 // ---------------------------------------------------------------------------
 // RTCD alias shims — let the body code read like the C source.
