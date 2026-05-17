@@ -410,17 +410,18 @@ pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxR
         &mut (*cm).yv12_fb[(*cm).alt_fb_idx as usize] as *mut Yv12BufferConfig;
 
     if let Err(e) = vp8_decode_frame(pbi) {
-        // Drop the just-allocated new_fb refcount and propagate the
-        // per-MB error_code up to the common error info.
+        // Drop the just-allocated new_fb refcount.
         if (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] > 0 {
             (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] -= 1;
         }
-
-        (*pbi).common.error.error_code = VPX_CODEC_ERROR;
-        if (*pbi).mb.error_info.error_code != VPX_CODEC_OK {
-            (*pbi).common.error.error_code = (*pbi).mb.error_info.error_code;
-        }
-        // goto decode_exit;
+        // The C source has a post-longjmp `pbi->common.error.error_code =
+        // VPX_CODEC_ERROR; if (mb.error_info.error_code) copy back;` block
+        // here that is unreachable in C (longjmp unwinds past it).
+        // `vpx_internal_error` already wrote the canonical code into
+        // `(*pc).error.error_code` before returning Err, so we just
+        // propagate it. (The Rust decoder never writes to
+        // `xd->error_info`, so the per-MB copy was dead code.)
+        (*pbi).common.error.error_code = e;
         vpx_clear_system_state();
         return Err(e);
     }

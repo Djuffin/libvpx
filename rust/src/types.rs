@@ -735,8 +735,18 @@ pub struct Vp8dComp<'a> {
     pub independent_partitions: i32,
     pub frame_corrupt_residual: i32,
 
-    /// Optional bytestream decryption callback (DRM hook).
-    pub decrypt_cb: Option<DecryptCb<'a>>,
+    /// Optional bytestream decryption callback — FFI-shaped, matches
+    /// the `vpx_decrypt_cb` typedef installed via `VPXD_SET_DECRYPTOR`.
+    /// Bridged into the bool decoder's `Box<dyn FnMut>` closure at
+    /// every `vp8dx_start_decode` call site (decodeframe.rs).
+    pub decrypt_cb: Option<
+        unsafe extern "C" fn(
+            decrypt_state: *mut c_void,
+            input: *const u8,
+            output: *mut u8,
+            count: i32,
+        ),
+    >,
     /// Caller-owned decrypt state pointer that is round-tripped to the
     /// callback.
     pub decrypt_state: *mut c_void,

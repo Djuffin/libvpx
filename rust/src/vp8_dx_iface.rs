@@ -570,10 +570,7 @@ pub unsafe fn vp8_decode(
     // decrypt config between frames.
     if (*ctx).decoder_init != 0 {
         let pbi = (*ctx).yv12_frame_buffers.pbi[0];
-        (*pbi).decrypt_cb = None; // FFI decryption callback wiring lives at the
-                                  // FFI boundary; the Rust core does not consume
-                                  // the C-style callback directly.
-        let _ = (*ctx).decrypt_cb;
+        (*pbi).decrypt_cb = (*ctx).decrypt_cb;
         (*pbi).decrypt_state = (*ctx).decrypt_state;
     }
 
