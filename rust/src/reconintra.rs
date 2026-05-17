@@ -21,59 +21,14 @@ use crate::types::{Macroblockd, MbPredictionMode};
 // ---------------------------------------------------------------------------
 
 use crate::reconintra4x4::vp8_init_intra4x4_predictors_internal;
+use crate::vpx_dsp_rtcd::{
+    vpx_dc_128_predictor_16x16, vpx_dc_128_predictor_8x8, vpx_dc_left_predictor_16x16,
+    vpx_dc_left_predictor_8x8, vpx_dc_predictor_16x16, vpx_dc_predictor_8x8,
+    vpx_dc_top_predictor_16x16, vpx_dc_top_predictor_8x8, vpx_h_predictor_16x16,
+    vpx_h_predictor_8x8, vpx_tm_predictor_16x16, vpx_tm_predictor_8x8, vpx_v_predictor_16x16,
+    vpx_v_predictor_8x8,
+};
 use crate::vpx_ports::once;
-
-// FIXME: the 14 vpx_*_predictor_8x8 / _16x16 kernels are macro
-// instantiations in `vpx_dsp/intrapred.c` that the initial translation
-// only delivered for 4x4. Stamp them out (same templates, different
-// size) and then this block can go away.
-unsafe extern "Rust" {
-    fn vpx_v_predictor_16x16(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_h_predictor_16x16(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_tm_predictor_16x16(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_dc_predictor_16x16(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_dc_top_predictor_16x16(
-        dst: *mut u8,
-        stride: isize,
-        above: *const u8,
-        left: *const u8,
-    );
-    fn vpx_dc_left_predictor_16x16(
-        dst: *mut u8,
-        stride: isize,
-        above: *const u8,
-        left: *const u8,
-    );
-    fn vpx_dc_128_predictor_16x16(
-        dst: *mut u8,
-        stride: isize,
-        above: *const u8,
-        left: *const u8,
-    );
-
-    fn vpx_v_predictor_8x8(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_h_predictor_8x8(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_tm_predictor_8x8(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_dc_predictor_8x8(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
-    fn vpx_dc_top_predictor_8x8(
-        dst: *mut u8,
-        stride: isize,
-        above: *const u8,
-        left: *const u8,
-    );
-    fn vpx_dc_left_predictor_8x8(
-        dst: *mut u8,
-        stride: isize,
-        above: *const u8,
-        left: *const u8,
-    );
-    fn vpx_dc_128_predictor_8x8(
-        dst: *mut u8,
-        stride: isize,
-        above: *const u8,
-        left: *const u8,
-    );
-}
 
 // ---------------------------------------------------------------------------
 // File-local enums and dispatch tables
@@ -89,7 +44,7 @@ const NUM_SIZES: usize = 2;
 /// `intra_pred_fn` typedef — kernel signature shared by every concrete
 /// VP8 intra predictor in `vpx_dsp/intrapred.c`.
 type IntraPredFn =
-    unsafe extern "Rust" fn(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
+    unsafe extern "C" fn(dst: *mut u8, stride: isize, above: *const u8, left: *const u8);
 
 /// `static intra_pred_fn pred[4][NUM_SIZES]`.
 /// Slot `[DC_PRED][*]` is intentionally left as `None`; the build
