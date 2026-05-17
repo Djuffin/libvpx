@@ -24,8 +24,8 @@ use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{
-    FragmentData, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame, Vp8Common,
-    Vp8dComp, Vp8dConfig, VpxResult, Yv12BufferConfig, NUM_YV12_BUFFERS,
+    FragmentData, FrameBuffers, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame, Vp8Common,
+    Vp8dComp, Vp8dConfig, Vp8PpFlags, VpxResult, Yv12BufferConfig, MAX_FB_MT_DEC, NUM_YV12_BUFFERS,
 };
 
 // ===========================================================================
@@ -50,23 +50,6 @@ pub const INTRA_FRAME: usize = MvReferenceFrame::Intra as usize;
 pub const LAST_FRAME: usize = MvReferenceFrame::Last as usize;
 pub const GOLDEN_FRAME: usize = MvReferenceFrame::Golden as usize;
 pub const ALTREF_FRAME: usize = MvReferenceFrame::Altref as usize;
-
-/// `vp8_ppflags_t` (`vp8/common/ppflags.h`) — opaque on the
-/// `--disable-postproc` build path; the parameter is only cast to
-/// `void` and never dereferenced by code below.
-#[repr(C)]
-pub struct Vp8PpFlags {
-    _opaque: [u8; 0],
-}
-
-/// `struct frame_buffers` (`vp8/decoder/onyxd_int.h:50-57`). In the
-/// single-threaded build only slot 0 is ever populated.
-pub const MAX_FB_MT_DEC: usize = 32;
-
-#[repr(C)]
-pub struct FrameBuffers<'a> {
-    pub pbi: [*mut Vp8dComp<'a>; MAX_FB_MT_DEC],
-}
 
 // ===========================================================================
 // `extern "Rust"` cross-translation-unit dependencies.

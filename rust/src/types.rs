@@ -741,3 +741,35 @@ pub struct Vp8dComp<'a> {
     /// callback.
     pub decrypt_state: *mut c_void,
 }
+
+// ===========================================================================
+// Per-frame and runtime post-process control structs (`vp8/common/ppflags.h`,
+// `vp8/decoder/onyxd_int.h`). Unified here so every consumer agrees on
+// layout.
+// ===========================================================================
+
+/// `vp8_ppflags_t` (`vp8/common/ppflags.h`) — runtime post-processing
+/// flags handed to the decoder per frame. Layout is part of the public
+/// API even though the minimal build never branches on the contents.
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct Vp8PpFlags {
+    pub post_proc_flag: i32,
+    pub deblocking_level: i32,
+    pub noise_level: i32,
+    pub display_ref_frame_flag: i32,
+    pub display_mb_modes_flag: i32,
+    pub display_b_modes_flag: i32,
+    pub display_mv_flag: i32,
+}
+
+/// `MAX_FB_MT_DEC` (`vp8/decoder/onyxd_int.h:48`) — slots in the
+/// per-frame multithreaded decoder pool. Only slot 0 is touched in the
+/// single-threaded build.
+pub const MAX_FB_MT_DEC: usize = 32;
+
+/// `struct frame_buffers` (`vp8/decoder/onyxd_int.h:50-57`).
+#[repr(C)]
+pub struct FrameBuffers<'a> {
+    pub pbi: [*mut Vp8dComp<'a>; MAX_FB_MT_DEC],
+}

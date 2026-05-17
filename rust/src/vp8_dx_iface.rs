@@ -14,10 +14,13 @@
 use core::ffi::c_void;
 use core::ptr;
 
-use crate::types::{FragmentData, Vp8dConfig, Vp8dComp, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, VP8_BORDER_IN_PIXELS};
+use crate::types::{FragmentData, FrameBuffers, Vp8dConfig, Vp8dComp, Vp8PpFlags, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, MAX_FB_MT_DEC, VP8_BORDER_IN_PIXELS};
 use crate::vpx_api::*;
 use crate::vpx_codec::vpx_internal_error;
-use crate::onyxd_if::{vp8dx_get_reference, vp8dx_set_reference};
+use crate::onyxd_if::{
+    vp8_create_decoder_instances, vp8_remove_decoder_instances, vp8dx_get_raw_frame,
+    vp8dx_get_reference, vp8dx_set_reference,
+};
 
 // ===========================================================================
 // Local types — adapter-private, not part of the public libvpx API.
@@ -83,15 +86,6 @@ pub const VP8_DEBLOCK: i32 = 0x1;
 pub const VP8_DEMACROBLOCK: i32 = 0x2;
 pub const VP8_MFQE: i32 = 0x10;
 
-/// `vp8_ppflags_t` (`common/ppflags.h`).
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct Vp8PpFlags {
-    pub post_proc_flag: i32,
-    pub deblocking_level: i32,
-    pub noise_level: i32,
-}
-
 /// `vpx_ref_frame_t` (`vpx/vp8.h`).
 #[repr(C)]
 pub struct VpxRefFrame {
@@ -120,17 +114,6 @@ pub const VP8D_GET_FRAME_CORRUPTED: i32 = 10;
 pub const VP8D_GET_LAST_REF_USED: i32 = 11;
 pub const VPXD_GET_LAST_QUANTIZER: i32 = 12;
 pub const VPXD_SET_DECRYPTOR: i32 = 13;
-
-/// `frame_buffers` (`vp8/decoder/onyxd_int.h:50-57`). Holds the array of
-/// `VP8D_COMP *pbi[MAX_FB_MT_DEC]`. In the single-threaded minimal
-/// build only `pbi[0]` is used.
-pub const MAX_FB_MT_DEC: usize = 1;
-
-#[repr(C)]
-pub struct FrameBuffers<'a> {
-    pub use_frame_threads: i32,
-    pub pbi: [*mut Vp8dComp<'a>; MAX_FB_MT_DEC],
-}
 
 /// `va_list` placeholder — varargs do not have a stable Rust ABI; the
 /// FFI shim that bridges into this module deals with the platform's
@@ -258,23 +241,6 @@ use crate::vpx_dsp_rtcd::vpx_dsp_rtcd;
 use crate::vpx_scale_rtcd::vpx_scale_rtcd;
 
 use crate::vpx_ports::vpx_clear_system_state;
-
-// FIXME: parameter types (`FrameBuffers`, `Vp8PpFlags`) are re-declared
-// in this module and differ by module path from the canonical
-// definitions in `onyxd_if.rs`. Remove the extern block once the
-// duplicate types are unified.
-unsafe extern "Rust" {
-    fn vp8_create_decoder_instances(
-        fb: *mut FrameBuffers<'static>,
-        oxcf: *mut Vp8dConfig,
-    ) -> i32;
-    fn vp8_remove_decoder_instances(fb: *mut FrameBuffers<'static>) -> i32;
-    fn vp8dx_get_raw_frame(
-        pbi: *mut Vp8dComp<'static>,
-        sd: *mut Yv12BufferConfig,
-        flags: *mut Vp8PpFlags,
-    ) -> i32;
-}
 
 // ===========================================================================
 // Helpers
