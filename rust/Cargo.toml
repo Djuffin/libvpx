@@ -1,6 +1,16 @@
 [package]
 name = "vp8-decoder-rs"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[features]
+# Encoder debug knobs from `vpx_util/vpx_write_yuv_frame.c` — flipped on via
+# `-DOUTPUT_YUV_*=1` in the C build. Off by default in this decoder crate.
+OUTPUT_YUV_SRC = []
+OUTPUT_YUV_DENOISED = []
+OUTPUT_YUV_SKINMAP = []
+OUTPUT_YUV_SVC_SRC = []
+# Thread pool — `CONFIG_MULTITHREAD` in the C build. Off in `vp8_only`.
+multithread = []
 
 [dependencies]

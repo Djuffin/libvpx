@@ -1,0 +1,64 @@
+// Copyright (c) 2015 The WebM project authors. All Rights Reserved.
+//
+// Use of this source code is governed by a BSD-style license
+// that can be found in the LICENSE file in the root of the source
+// tree. An additional intellectual property rights grant can be found
+// in the file PATENTS.  All contributing project authors may
+// be found in the AUTHORS file in the root of the source tree.
+
+// Literal Rust transliteration of vpx_dsp/vpx_dsp_rtcd.c.
+//
+// The original C file is the load-bearing one-liner that owns the cross-codec
+// DSP function-pointer table for the VP8/VP9 RTCD (Run-Time CPU Dispatch)
+// subsystem. In C, this translation unit defines `RTCD_C` before including
+// the generated `vpx_dsp_rtcd.h`, which causes:
+//
+//   * `RTCD_EXTERN` to expand to nothing (giving each pointer in the table
+//     a single tentative definition here), and
+//   * `setup_rtcd_internal` to be emitted as a `static` function with a body
+//     populating that pointer table.
+//
+// The public entry point `vpx_dsp_rtcd()` then wraps `setup_rtcd_internal`
+// in a per-translation-unit `once()` so the population runs exactly once,
+// even under thread races.
+//
+// On the verified single-arch `generic-gnu` decoder build, every dispatchable
+// kernel in the generated header collapses to a `#define` alias of its `_c`
+// implementation, so `setup_rtcd_internal()` has an empty body and
+// `vpx_dsp_rtcd()` is effectively a no-op (after the once-synchronisation).
+//
+// This Rust port targets that generic build: there are no SIMD pointers to
+// resolve, so the function is a true no-op. We still preserve the C-visible
+// symbol name (`vpx_dsp_rtcd`) and a `once`-style guard so the semantics
+// match the original (idempotent, safe to call from any thread).
+
+use std::sync::Once;
+
+/// The per-translation-unit `once` guard. In the C source this is a `static`
+/// inside `vpx_ports/vpx_once.h` and is private to this compilation unit.
+static SETUP_RTCD_ONCE: Once = Once::new();
+
+/// Mirror of the generated `static void setup_rtcd_internal(void)` in
+/// `vpx_dsp_rtcd.h`. On the generic (no-SIMD) build, the generated body is
+/// empty because every dispatchable DSP kernel collapses to a `#define` alias
+/// of its `_c` implementation.
+fn setup_rtcd_internal() {
+    // Empty: no SIMD function pointers to resolve in the generic build.
+}
+
+/// Public entry point of the cross-codec DSP RTCD subsystem.
+///
+/// Direct transliteration of:
+///
+/// ```c
+/// void vpx_dsp_rtcd(void) { once(setup_rtcd_internal); }
+/// ```
+///
+/// Guarantees that `setup_rtcd_internal` runs exactly once over the program's
+/// lifetime, regardless of how many threads race to enter this function.
+/// Name kept verbatim (no `vpx_dsp_rtcd_rs` etc.) per the literal-translation
+/// rule.
+#[no_mangle]
+pub extern "C" fn vpx_dsp_rtcd() {
+    SETUP_RTCD_ONCE.call_once(setup_rtcd_internal);
+}

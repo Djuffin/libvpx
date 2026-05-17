@@ -383,12 +383,31 @@ pub type SubpixFn = unsafe extern "C" fn(
     dst_stride: i32,
 );
 
+/// `vpx_codec_err_t` (`vpx/vpx_codec.h`) — public algorithm return code.
+/// `#[repr(C)]` keeps the integer ABI compatible with the C enum.
+#[repr(C)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum VpxCodecErr {
+    VPX_CODEC_OK = 0,
+    VPX_CODEC_ERROR = 1,
+    VPX_CODEC_MEM_ERROR = 2,
+    VPX_CODEC_ABI_MISMATCH = 3,
+    VPX_CODEC_INCAPABLE = 4,
+    VPX_CODEC_UNSUP_BITSTREAM = 5,
+    VPX_CODEC_UNSUP_FEATURE = 6,
+    VPX_CODEC_CORRUPT_FRAME = 7,
+    VPX_CODEC_INVALID_PARAM = 8,
+    VPX_CODEC_LIST_END = 9,
+}
+
+pub use VpxCodecErr::*;
+
 /// Placeholder for `vpx_internal_error_info` (longjmp target + error
 /// code + message buffer). Translated in detail when error handling
 /// lands.
 #[repr(C)]
 pub struct VpxInternalErrorInfo {
-    pub error_code: i32,
+    pub error_code: VpxCodecErr,
     pub has_detail: i32,
     pub detail: [u8; 80],
     pub setjmp: i32,
