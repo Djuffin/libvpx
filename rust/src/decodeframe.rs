@@ -1054,15 +1054,22 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
         (*pc).ref_frame_sign_bias[ALTREF_FRAME] = 0;
     } else {
         /* To enable choice of different interpolation filters */
-        // The C code installs different sub-pel predictor function pointers
-        // depending on use_bilinear_mc_filter. The actual function symbols
-        // live in vp8/common/{filter.c,bilinear_filter.c} — we punt on the
-        // wiring here (no corresponding Rust translations yet) and leave
-        // xd->subpixel_predict* as previously set. (See report.)
+        use crate::filter::{
+            vp8_bilinear_predict16x16_c, vp8_bilinear_predict4x4_c,
+            vp8_bilinear_predict8x4_c, vp8_bilinear_predict8x8_c,
+            vp8_sixtap_predict16x16_c, vp8_sixtap_predict4x4_c, vp8_sixtap_predict8x4_c,
+            vp8_sixtap_predict8x8_c,
+        };
         if (*pc).use_bilinear_mc_filter == 0 {
-            // sixtap variant — to be linked once the filter translations exist.
+            (*xd).subpixel_predict = vp8_sixtap_predict4x4_c;
+            (*xd).subpixel_predict8x4 = vp8_sixtap_predict8x4_c;
+            (*xd).subpixel_predict8x8 = vp8_sixtap_predict8x8_c;
+            (*xd).subpixel_predict16x16 = vp8_sixtap_predict16x16_c;
         } else {
-            // bilinear variant — to be linked once the filter translations exist.
+            (*xd).subpixel_predict = vp8_bilinear_predict4x4_c;
+            (*xd).subpixel_predict8x4 = vp8_bilinear_predict8x4_c;
+            (*xd).subpixel_predict8x8 = vp8_bilinear_predict8x8_c;
+            (*xd).subpixel_predict16x16 = vp8_bilinear_predict16x16_c;
         }
 
         // Minimal build: CONFIG_ERROR_CONCEALMENT is off, so the

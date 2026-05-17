@@ -12,7 +12,7 @@ use vp8_decoder_rs::filter::{
     vp8_sixtap_predict8x4_c, vp8_sixtap_predict8x8_c,
 };
 
-type PredictFn = unsafe fn(
+type PredictFn = unsafe extern "C" fn(
     src: *mut u8,
     src_pixels_per_line: c_int,
     xoffset: c_int,

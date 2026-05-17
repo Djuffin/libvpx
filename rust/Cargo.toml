@@ -14,3 +14,6 @@ OUTPUT_YUV_SVC_SRC = []
 multithread = []
 
 [dependencies]
+
+[dev-dependencies]
+md-5 = "0.10"
