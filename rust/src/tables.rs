@@ -63,9 +63,6 @@ pub const MAXQ: usize = 127;
 /// `QINDEX_RANGE` — count of legal quantizer indices.
 pub const QINDEX_RANGE: usize = MAXQ + 1;
 
-/// `MB_LVL_MAX` — number of MB-level features (alt-Q, alt-LF). RFC 6386 §10.
-pub const MB_LVL_MAX: usize = 2;
-
 /// `VP8_BINTRAMODES` — number of intra modes for a 4x4 sub-block. RFC 6386 §11.5.
 pub const VP8_BINTRAMODES: usize = 10;
 /// `VP8_YMODES` — number of macroblock-level intra Y modes. RFC 6386 §11.2.
