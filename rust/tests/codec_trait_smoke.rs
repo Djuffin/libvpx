@@ -104,6 +104,26 @@ fn trait_decodes_first_keyframe() {
     assert_eq!(got, expected, "trait-path MD5 mismatch");
 }
 
+/// `set_user_priv` round-trips an opaque pointer to the next emitted
+/// `Image.user_priv` field.
+#[test]
+fn user_priv_round_trip() {
+    let Some(dir) = data_dir() else {
+        eprintln!("skipping: VP8 test data not available");
+        return;
+    };
+    let packet = read_ivf_first_packet(&dir.join("vp80-00-comprehensive-001.ivf"));
+
+    let mut decoder: Box<dyn Decoder> =
+        Box::new(Vp8Decoder::new(0).expect("decoder init"));
+
+    let tag: usize = 0xDEAD_BEEF;
+    decoder.set_user_priv(tag as *mut core::ffi::c_void);
+    decoder.decode(&packet, Duration::ZERO).expect("decode");
+    let img = decoder.get_frame().expect("got frame");
+    assert_eq!(img.user_priv as usize, tag, "user_priv did not round-trip");
+}
+
 /// Sanity check: peek_stream_info returns plausible width/height.
 #[test]
 fn peek_stream_info_keyframe() {

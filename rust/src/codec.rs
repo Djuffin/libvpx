@@ -85,6 +85,15 @@ pub enum ControlCmd<'a> {
 /// Stateful — implementors maintain reference buffers and probability
 /// tables across calls.
 pub trait Decoder {
+    /// Stash a per-frame opaque tag. The next image emitted by
+    /// [`Decoder::get_frame`] will carry it in
+    /// [`Image::user_priv`](crate::vpx_api::VpxImage). Default impl is
+    /// a no-op for codecs that don't support tagging.
+    ///
+    /// Stays `*mut c_void` because the value is caller-typed; the
+    /// decoder treats it as fully opaque.
+    fn set_user_priv(&mut self, _user_priv: *mut core::ffi::c_void) {}
+
     /// Submit a compressed frame to the decoder. May internally
     /// produce an image retrievable via [`Decoder::get_frame`].
     ///

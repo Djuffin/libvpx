@@ -162,12 +162,12 @@ pub unsafe fn vpx_codec_get_stream_info(
 }
 
 /// `vpx_codec_decode` — feed encoded bytes in. `data` empty means
-/// flush. `_user_priv` is ignored (the per-frame opaque-pointer
-/// tagging feature was dropped during the trait refactor).
+/// flush. `user_priv` is stashed on the next emitted [`VpxImage`]'s
+/// `user_priv` field for per-frame caller tagging.
 pub fn vpx_codec_decode(
     ctx: Option<&mut VpxCodecCtx>,
     data: &[u8],
-    _user_priv: *mut c_void,
+    user_priv: *mut c_void,
     _deadline: i64,
 ) -> VpxCodecErr {
     let Some(ctx) = ctx else { return VPX_CODEC_INVALID_PARAM };
@@ -175,12 +175,9 @@ pub fn vpx_codec_decode(
         ctx.err = VPX_CODEC_ERROR;
         return VPX_CODEC_ERROR;
     }
-    let res = match ctx
-        .trait_obj
-        .as_mut()
-        .unwrap()
-        .decode(data, core::time::Duration::ZERO)
-    {
+    let dec = ctx.trait_obj.as_mut().unwrap();
+    dec.set_user_priv(user_priv);
+    let res = match dec.decode(data, core::time::Duration::ZERO) {
         Ok(()) => VPX_CODEC_OK,
         Err(e) => e,
     };

@@ -349,8 +349,10 @@ pub unsafe fn vp8_decode(
     ctx: *mut Vp8AlgPriv<'static>,
     data: *const u8,
     data_sz: u32,
-    user_priv: *mut c_void,
 ) -> VpxCodecErr {
+    // `user_priv` is already on `(*ctx).user_priv` — populated by
+    // `Vp8Decoder::set_user_priv` before this call. Read by
+    // `vp8_get_frame` → `yuvconfig2image` → `(*img).user_priv`.
     let mut res: VpxCodecErr;
     let mut resolution_change: u32 = 0;
     let w: u32;
@@ -470,7 +472,6 @@ pub unsafe fn vp8_decode(
 
         // update the pbi fragment data
         (*pbi).fragments = (*ctx).fragments;
-        (*ctx).user_priv = user_priv;
         if vp8dx_receive_compressed_data(pbi).is_err() {
             (*pc).yv12_fb[(*pc).lst_fb_idx as usize].corrupted = 1;
             if (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] > 0 {
@@ -675,6 +676,10 @@ impl Drop for Vp8Decoder {
 }
 
 impl Decoder for Vp8Decoder {
+    fn set_user_priv(&mut self, user_priv: *mut c_void) {
+        self.priv_.user_priv = user_priv;
+    }
+
     fn decode(&mut self, data: &[u8], _deadline: core::time::Duration) -> Result<(), Error> {
         unsafe {
             let (ptr, len) = if data.is_empty() {
@@ -685,7 +690,7 @@ impl Decoder for Vp8Decoder {
             // Reset the iter so the next get_frame() reports the
             // newly-decoded image instead of replaying the previous one.
             self.iter = core::ptr::null();
-            let err = vp8_decode(&raw mut *self.priv_, ptr, len, ptr::null_mut());
+            let err = vp8_decode(&raw mut *self.priv_, ptr, len);
             if err == VPX_CODEC_OK { Ok(()) } else { Err(err) }
         }
     }
