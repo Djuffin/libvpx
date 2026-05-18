@@ -25,10 +25,7 @@ type Uc = u8;
 /// Saturating `int -> signed char` cast. `loopfilter_filters.c:17`.
 #[inline]
 fn vp8_signed_char_clamp(t: i32) -> i8 {
-    let mut t = t;
-    t = if t < -128 { -128 } else { t };
-    t = if t > 127 { 127 } else { t };
-    t as i8
+    t.clamp(i8::MIN as i32, i8::MAX as i32) as i8
 }
 
 // ===========================================================================

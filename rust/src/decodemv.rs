@@ -112,17 +112,8 @@ unsafe fn vp8_clamp_mv2(mv: *mut Mv, xd: *const Macroblockd) {
     let top = (*xd).mb_to_top_edge - LEFT_TOP_MARGIN;
     let bottom = (*xd).mb_to_bottom_edge + RIGHT_BOTTOM_MARGIN;
 
-    if ((*mv).col as i32) < left {
-        (*mv).col = left as i16;
-    } else if ((*mv).col as i32) > right {
-        (*mv).col = right as i16;
-    }
-
-    if ((*mv).row as i32) < top {
-        (*mv).row = top as i16;
-    } else if ((*mv).row as i32) > bottom {
-        (*mv).row = bottom as i16;
-    }
+    (*mv).col = ((*mv).col as i32).clamp(left, right) as i16;
+    (*mv).row = ((*mv).row as i32).clamp(top, bottom) as i16;
 }
 
 /// `vp8_check_mv_bounds` (`findnearmv.h:60`).

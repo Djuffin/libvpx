@@ -21,7 +21,7 @@ use core::ptr;
 use crate::types::{
     FrameType, LoopFilterInfo, LoopFilterInfoN, Macroblockd,
     MbPredictionMode, ModeInfo, Vp8Common, INTRA_FRAME, MAX_LOOP_FILTER,
-    MAX_MB_SEGMENTS, MAX_REF_FRAMES, SIMD_WIDTH,
+    MAX_MB_SEGMENTS, MAX_REF_FRAMES,
 };
 
 // ---------------------------------------------------------------------------
@@ -122,14 +122,6 @@ unsafe fn vp8_loop_filter_simple_bh(y_ptr: *mut u8, y_stride: i32, blimit: *cons
     vp8_loop_filter_bhs_c(y_ptr, y_stride, blimit)
 }
 
-// ---------------------------------------------------------------------------
-// `memset` shim (libc `memset(p, v, n)` semantics on bytes).
-// ---------------------------------------------------------------------------
-
-#[inline(always)]
-unsafe fn memset_bytes(p: *mut u8, v: u8, n: usize) {
-    ptr::write_bytes(p, v, n)
-}
 
 // ---------------------------------------------------------------------------
 // `lf_init_lut` — static helper (vp8/common/vp8_loopfilter.c:17).
@@ -194,21 +186,9 @@ pub unsafe fn vp8_loop_filter_update_sharpness(
             block_inside_limit = 1;
         }
 
-        memset_bytes(
-            (*lfi).lim[i].as_mut_ptr(),
-            block_inside_limit as u8,
-            SIMD_WIDTH,
-        );
-        memset_bytes(
-            (*lfi).blim[i].as_mut_ptr(),
-            (2 * filt_lvl + block_inside_limit) as u8,
-            SIMD_WIDTH,
-        );
-        memset_bytes(
-            (*lfi).mblim[i].as_mut_ptr(),
-            (2 * (filt_lvl + 2) + block_inside_limit) as u8,
-            SIMD_WIDTH,
-        );
+        (*lfi).lim[i].fill(block_inside_limit as u8);
+        (*lfi).blim[i].fill((2 * filt_lvl + block_inside_limit) as u8);
+        (*lfi).mblim[i].fill((2 * (filt_lvl + 2) + block_inside_limit) as u8);
     }
 }
 
@@ -229,7 +209,7 @@ pub unsafe fn vp8_loop_filter_init(cm: *mut Vp8Common) {
 
     /* init hev threshold const vectors */
     for i in 0..4usize {
-        memset_bytes((*lfi).hev_thr[i].as_mut_ptr(), i as u8, SIMD_WIDTH);
+        (*lfi).hev_thr[i].fill(i as u8);
     }
 }
 
@@ -270,7 +250,9 @@ pub unsafe fn vp8_loop_filter_frame_init(
             /* we could get rid of this if we assume that deltas are set to
              * zero when not in use; encoder always uses deltas
              */
-            memset_bytes((*lfi).lvl[seg][0].as_mut_ptr(), lvl_seg as u8, 4 * 4);
+            for row in (*lfi).lvl[seg].iter_mut() {
+                row.fill(lvl_seg as u8);
+            }
             continue;
         }
 

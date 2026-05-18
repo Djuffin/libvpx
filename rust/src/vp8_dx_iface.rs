@@ -138,21 +138,7 @@ use crate::types::{
 // Helpers
 // ===========================================================================
 
-/// `VPXMIN` macro.
-#[inline]
-fn vpx_min<T: PartialOrd>(a: T, b: T) -> T {
-    if a < b {
-        a
-    } else {
-        b
-    }
-}
 
-/// `vp8_zero` macro — memset a struct to zero.
-#[inline]
-unsafe fn vp8_zero<T>(t: &mut T) {
-    ptr::write_bytes(t as *mut T, 0, 1);
-}
 
 // ===========================================================================
 // `vp8_dx_iface.c` static helpers
@@ -183,7 +169,7 @@ unsafe fn vp8_peek_si_internal(
         let mut clear_buffer: [u8; 10] = [0; 10];
         let mut clear: *const u8 = data;
         if let Some(cb) = decrypt {
-            let n = vpx_min(clear_buffer.len(), data_sz as usize);
+            let n = clear_buffer.len().min(data_sz as usize);
             let src = core::slice::from_raw_parts(data, n);
             cb(src, &mut clear_buffer[..n]);
             clear = clear_buffer.as_ptr();
