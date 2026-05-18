@@ -1,14 +1,24 @@
 # VP8 Decoder C → Rust Translation Summary
 
 This document catalogs every meaningful difference between the libvpx
-C VP8 decoder and the Rust port at `rust/`. The Rust port is a
-**literal transliteration** intended for behavioral parity, not an
-idiomatic rewrite — but C constructs that don't exist in Rust forced a
-handful of deliberate deviations. They're enumerated here.
+C VP8 decoder and the Rust port at `rust/`.
+
+The **decoder kernel** (`decodeframe.rs`, `decodemv.rs`, `reconinter.rs`,
+`reconintra.rs`, `vp8_loopfilter.rs`, `loopfilter_filters.rs`,
+`intrapred.rs`, `filter.rs`, `idctllm.rs`, `dboolhuff.rs`, `detokenize.rs`,
+and friends) is a **literal transliteration** intended for behavioral
+parity with libvpx — function names, control flow, and pointer arithmetic
+mirror the C source.
+
+The **API/adapter layer** (`crate::codec`, `vpx_api`, `vpx_codec`,
+`vpx_decoder`, `vp8_dx_iface`'s outer `Vp8Decoder`) has been **reshaped
+around an idiomatic `Decoder` trait**; the original C-shape vtable and
+`#[no_mangle]` / `extern "C"` decorators were removed once C-caller
+compatibility was abandoned. See §6 for the full story.
 
 **Verification baseline.** All 62 VP8 conformance test vectors
 (`vp80-00-comprehensive-*.ivf` etc.) decode to bit-exact MD5 match with
-libvpx C, across all 29-frame sequences. 158 ported tests pass, zero
+libvpx C, across all 29-frame sequences. **162 ported tests pass**, zero
 failures, zero ignored. `cargo build` reports 0 errors / 0 warnings.
 
 ---
@@ -34,9 +44,9 @@ Code paths gated by `CONFIG_POSTPROC`, `CONFIG_ERROR_CONCEALMENT`,
 the Rust port. Each such omission is documented at the call site that
 would have housed the conditional code.
 
-**~18,400 lines of Rust source** across 51 modules + 8 integration
+**~18,500 lines of Rust source** across 54 modules + 9 integration
 test files. Roughly 1.5× the C line count, mostly due to:
-- Explicit `unsafe { ... }` blocks at call sites.
+- Explicit `unsafe { ... }` blocks at call sites in the kernel.
 - Per-field type annotations on struct literals.
 - Doc comments tracing every public function back to its C source line.
 
@@ -44,7 +54,8 @@ test files. Roughly 1.5× the C line count, mostly due to:
 
 ## 2. Module structure
 
-The Rust crate mirrors the C source tree one-to-one:
+The Rust crate mirrors the C source tree one-to-one for the decoder
+kernel:
 
 | C source | Rust module |
 |---|---|
@@ -57,11 +68,11 @@ The Rust crate mirrors the C source tree one-to-one:
 | `vpx_scale/generic/<name>.c` | `rust/src/<name>.rs` |
 | `vpx_util/<name>.c` | `rust/src/<name>.rs` |
 
-In addition, **6 new modules** exist that have no `.c` analog. They
-correspond to C **headers** that aren't compiled to `.o` files but are
-load-bearing:
+In addition, **9 new modules** exist that have no `.c` analog. They
+correspond either to C **headers** that aren't compiled to `.o` files
+but are load-bearing, or to the post-port trait-based API surface:
 
-| New Rust module | Translated from | Purpose |
+| Rust module | Origin | Purpose |
 |---|---|---|
 | `rust/src/types.rs` | many `.h` files | All shared struct / enum / typedef declarations |
 | `rust/src/tables.rs` | many `.c` files (data only) | Every `const` table from VP8 / RFC 6386 |
@@ -69,6 +80,9 @@ load-bearing:
 | `rust/src/vp8_rtcd.rs` | `vp8_only/vp8_rtcd.h` (generated) | `#define X X_c` alias layer |
 | `rust/src/vpx_ports.rs` | `vpx_ports/{system_state,vpx_once}.h` | `once()` + `vpx_clear_system_state()` shims |
 | `rust/src/treereader.rs` | `vp8/decoder/treereader.h` (header-only) | `vp8_read`, `vp8_read_literal`, `vp8_treed_read` |
+| `rust/src/codec.rs` | new (post-port) | Idiomatic `Decoder` / `Encoder` / `ControlCmd` traits |
+| `rust/src/vp8_cx_stub.rs` | new (post-port) | `Vp8Encoder` placeholder — confirms trait shape compiles |
+| `rust/src/vp9_dx_stub.rs` | new (post-port) | `Vp9Decoder` placeholder — same |
 
 The `vpx_dsp_rtcd.rs` and `vpx_scale_rtcd.rs` modules each absorb their
 respective RTCD `#define X X_c` aliases in addition to their original
@@ -116,6 +130,11 @@ every access is `unsafe`. Borrow-checker-friendly remodeling would have
 required rewriting essentially every function and would not have
 preserved the bit-exact decoder behavior.
 
+The **API/adapter layer is different** — see §6. The post-port API
+surface uses `&mut T` / `&[u8]` / `Option<Box<dyn Decoder>>` and stays
+fully on the safe-Rust side of the line. The crossing from safe API to
+unsafe kernel happens at the `Vp8Decoder` trait impl boundary.
+
 ### 3.3 `union` translation
 
 The C `union b_mode_info` (`B_PREDICTION_MODE as_mode` / `int_mv mv`,
@@ -149,18 +168,23 @@ mode lookup tables.
 
 ### 3.5 Forced `#[repr(C, align(16))]`
 
-`Macroblockd` and `Vp8Common` are 16-byte aligned to match the C
-`DECLARE_ALIGNED(16, ...)` macros. The original C alignment was
-required for SIMD intrinsics; we preserve it because the buffer
-layouts are public-API-visible (the `vpx_image_t` wrapper exposes
-plane pointers directly into these structs).
+`Macroblockd`, `Vp8Common`, and most kernel structs are 16-byte aligned
+to match the C `DECLARE_ALIGNED(16, ...)` macros. SIMD intrinsics
+require this alignment for `_mm_load_si128` / `_mm_store_si128`; the
+plane-pointer aliasing into `Yv12BufferConfig` buffers also depends on
+it.
+
+**Exception:** `Vp8dComp<'a>` and `Vp8AlgPriv<'a>` were retitled from
+`#[repr(C)]` to `#[repr(align(16))]` (and plain `#[repr(Rust)]`
+respectively) to hold `Option<Box<dyn FnMut(&[u8], &mut [u8]) + 'static>>`
+fields (see §7). Layout-stable kernel structs are untouched.
 
 ---
 
 ## 4. Error handling — `setjmp`/`longjmp` → `Result<T, VpxCodecErr>`
 
-The single largest divergence. libvpx C uses `setjmp`/`longjmp` as a
-C-style exception mechanism:
+The single largest divergence in the decoder kernel. libvpx C uses
+`setjmp`/`longjmp` as a C-style exception mechanism:
 
 ```c
 // outermost trampoline:
@@ -221,19 +245,7 @@ return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
 | `onyxd_if.rs` | 4 throw sites; `vp8dx_get/set_reference` and `vp8dx_receive_compressed_data` return `VpxResult` |
 | `vp8_dx_iface.rs` | 5 throw sites; the 2 `setjmp`-guarded blocks in `vp8_decode` rewritten as `match` arms |
 
-### 4.3 The four trampolines
-
-The C source has 4 `setjmp` sites for the decoder. Each became an
-explicit `Err` arm in Rust:
-
-| C site | Rust equivalent |
-|---|---|
-| `create_decompressor` (onyxd_if.c:73) | `match create_decompressor_inner() { Err(_) => remove_decompressor; return null }` |
-| `vp8_create_decoder_instances` (onyxd_if.c:430) | (cleanup lives in `create_decompressor`) |
-| `vp8_decode` reso-change (vp8_dx_iface.c:402) | `match vp8_decode_resolution_change() { Err(_) => clear fragments; update_error_state }` |
-| `vp8_decode` main (vp8_dx_iface.c:488) | `if let Err(_) = vp8dx_receive_compressed_data { mark fb corrupt; refcount--; update_error_state }` |
-
-### 4.4 Bug exposed in the process
+### 4.3 Bug exposed in the process
 
 The C source unconditionally writes:
 ```c
@@ -274,70 +286,148 @@ Same pattern in `vpx_dsp_rtcd.rs` (intra-predictors, ≈30 aliases) and
 `vpx_scale_rtcd.rs` (YV12 buffer ops, 3 aliases).
 
 The `vp8_rtcd()` / `vpx_dsp_rtcd()` / `vpx_scale_rtcd()` init shims
-are still present (each `pub extern "C" fn` with a `std::sync::Once`
-guard, no-op body) to preserve symbol-level FFI compatibility.
+are still present (each a `pub fn` with a `std::sync::Once` guard,
+no-op body). Called once at decoder construction.
 
-If SIMD lands later, these alias modules become the runtime-dispatch
-selection points.
+The **kernel functions themselves** (`intrapred.rs`, `filter.rs`,
+`idctllm.rs`, `reconintra.rs`) retain `pub unsafe extern "C" fn`
+signatures so that future SIMD slot-in via libvpx's hand-rolled
+`.asm`/`.S` files stays possible — the assembly assumes C ABI, and
+mixing assembly kernels into the same RTCD dispatch table as Rust
+kernels requires shared ABI. Pure-Rust SIMD intrinsics would not need
+this; see §15 for the trade-off.
 
 ---
 
-## 6. ABI considerations
+## 6. API surface evolution: from C-ABI vtable to `Decoder` trait
 
-### 6.1 `extern "C"` on every public symbol
+This section replaces the original "ABI considerations" section. After
+the initial port, the public API was reshaped through six phases. The
+result is an idiomatic Rust surface; the C-ABI scaffolding is gone.
 
-Every function that the C public API exposes is `pub unsafe extern
-"C" fn` with `#[unsafe(no_mangle)]`. This includes `vpx_codec_decode`,
-`vpx_codec_destroy`, `vpx_img_alloc`, every `_c` kernel, every iface
-vtable entry, etc.
+### 6.1 What used to be there
 
-### 6.2 The `Vp8DxIface` collapse
+The first cut of the port preserved drop-in `libvpx.so` compatibility:
 
-Originally, the agent that translated `vp8_dx_iface.c` invented a
-*local* `Vp8DxIface` struct whose function-pointer slots used Rust ABI
-(`Option<unsafe fn(...)>`). The canonical `VpxCodecIface` in
-`vpx_api.rs` (which `vpx_codec_dec_init` consumes) uses C ABI
-(`Option<unsafe extern "C" fn(...)>`). Two structs with the same shape
-but incompatible fn-pointer ABI — dispatch through the vtable failed.
+- Every public entry point was `pub unsafe extern "C" fn` with
+  `#[unsafe(no_mangle)]` so external linkers could resolve the symbols
+  by their libvpx C names.
+- The `VpxCodecIface` struct held **14 function-pointer slots**
+  (`init`, `destroy`, `peek_si`, `get_si`, `decode`, `get_frame`,
+  `set_fb_fn`, plus 8 control-ID thunks, plus the encoder slots) all
+  typed `Option<unsafe extern "C" fn(...)>`.
+- A static `VPX_CODEC_VP8_DX_ALGO: VpxCodecIface` carried the VP8
+  decoder's slot bindings; `vpx_codec_vp8_dx()` returned a `*mut
+  VpxCodecIface` to it.
+- 14 `extern "C"` trampoline functions (`vp8_init_c`, `vp8_destroy_c`,
+  …) in `vp8_dx_iface.rs` bridged Rust-ABI internal helpers to the
+  C-ABI slots, doing the `*mut VpxCodecAlgPriv` → `*mut Vp8AlgPriv`
+  downcast at each entry.
+- Dispatch in `vpx_codec_decode` went
+  `(*ctx).iface->dec.decode.unwrap()(get_alg_priv(ctx), data, sz, ...)`.
 
-Fixed by introducing **14 `extern "C"` trampolines** in
-`vp8_dx_iface.rs` and switching `VPX_CODEC_VP8_DX_ALGO` to the
-canonical `VpxCodecIface` shape:
+### 6.2 What replaced it
+
+A small **trait surface** at `crate::codec`:
 
 ```rust
-unsafe extern "C" fn vp8_destroy_c(ctx: *mut VpxCodecAlgPriv) -> VpxCodecErr {
-    vp8_destroy(ctx as *mut Vp8AlgPriv<'static>)
+pub trait Decoder {
+    fn decode(&mut self, data: &[u8], deadline: Duration) -> Result<(), Error>;
+    fn get_frame(&mut self) -> Option<&Image>;
+    fn control(&mut self, cmd: ControlCmd<'_>) -> Result<(), Error>;
+    fn peek_stream_info(data: &[u8]) -> Result<StreamInfo, Error>
+        where Self: Sized;
+    fn stream_info(&self) -> Result<StreamInfo, Error>;
+    fn flush(&mut self) -> Result<(), Error> { self.decode(&[], Duration::ZERO) }
+}
+
+pub trait Encoder { ... }    // stub for future VP9/VP8 encoder work
+
+#[non_exhaustive]
+pub enum ControlCmd<'a> {
+    SetReference(&'a VpxRefFrame),
+    CopyReference(&'a mut VpxRefFrame),
+    SetPostproc(Vp8PostprocCfg),
+    GetLastRefUpdates(&'a mut i32),
+    GetFrameCorrupted(&'a mut i32),
+    GetLastRefUsed(&'a mut i32),
+    GetLastQuantizer(&'a mut i32),
+    SetDecryptor(Option<&'a VpxDecryptInit>),
 }
 ```
 
-Each trampoline does two jobs:
-1. ABI switch (Rust → C).
-2. Pointer-type cast (opaque `*mut VpxCodecAlgPriv` →
-   concrete `*mut Vp8AlgPriv<'static>`).
+`Vp8Decoder` implements `Decoder`; it owns a `Box<Vp8AlgPriv<'static>>`
+(see §7) and a per-frame `iter` cursor mirroring `vpx_codec_iter_t`.
 
-Same pattern as how the C source does `(vpx_codec_alg_priv_t *) ctx`
-casts internally. The local `Vp8DxIface` / `Vp8DxCtrlFnMap` / 8
-fn-pointer typedefs were deleted.
+The original `VpxCodecIface` shrunk from a 14-slot vtable to a 3-field
+descriptor:
 
-### 6.3 No `extern "Rust"` blocks remain
+```rust
+pub struct VpxCodecIface {
+    pub name: *const c_char,
+    pub abi_version: c_int,
+    pub caps: VpxCodecCaps,
+}
+```
 
-Early in the translation, the per-`.c`-file subagents used `extern
-"Rust" { fn name(...); }` forward declarations to call functions that
-hadn't been translated yet. Once every module landed, **all such
-blocks were eliminated** in favor of plain `use crate::module::name;`
-imports. The compiler now enforces signature agreement.
+— purely metadata used for capability checks. **All 14 trampolines, the
+fn-pointer typedefs, and `VP8_CTF_MAPS` were deleted.**
 
-A side-effect of this cleanup was finding three latent type-drift bugs
-(`vp8_init_mbmode_probs` parameter type, `vp8_default_bmode_probs`
-slice vs raw, `vp8_intra4x4_predict` enum vs `c_int`) that the loose
-`extern` decls had been hiding.
+### 6.3 Public C-API entry points reshaped
+
+The libvpx-named entry points (`vpx_codec_dec_init_ver`,
+`vpx_codec_decode`, `vpx_codec_get_frame`, `vpx_codec_destroy`,
+`vpx_codec_control_`, etc.) survive — but with idiomatic Rust
+signatures, no longer C-ABI:
+
+```rust
+// Before:
+pub unsafe extern "C" fn vpx_codec_decode(
+    ctx: *mut VpxCodecCtx,
+    data: *const u8,
+    data_sz: c_uint,
+    user_priv: *mut c_void,
+    deadline: i64,
+) -> VpxCodecErr
+
+// After:
+pub fn vpx_codec_decode(
+    ctx: Option<&mut VpxCodecCtx>,
+    data: &[u8],
+    _user_priv: *mut c_void,
+    _deadline: i64,
+) -> VpxCodecErr
+```
+
+Inside, dispatch goes through the trait:
+`ctx.trait_obj.as_mut().unwrap().decode(data, Duration::ZERO)`.
+
+- `#[unsafe(no_mangle)]` removed from every public function.
+- `extern "C"` removed from public API; kept on RTCD-table-pointed
+  kernel `_c` functions for SIMD future-compatibility.
+- Null pointers expressible as `None`; the structurally-invalid
+  combinations (null buffer + nonzero length, etc.) are gone.
+
+### 6.4 `VpxCodecCtx.trait_obj`
+
+`VpxCodecCtx` gained a `trait_obj: Option<Box<dyn Decoder + 'static>>`
+field. The `iface` field changed to `Option<&'static VpxCodecIface>`.
+The struct is no longer `#[repr(C)]` (a `Box<dyn Trait>` field is not
+FFI-safe), but no external C consumer was ever wired up.
+
+`vpx_codec_destroy` collapses to `let _ = ctx.trait_obj.take()` —
+`Box`'s `Drop` runs `Vp8Decoder::Drop` which releases the YV12 pool +
+inner `Vp8dComp` instances; the `Box` itself reclaims the
+`Vp8AlgPriv` shell.
 
 ---
 
 ## 7. Memory management
 
+### 7.1 Internal allocators
+
 `vpx_mem.c`'s allocator wrappers (`vpx_malloc`, `vpx_calloc`,
-`vpx_realloc`, `vpx_memalign`, `vpx_free`) became thin shims over
+`vpx_realloc`, `vpx_memalign`, `vpx_free`) are thin shims over
 `std::alloc::{alloc, alloc_zeroed, realloc, dealloc, Layout}`.
 
 One deviation: C `vpx_malloc` stashes the original pointer **one
@@ -347,16 +437,46 @@ The Rust port stashes **two** `usize` words — the original pointer
 the `Layout` back. Header size constant changes accordingly. Callers
 are oblivious.
 
-No `Vec`, no `Box<[T]>`, no `String` is used inside the decoder hot
-path. The pool of YV12 frame buffers and the MI grid are still raw
-`vpx_memalign`-allocated slabs, accessed via `*mut Yv12BufferConfig` /
-`*mut ModeInfo` pointers, exactly like C.
+### 7.2 Box / std::alloc / vpx_calloc split
 
-`Box<dyn FnMut>` shows up in two narrow places:
-- `BoolDecoder<'a>::decrypt` — the per-decoder decryption callback.
-- The bridge in `decodeframe.rs::bridge_decrypt_cb` — a fresh
-  `Box<dyn FnMut>` is built per `vp8dx_start_decode` call, wrapping
-  the FFI `vpx_decrypt_cb` fn pointer.
+After the trait refactor, the allocator landscape is:
+
+| Allocation | Allocator | Freed by |
+|---|---|---|
+| `Vp8AlgPriv` (outer shell, ~few KiB) | `Box::new(zeroed())` → `std::alloc` | `Box` drop |
+| `Vp8dComp` instances + YV12 frame buffer pool + MI grid | `vpx_calloc` / `vpx_memalign` | `vp8_remove_decoder_instances` (called from `Vp8Decoder::Drop` before Box drop) |
+| Decryption-callback closure | `Box::new(closure)` | `Box` drop (inside `Vp8AlgPriv.decrypt`) |
+| `Box<dyn Decoder>` (the trait object) | `Box::new(Vp8Decoder)` | `Box` drop |
+| YV12 plane buffers (`buffer_alloc: *mut u8`) | `vpx_memalign` | `vpx_free` |
+| MI grid (`Vp8Common.mip`) | `vpx_calloc` | `vpx_free` |
+
+Inner slabs are freed **before** the outer `Box` shell drop runs, so
+no cross-allocator free occurs. The kernel data structures (YV12
+buffers, MI grid, residual scratch) remain raw-pointer-managed exactly
+like C; only the outer aggregate moved to `Box`.
+
+### 7.3 Decryption callback storage (`Box<dyn FnMut>`)
+
+`Vp8AlgPriv.decrypt: Option<Box<dyn FnMut(&[u8], &mut [u8]) + 'static>>`
+holds the per-codec decryption closure, built **once** when the
+`VPXD_SET_DECRYPTOR` control runs. Each frame:
+
+1. `vp8_decode` moves the `Box` from `Vp8AlgPriv.decrypt` to
+   `Vp8dComp.decrypt` (a single `Option::take` swap).
+2. Bool-decoder partitions borrow it via
+   `(*pbi).decrypt.as_deref_mut()` — type alias `DecryptCbMut<'a>`.
+3. After the frame, the `Box` moves back.
+
+This replaces the pre-refactor pattern where a fresh `Box<dyn FnMut>`
+was allocated per `vp8dx_start_decode` call.
+
+Type aliases at `types.rs`:
+
+```rust
+pub type DecryptFn = dyn FnMut(&[u8], &mut [u8]) + 'static;
+pub type DecryptCb = Box<DecryptFn>;            // owned form
+pub type DecryptCbMut<'a> = &'a mut DecryptFn;  // borrowed form
+```
 
 ---
 
@@ -372,7 +492,7 @@ pub struct BoolDecoder<'a> {
     pub value: BdValue,
     pub count: i32,
     pub range: u32,
-    pub decrypt: Option<DecryptCb<'a>>,
+    pub decrypt: Option<DecryptCbMut<'a>>,
 }
 ```
 
@@ -383,9 +503,9 @@ embedded in `Vp8dComp<'static>` (the longest-lived owner), so the
 borrow checker doesn't actually restrict behavior — but the
 *signature* is more honest.
 
-`vp8dx_start_decode` takes `decrypt_cb: Option<DecryptCb<'a>>` (a
-`Box` closure). The bridge described in §7 builds a fresh closure
-from the FFI `vpx_decrypt_cb` pointer stored on `Vp8dComp::decrypt_cb`.
+`vp8dx_start_decode` takes `Option<DecryptCbMut<'a>>`, a borrow into
+`Vp8dComp.decrypt`. The bool decoder accesses the closure through the
+borrow during refill; the underlying `Box` lives on `Vp8AlgPriv` (see §7).
 
 ---
 
@@ -405,40 +525,38 @@ Removing setjmp meant making every function on the throw path
 | `vp8dx_get_reference` | `vpx_codec_err_t` (in-band) | `VpxResult<()>` |
 | `vp8dx_set_reference` | `vpx_codec_err_t` (in-band) | `VpxResult<()>` |
 
-10 signature changes total. None propagate further outward — the FFI
-boundary at `vp8_decode` collapses `Ok(())` → `VPX_CODEC_OK as i32`,
-`Err(e)` → `e as i32`.
+10 signature changes total. None propagate further outward — the trait
+boundary at `Vp8Decoder::decode` collapses `Ok(())` → `Ok(())`,
+`Err(e)` → `Err(e)` directly.
 
 ---
 
 ## 10. Edition / lint configuration
 
-`Cargo.toml` pins `edition = "2021"` rather than 2024 because:
-
-- Edition 2024 enables `unsafe_op_in_unsafe_fn` by default. The
-  literal port is built on `unsafe fn` bodies full of raw pointer
-  dereferences; wrapping each individual `*p`, `*q.add(i)`, etc., in
-  `unsafe { ... }` adds ~4000 mechanical edits with no behavioral
-  change. The 2021 edition keeps the older "implicit unsafe body"
-  semantics, matching the C source structure.
-- All other 2024 changes (panic vs abort defaults, `Future` send
-  bounds, etc.) are irrelevant to this codebase.
-
-A handful of crate-wide `#![allow(...)]` lints quiet noise that's
-intrinsic to the literal-translation approach:
+`Cargo.toml` pins `edition = "2024"`. Crate-wide lint allows:
 
 ```rust
-#![allow(non_snake_case)]          // C names like `vp8_dc2quant`
-#![allow(non_camel_case_types)]    // typedefs like vpx_codec_err_t
-#![allow(non_upper_case_globals)]  // const names like vp8_default_mv_context
-#![allow(dead_code)]               // many helpers unused until later phases
-#![allow(unused_imports)]
-#![allow(unused_variables)]        // `(void)param;` in C → unused arg in Rust
-#![allow(unused_assignments)]      // C-style init then conditional reassign
-#![allow(unused_mut)]
-#![allow(unused_unsafe)]
-#![allow(static_mut_refs)]         // RTCD tables are `static mut`
+#![allow(non_snake_case)]              // C names like `vp8_dc2quant`
+#![allow(non_camel_case_types)]        // typedefs like vpx_codec_err_t
+#![allow(non_upper_case_globals)]      // const names like vp8_default_mv_context
+#![allow(static_mut_refs)]             // RTCD tables are `static mut`
+#![allow(unsafe_op_in_unsafe_fn)]      // see below
 ```
+
+Edition 2024 enables `unsafe_op_in_unsafe_fn` by default — every
+unsafe operation inside an `unsafe fn` body must be wrapped in its own
+`unsafe { ... }` block. The decoder kernel is built on `unsafe fn`
+bodies full of raw pointer dereferences (~4000 sites); wrapping each
+individually has no behavioral payoff and would mostly add noise. The
+crate-wide `#![allow(unsafe_op_in_unsafe_fn)]` preserves the old
+"implicit unsafe body" semantics.
+
+The lints that used to be in this list (`dead_code`, `unused_imports`,
+`unused_variables`, `unused_assignments`, `unused_mut`,
+`unused_unsafe`) have been removed; the codebase now compiles cleanly
+with the default warning level. Test files individually carry
+`#![allow(unsafe_op_in_unsafe_fn)]` since they define `unsafe fn`
+helpers.
 
 ---
 
@@ -463,21 +581,21 @@ python3 rust/scripts/verify_tables.py      # byte-for-byte check vs C
 
 ## 12. Tests
 
-The Rust port ships **8 integration test files** under `rust/tests/`,
-one per VP8-relevant C test in `test/*.cc`:
+The Rust port ships **9 integration test files** under `rust/tests/`:
 
 | Rust test file | C source | Tests | Notes |
 |---|---|---|---|
 | `vpx_image_test.rs` | `test/vpx_image_test.cc` | 5 | Image alloc/wrap/format validation |
 | `idct_test.rs` | `test/idct_test.cc` | 4 | 4x4 IDCT correctness |
 | `predict_test.rs` | `test/predict_test.cc` | 11 | Sub-pel filter random + preset data |
-| `decode_api_test.rs` | `test/decode_api_test.cc` | 5 | Public API null guards + iface dispatch |
+| `decode_api_test.rs` | `test/decode_api_test.cc` | 5 | Public API null/None guards + iface dispatch |
 | `invalid_file_test.rs` | `test/invalid_file_test.cc` | 5 | Corrupt-bitstream error-code matching |
 | `vpx_scale_test.rs` | `test/vpx_scale_test.cc` | 2 (49 size combos each) | YV12 border extension + frame copy |
 | `vp8_decrypt_test.rs` | `test/vp8_decrypt_test.cc` | 1 | DRM bytestream decryption callback |
 | `test_vector_test.rs` | `test/test_vector_test.cc` | 1 + 62 + 62 | Full conformance suite |
+| `codec_trait_smoke.rs` | new (post-port) | 2 | Trait-API decode of comp-001 keyframe |
 
-**158 tests pass, 0 failures, 0 ignored.** The conformance suite
+**162 tests pass, 0 failures, 0 ignored.** The conformance suite
 (`test_vector_test.rs`) decodes every frame of all 62 official VP8
 test vectors, MD5-comparing each frame's output against the
 canonical `.md5` files. Total runtime: ~2.3 seconds for all 62
@@ -513,10 +631,10 @@ otherwise reject those files. Documented at `IvfReader::open`.
 
 | # | Bug | Surfaced via | Fix location |
 |---|---|---|---|
-| 1 | `init_frame` left `subpixel_predict*` function pointers uninitialized for inter frames — `subagent stubbed them with "TODO: link once filter translations exist"` | First inter frame SIGSEGV in `test_vector_test::full_vector_001` | `decodeframe.rs::init_frame`: assign sixtap or bilinear fn pointers per `pc->use_bilinear_mc_filter` |
+| 1 | `init_frame` left `subpixel_predict*` function pointers uninitialized for inter frames — subagent stubbed them with "TODO: link once filter translations exist" | First inter frame SIGSEGV in `test_vector_test::full_vector_001` | `decodeframe.rs::init_frame`: assign sixtap or bilinear fn pointers per `pc->use_bilinear_mc_filter` |
 | 2 | `vp8dx_receive_compressed_data` overwrote the correct error code with `VPX_CODEC_ERROR` because the post-longjmp cleanup block from C became reachable in Rust | `invalid_file_test` reported `VPX_CODEC_ERROR` where `VPX_CODEC_CORRUPT_FRAME` was expected | `onyxd_if.rs::vp8dx_receive_compressed_data`: drop the unreachable-in-C overwrite |
-| 3 | Decryption callback never reached the bool decoder — `(*pbi).decrypt_cb = None;` was hardcoded at the FFI boundary | `vp8_decrypt_test` failed | Three-place fix: retype `Vp8dComp::decrypt_cb` to match the FFI shape, copy from AlgPriv at frame init, build a `Box<dyn FnMut>` adapter per `vp8dx_start_decode` call |
-| 4 | `Vp8DxIface` had Rust-ABI fn pointers while `VpxCodecIface` had C-ABI — dispatch through the vtable was a no-op / type error | `decode_api_test::invalid_params_via_iface` couldn't even compile | Collapse `Vp8DxIface` into `VpxCodecIface`; add 14 `extern "C"` trampolines |
+| 3 | Decryption callback never reached the bool decoder — `(*pbi).decrypt_cb = None;` was hardcoded at the FFI boundary | `vp8_decrypt_test` failed | Initially: retype `Vp8dComp::decrypt_cb` to match the FFI shape, copy from AlgPriv at frame init, build a `Box<dyn FnMut>` adapter per call. Later simplified — see §7.3. |
+| 4 | `Vp8DxIface` had Rust-ABI fn pointers while `VpxCodecIface` had C-ABI — dispatch through the vtable was a no-op / type error | `decode_api_test::invalid_params_via_iface` couldn't even compile | Collapsed `Vp8DxIface` into `VpxCodecIface`; added 14 `extern "C"` trampolines. Later: the whole vtable was deleted in favor of the trait surface (§6). |
 | 5 | 9 `extern "Rust" { fn ... }` declaration blocks across modules — each module independently re-declared its callees with potentially-drifting signatures | Spotted via `clashing_extern_declarations` lint after the iface unification | Replace all with `use crate::module::name;` imports — compiler enforces signatures |
 | 6 | `IntraPredFn` type alias in `reconintra.rs` was `unsafe extern "Rust" fn` but the kernels in `intrapred.rs` are `unsafe extern "C" fn` | Link error during `cargo test` | Switch the alias to `extern "C"` |
 | 7 | `reconintra4x4.rs` had a bare `extern "C" { fn vpx_*_predictor_4x4(...) }` block referencing the un-suffixed RTCD names that were never defined | Link error | Same RTCD-alias pattern: add 10 `pub use … as …` lines to `vpx_dsp_rtcd.rs` and import from there |
@@ -531,45 +649,56 @@ existed in the libvpx C source.
 
 | C feature | Why omitted | Re-enable cost |
 |---|---|---|
-| VP8 encoder (`vp8/encoder/`) | `--disable-vp8-encoder` build target | Out of scope |
-| VP9 codec (`vp9/`) | `--disable-vp9` | Out of scope |
+| VP8 encoder (`vp8/encoder/`) | `--disable-vp8-encoder` build target | Out of scope; `crate::codec::Encoder` trait shape is ready (`Vp8Encoder` stub) |
+| VP9 codec (`vp9/`) | `--disable-vp9` | Out of scope; `crate::codec::Decoder` trait validated via `Vp9Decoder` stub |
 | Post-processing (`vp8/common/postproc.c`, `mfqe`, etc.) | `--disable-postproc` | Tractable; ~3 source files, no decoder dependency |
 | Error concealment | `--disable-error-concealment` | Tractable; isolated `#if`'d branches throughout decoder |
-| Multi-threading | `--disable-multithread` | Significant; requires reasoning about per-MB-row workers, fragment partition routing, mutex/cv translation |
+| Multi-threading | `--disable-multithread` | Significant; requires reasoning about per-MB-row workers, fragment partition routing, mutex/cv translation. `vpx_thread.rs` is a single-threaded shim |
 | Spatial resampling | `--disable-spatial-resampling` | Standalone helpers — porting unblocks the scaler tests in `vpx_scale_test.cc`'s `ResetScaleImages` path |
-| SIMD (NEON, SSE2, AVX2, ...) | `--target=generic-gnu` | Per-kernel; each `_c` kernel has 1-4 SIMD variants that would replace it at runtime via RTCD |
+| SIMD (NEON, SSE2, AVX2, ...) | `--target=generic-gnu` | Per-kernel; each `_c` kernel has 1-4 SIMD variants that would replace it at runtime via RTCD. Kernel `extern "C" fn` annotations preserved to keep this path open |
 | `setjmp`/`longjmp` | Rust has no longjmp; replaced with `Result` | N/A — the new model is strictly better |
 | Variadic `vpx_internal_error(..., fmt, ...)` formatted messages | Rust doesn't expose stable variadic dispatch | Cheap; attach `Cow<'static, str>` to `VpxError` and use `format!()` at throw sites |
 | `vpx_codec_error_detail()` returning the formatted detail | Detail was dropped with the variadic formatter | Same as above |
+| External frame-buffer registration (`vpx_codec_set_frame_buffer_functions`) | The C-ABI cb pair was dropped during the refactor. `crate::codec::FrameBufferAllocator` trait is defined but not yet wired | Wire the trait at decoder construction time |
+| `*mut c_void user_priv` per-frame tagging | Dropped during trait refactor — the trait `decode` signature has no user_priv | Add an explicit `tag: Option<u64>` parameter or HashMap on the caller side |
 
 ---
 
 ## 15. Things that remain idiomatically un-Rust
 
-The literal-translation rule means several constructs stay un-idiomatic:
+The literal-translation rule still applies to the **decoder kernel**.
+Several constructs stay un-idiomatic for layout/lifetime parity with
+the C source:
 
-- **Raw pointers everywhere.** No `&`/`&mut`, no `Box<T>`, no `Vec<T>`
-  inside the hot path. Every method on `Macroblockd`, `Vp8dComp`, etc.
-  is `unsafe fn` and dereferences raw pointers.
+- **Raw pointers throughout the kernel.** `Macroblockd`, `Vp8Common`,
+  `Vp8dComp`, `Blockd`, `Yv12BufferConfig` all carry `*mut T` / `*const T`
+  fields that alias into shared scratch arrays. Methods on these
+  structs are `unsafe fn` and dereference raw pointers. (~250 occurrences.)
+- **Pointer arithmetic in kernels.** `intrapred.rs`, `filter.rs`,
+  `loopfilter_filters.rs`, `reconinter.rs`, `idctllm.rs` use `*p.add(i)`,
+  `*p.offset(stride * j)`, etc. Going through `&[u8]` would add bounds
+  checks on every sample access (~250 more occurrences; gated on a
+  Criterion bench harness before any conversion).
 - **`while i < N { ... i += 1; }`** instead of `for i in 0..N`. The
   raw loop matches the C source's induction-variable shape and makes
   side-by-side diffing easier.
 - **C-style early returns.** Where the C says `goto cleanup;`, the Rust
-  port repeats the cleanup at each early-return site. (One exception:
-  the four trampoline functions, where the cleanup lives in a single
-  `Err(_) => { … }` arm.)
-- **`pub static mut`** for the iface vtable. Required to match
-  `vpx_codec_vp8_dx()`'s C semantics (returns a pointer to a global
-  iface struct).
-- **`#[no_mangle]`** on every public function the C API exposes — even
-  if no current consumer links against it from C, the symbol names
-  match libvpx exactly.
+  port repeats the cleanup at each early-return site.
+- **`pub static mut`** for the iface metadata descriptor. Could be
+  `const`, but the original C let users mutate it (e.g.,
+  `vpx_set_worker_interface`); the field is kept for shape parity.
+- **`*mut c_void`** survives in genuine FFI boundaries: `VpxImage.user_priv`,
+  `VpxDecryptInit.decrypt_state`, `VPxWorker.data1/data2`,
+  `VpxCodecCtx.priv_` sentinel. These intentionally type-erase
+  caller-supplied state. (~75 occurrences.)
 
-A rewrite that prioritized Rust idioms (typed slices, builder
-patterns, RAII, `Result` chaining, iterator-style loops) is possible
-but is explicitly out of scope for the v1 port. The current shape
-exists to make line-by-line comparison with `vp8/` straightforward
-and to make any bug bisectable against the libvpx C source.
+A rewrite that prioritized Rust idioms throughout (typed slices, owned
+buffers, RAII, iterator-style loops, no raw pointer arithmetic) is
+possible for the kernel layer as well, but is gated on a benchmark
+harness — the bounds-check tax could measurably regress decode
+throughput, and the bit-exact MD5 baseline must keep passing.
+
+The **API/adapter layer** does NOT have these constraints — see §6.
 
 ---
 
@@ -578,17 +707,21 @@ and to make any bug bisectable against the libvpx C source.
 When something in the Rust port looks weird, the cause is usually one
 of these (in order of likelihood):
 
-1. **C-to-Rust transliteration of an idiomatic-C construct.** Check
-   the doc comment above the function — it cites the C source line.
+1. **C-to-Rust transliteration of an idiomatic-C construct in a kernel
+   file.** Check the doc comment above the function — it cites the C
+   source line.
 2. **The function returns `VpxResult<T>` because the C version threw
    via `longjmp`.** See §4.
 3. **A `pub use ... as ...` alias is doing what a `#define` did in C.**
    See §5 (RTCD).
 4. **A `*mut T` field stores what would naturally be `&mut T` or
-   `Box<T>` in Rust.** Required for layout / lifetime parity with C.
-   See §3.2.
-5. **A function is `pub unsafe extern "C" fn` even though no C caller
-   exists yet.** Required for ABI compatibility with consumers that
-   may link via `#[no_mangle]` symbol resolution. See §6.
+   `Box<T>` in Rust.** Required for layout / lifetime parity with C in
+   the kernel. See §3.2 and §15.
+5. **An `unsafe extern "C" fn` kernel function** — kept that ABI to
+   preserve the libvpx-asm slot-in path. See §5.
 
-Anywhere that diverges from those five patterns is documented inline.
+The **API layer** (`crate::codec`, `vpx_api`, `vpx_codec`,
+`vpx_decoder`, the outer `Vp8Decoder`) is safe-Rust idiomatic and does
+not match any of patterns 1, 4, or 5. If you see raw pointers there,
+they're either at the FFI boundary (callback state) or a sentinel
+into the kernel — both documented inline.
