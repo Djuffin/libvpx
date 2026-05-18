@@ -173,7 +173,6 @@ pub unsafe fn vp8_mb_init_dequantizer(pbi: *mut Vp8dComp<'static>, xd: *mut Macr
 /// `decode_macroblock` (vp8/decoder/decodeframe.c:94). Static helper.
 unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _mb_idx: c_uint) {
     let mode: MbPredictionMode;
-    let mut i: c_int;
 
     if (*(*xd).mode_info_context).mbmi.mb_skip_coeff {
         vp8_reset_mb_tokens_context(xd);
@@ -224,8 +223,7 @@ unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _
 
             intra_prediction_down_copy(xd, (*xd).recon_above[0].add(16));
 
-            i = 0;
-            while i < 16 {
+            for i in 0..16 {
                 let b: *mut Blockd = &mut (*xd).block[i as usize];
                 let dst: *mut u8 = (*xd).dst.y_buffer.offset((*b).offset as isize);
                 // Extract the 4x4 intra mode from the BModeInfo enum at this
@@ -270,7 +268,6 @@ unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _
                         ptr::write_bytes((*b).qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
                     }
                 }
-                i += 1;
             }
         }
     } else {

@@ -169,7 +169,7 @@ pub unsafe fn vp8_build_inter_predictors_b(
     pre_stride: i32,
     sppf: SubpixFn,
 ) {
-    let mut r: i32;
+
     let mut pred_ptr: *mut u8 = (*d).predictor;
     let mut ptr: *mut u8;
     let mv = bmi_mv(&(*d).bmi);
@@ -188,15 +188,13 @@ pub unsafe fn vp8_build_inter_predictors_b(
             pitch,
         );
     } else {
-        r = 0;
-        while r < 4 {
+        for _ in 0..4 {
             *pred_ptr.offset(0) = *ptr.offset(0);
             *pred_ptr.offset(1) = *ptr.offset(1);
             *pred_ptr.offset(2) = *ptr.offset(2);
             *pred_ptr.offset(3) = *ptr.offset(3);
             pred_ptr = pred_ptr.offset(pitch as isize);
             ptr = ptr.offset(pre_stride as isize);
-            r += 1;
         }
     }
 }
@@ -279,7 +277,7 @@ unsafe fn build_inter_predictors_b(
     pre_stride: i32,
     sppf: SubpixFn,
 ) {
-    let mut r: i32;
+
     let mut ptr: *mut u8;
     let mv = bmi_mv(&(*d).bmi);
     ptr = base_pre
@@ -297,15 +295,13 @@ unsafe fn build_inter_predictors_b(
             dst_stride,
         );
     } else {
-        r = 0;
-        while r < 4 {
+        for _ in 0..4 {
             *dst.offset(0) = *ptr.offset(0);
             *dst.offset(1) = *ptr.offset(1);
             *dst.offset(2) = *ptr.offset(2);
             *dst.offset(3) = *ptr.offset(3);
             dst = dst.offset(dst_stride as isize);
             ptr = ptr.offset(pre_stride as isize);
-            r += 1;
         }
     }
 }
@@ -482,7 +478,6 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
 ///
 /// Source: `vp8/common/reconinter.c:359`.
 unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
-    let mut i: i32;
     let mut base_dst: *mut u8 = (*x).dst.y_buffer;
     let mut base_pre: *mut u8 = (*x).pre.y_buffer;
 
@@ -538,8 +533,7 @@ unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
             dst_stride,
         );
     } else {
-        i = 0;
-        while i < 16 {
+        for i in (0..16).step_by(2) {
             let d0: *mut Blockd = &mut (*x).block[i as usize] as *mut Blockd;
             let d1: *mut Blockd = &mut (*x).block[(i + 1) as usize] as *mut Blockd;
             let dst_stride: i32 = (*x).dst.y_stride;
@@ -578,13 +572,11 @@ unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
                     (*x).subpixel_predict,
                 );
             }
-            i += 2;
         }
     }
     base_dst = (*x).dst.u_buffer;
     base_pre = (*x).pre.u_buffer;
-    i = 16;
-    while i < 20 {
+    for i in (16..20).step_by(2) {
         let d0: *mut Blockd = &mut (*x).block[i as usize] as *mut Blockd;
         let d1: *mut Blockd = &mut (*x).block[(i + 1) as usize] as *mut Blockd;
         let dst_stride: i32 = (*x).dst.uv_stride;
@@ -618,13 +610,11 @@ unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
                 (*x).subpixel_predict,
             );
         }
-        i += 2;
     }
 
     base_dst = (*x).dst.v_buffer;
     base_pre = (*x).pre.v_buffer;
-    i = 20;
-    while i < 24 {
+    for i in (20..24).step_by(2) {
         let d0: *mut Blockd = &mut (*x).block[i as usize] as *mut Blockd;
         let d1: *mut Blockd = &mut (*x).block[(i + 1) as usize] as *mut Blockd;
         let dst_stride: i32 = (*x).dst.uv_stride;
@@ -658,7 +648,6 @@ unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
                 (*x).subpixel_predict,
             );
         }
-        i += 2;
     }
 }
 

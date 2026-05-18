@@ -93,8 +93,7 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
     ip = output.as_mut_ptr();
     op = output.as_mut_ptr();
 
-    let mut i: i32 = 0;
-    while i < 4 {
+    for _ in 0..4 {
         a1 = (*ip.offset(0) as i32) + (*ip.offset(2) as i32);
         b1 = (*ip.offset(0) as i32) - (*ip.offset(2) as i32);
 
@@ -116,7 +115,6 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
 
         ip = ip.offset(shortpitch as isize);
         op = op.offset(shortpitch as isize);
-        i += 1;
     }
 
     let mut ip: *mut i16 = output.as_mut_ptr();
@@ -229,8 +227,7 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
     ip = output.as_mut_ptr();
     op = output.as_mut_ptr();
 
-    let mut i: i32 = 0;
-    while i < 4 {
+    for _ in 0..4 {
         a1 = (*ip.offset(0) as i32) + (*ip.offset(3) as i32);
         b1 = (*ip.offset(1) as i32) + (*ip.offset(2) as i32);
         c1 = (*ip.offset(1) as i32) - (*ip.offset(2) as i32);
@@ -248,13 +245,10 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
 
         ip = ip.offset(4);
         op = op.offset(4);
-        i += 1;
     }
 
-    let mut i: i32 = 0;
-    while i < 16 {
+    for i in 0..16 {
         *mb_dqcoeff.offset((i * 16) as isize) = output[i as usize];
-        i += 1;
     }
 }
 
@@ -271,9 +265,7 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_1_c(
 ) {
     let a1: i32 = ((*input.offset(0) as i32) + 3) >> 3;
 
-    let mut i: i32 = 0;
-    while i < 16 {
+    for i in 0..16 {
         *mb_dqcoeff.offset((i * 16) as isize) = a1 as i16;
-        i += 1;
     }
 }
