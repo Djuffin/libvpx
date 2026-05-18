@@ -39,15 +39,13 @@ unsafe fn extend_plane(
     let mut dst_ptr1: *mut u8 = src.offset(-(extend_left as isize));
     let mut dst_ptr2: *mut u8 = src.offset(width as isize);
 
-    let mut i = 0;
-    while i < height {
+    for _ in 0..height {
         ptr::write_bytes(dst_ptr1, *src_ptr1, extend_left as usize);
         ptr::write_bytes(dst_ptr2, *src_ptr2, extend_right as usize);
         src_ptr1 = src_ptr1.offset(src_stride as isize);
         src_ptr2 = src_ptr2.offset(src_stride as isize);
         dst_ptr1 = dst_ptr1.offset(src_stride as isize);
         dst_ptr2 = dst_ptr2.offset(src_stride as isize);
-        i += 1;
     }
 
     /* Now copy the top and bottom lines into each line of the respective
@@ -64,18 +62,14 @@ unsafe fn extend_plane(
         .offset((src_stride * height) as isize)
         .offset(-(extend_left as isize));
 
-    let mut i = 0;
-    while i < extend_top {
+    for _ in 0..extend_top {
         ptr::copy_nonoverlapping(src_ptr1, dst_ptr1, linesize as usize);
         dst_ptr1 = dst_ptr1.offset(src_stride as isize);
-        i += 1;
     }
 
-    let mut i = 0;
-    while i < extend_bottom {
+    for _ in 0..extend_bottom {
         ptr::copy_nonoverlapping(src_ptr2, dst_ptr2, linesize as usize);
         dst_ptr2 = dst_ptr2.offset(src_stride as isize);
-        i += 1;
     }
 }
 
@@ -147,34 +141,28 @@ pub unsafe fn vp8_yv12_copy_frame_c(
 
     // #if 0 block (disabled assertions) elided.
 
-    let mut row = 0;
-    while row < (*src_ybc).y_height {
+    for _ in 0..(*src_ybc).y_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).y_width as usize);
         src = src.offset((*src_ybc).y_stride as isize);
         dst = dst.offset((*dst_ybc).y_stride as isize);
-        row += 1;
     }
 
     src = (*src_ybc).u_buffer;
     dst = (*dst_ybc).u_buffer;
 
-    let mut row = 0;
-    while row < (*src_ybc).uv_height {
+    for _ in 0..(*src_ybc).uv_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).uv_width as usize);
         src = src.offset((*src_ybc).uv_stride as isize);
         dst = dst.offset((*dst_ybc).uv_stride as isize);
-        row += 1;
     }
 
     src = (*src_ybc).v_buffer;
     dst = (*dst_ybc).v_buffer;
 
-    let mut row = 0;
-    while row < (*src_ybc).uv_height {
+    for _ in 0..(*src_ybc).uv_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).uv_width as usize);
         src = src.offset((*src_ybc).uv_stride as isize);
         dst = dst.offset((*dst_ybc).uv_stride as isize);
-        row += 1;
     }
 
     vp8_yv12_extend_frame_borders_c(dst_ybc);
@@ -193,11 +181,9 @@ pub unsafe fn vpx_yv12_copy_y_c(
     let mut src: *const u8 = (*src_ybc).y_buffer;
     let mut dst: *mut u8 = (*dst_ybc).y_buffer;
 
-    let mut row = 0;
-    while row < (*src_ybc).y_height {
+    for _ in 0..(*src_ybc).y_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).y_width as usize);
         src = src.offset((*src_ybc).y_stride as isize);
         dst = dst.offset((*dst_ybc).y_stride as isize);
-        row += 1;
     }
 }

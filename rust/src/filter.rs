@@ -44,14 +44,10 @@ unsafe fn filter_block2d_first_pass(
     output_width: u32,
     vp8_filter: *const i16,
 ) {
-    let mut i: u32;
-    let mut j: u32;
     let mut Temp: i32;
 
-    i = 0;
-    while i < output_height {
-        j = 0;
-        while j < output_width {
+    for _ in 0..output_height {
+        for j in 0..output_width {
             Temp = (*src_ptr.offset(-2 * pixel_step as isize) as i32)
                 * (*vp8_filter.offset(0) as i32)
                 + (*src_ptr.offset(-1 * pixel_step as isize) as i32)
@@ -76,13 +72,11 @@ unsafe fn filter_block2d_first_pass(
 
             *output_ptr.offset(j as isize) = Temp;
             src_ptr = src_ptr.offset(1);
-            j += 1;
         }
 
         /* Next row... */
         src_ptr = src_ptr.offset((src_pixels_per_line - output_width) as isize);
         output_ptr = output_ptr.offset(output_width as isize);
-        i += 1;
     }
 }
 
@@ -100,14 +94,10 @@ unsafe fn filter_block2d_second_pass(
     output_width: u32,
     vp8_filter: *const i16,
 ) {
-    let mut i: u32;
-    let mut j: u32;
     let mut Temp: i32;
 
-    i = 0;
-    while i < output_height {
-        j = 0;
-        while j < output_width {
+    for _ in 0..output_height {
+        for j in 0..output_width {
             /* Apply filter */
             Temp = (*src_ptr.offset(-2 * pixel_step as isize)) * (*vp8_filter.offset(0) as i32)
                 + (*src_ptr.offset(-1 * pixel_step as isize)) * (*vp8_filter.offset(1) as i32)
@@ -128,13 +118,11 @@ unsafe fn filter_block2d_second_pass(
 
             *output_ptr.offset(j as isize) = Temp as u8;
             src_ptr = src_ptr.offset(1);
-            j += 1;
         }
 
         /* Start next row */
         src_ptr = src_ptr.offset((src_pixels_per_line - output_width) as isize);
         output_ptr = output_ptr.offset(output_pitch as isize);
-        i += 1;
     }
 }
 
@@ -342,13 +330,8 @@ unsafe fn filter_block2d_bil_first_pass(
     width: u32,
     vp8_filter: *const i16,
 ) {
-    let mut i: u32;
-    let mut j: u32;
-
-    i = 0;
-    while i < height {
-        j = 0;
-        while j < width {
+    for _ in 0..height {
+        for j in 0..width {
             /* Apply bilinear filter */
             *dst_ptr.offset(j as isize) = (((*src_ptr.offset(0) as i32)
                 * (*vp8_filter.offset(0) as i32)
@@ -356,13 +339,11 @@ unsafe fn filter_block2d_bil_first_pass(
                 + (VP8_FILTER_WEIGHT / 2))
                 >> VP8_FILTER_SHIFT) as u16;
             src_ptr = src_ptr.offset(1);
-            j += 1;
         }
 
         /* Next row... */
         src_ptr = src_ptr.offset((src_stride - width) as isize);
         dst_ptr = dst_ptr.offset(width as isize);
-        i += 1;
     }
 }
 
@@ -378,26 +359,20 @@ unsafe fn filter_block2d_bil_second_pass(
     width: u32,
     vp8_filter: *const i16,
 ) {
-    let mut i: u32;
-    let mut j: u32;
     let mut Temp: i32;
 
-    i = 0;
-    while i < height {
-        j = 0;
-        while j < width {
+    for _ in 0..height {
+        for j in 0..width {
             /* Apply filter */
             Temp = (*src_ptr.offset(0) as i32) * (*vp8_filter.offset(0) as i32)
                 + (*src_ptr.offset(width as isize) as i32) * (*vp8_filter.offset(1) as i32)
                 + (VP8_FILTER_WEIGHT / 2);
             *dst_ptr.offset(j as isize) = ((Temp >> VP8_FILTER_SHIFT) as u32) as u8;
             src_ptr = src_ptr.offset(1);
-            j += 1;
         }
 
         /* Next row... */
         dst_ptr = dst_ptr.offset(dst_pitch as isize);
-        i += 1;
     }
 }
 

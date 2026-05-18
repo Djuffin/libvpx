@@ -12,8 +12,6 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
-#![allow(unused_assignments)]
-#![allow(unused_variables)]
 
 use core::ffi::{c_int, c_uint, c_void};
 use core::ptr;
@@ -851,7 +849,7 @@ unsafe fn read_available_partition_size(
 ) -> VpxResult<c_uint> {
     let pc: *mut Vp8Common = &mut (*pbi).common;
     let partition_size_ptr: *const u8 = token_part_sizes.offset((i * 3) as isize);
-    let mut partition_size: c_uint = 0;
+    let mut partition_size: c_uint;
     let bytes_left: isize = (fragment_end as isize) - (fragment_start as isize);
     if bytes_left < 0 {
         return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);

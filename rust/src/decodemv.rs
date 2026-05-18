@@ -157,27 +157,21 @@ unsafe fn above_block_mode(cur_mb: *const ModeInfo, b: i32, mi_stride: i32) -> B
     if (b >> 2) == 0 {
         // On top edge, get from MB above us
         let cur_mb = cur_mb.offset(-(mi_stride as isize));
-        match (*cur_mb).mbmi.mode {
-            MbPredictionMode::BPred => {
-                let bmi = (*cur_mb).bmi[(b + 12) as usize];
-                if let BModeInfo::Intra(m) = bmi {
-                    return m;
-                }
-                return BPredictionMode::DcPred;
-            }
-            MbPredictionMode::DcPred => return BPredictionMode::DcPred,
-            MbPredictionMode::VPred => return BPredictionMode::VePred,
-            MbPredictionMode::HPred => return BPredictionMode::HePred,
-            MbPredictionMode::TmPred => return BPredictionMode::TmPred,
-            _ => return BPredictionMode::DcPred,
-        }
+        return match (*cur_mb).mbmi.mode {
+            MbPredictionMode::BPred => match (*cur_mb).bmi[(b + 12) as usize] {
+                BModeInfo::Intra(m) => m,
+                _ => BPredictionMode::DcPred,
+            },
+            MbPredictionMode::VPred => BPredictionMode::VePred,
+            MbPredictionMode::HPred => BPredictionMode::HePred,
+            MbPredictionMode::TmPred => BPredictionMode::TmPred,
+            _ => BPredictionMode::DcPred,
+        };
     }
 
-    let bmi = (*cur_mb).bmi[(b - 4) as usize];
-    if let BModeInfo::Intra(m) = bmi {
-        m
-    } else {
-        BPredictionMode::DcPred
+    match (*cur_mb).bmi[(b - 4) as usize] {
+        BModeInfo::Intra(m) => m,
+        _ => BPredictionMode::DcPred,
     }
 }
 
@@ -187,27 +181,21 @@ unsafe fn left_block_mode(cur_mb: *const ModeInfo, b: i32) -> BPredictionMode {
     if (b & 3) == 0 {
         // On L edge, get from MB to left of us
         let cur_mb = cur_mb.offset(-1);
-        match (*cur_mb).mbmi.mode {
-            MbPredictionMode::BPred => {
-                let bmi = (*cur_mb).bmi[(b + 3) as usize];
-                if let BModeInfo::Intra(m) = bmi {
-                    return m;
-                }
-                return BPredictionMode::DcPred;
-            }
-            MbPredictionMode::DcPred => return BPredictionMode::DcPred,
-            MbPredictionMode::VPred => return BPredictionMode::VePred,
-            MbPredictionMode::HPred => return BPredictionMode::HePred,
-            MbPredictionMode::TmPred => return BPredictionMode::TmPred,
-            _ => return BPredictionMode::DcPred,
-        }
+        return match (*cur_mb).mbmi.mode {
+            MbPredictionMode::BPred => match (*cur_mb).bmi[(b + 3) as usize] {
+                BModeInfo::Intra(m) => m,
+                _ => BPredictionMode::DcPred,
+            },
+            MbPredictionMode::VPred => BPredictionMode::VePred,
+            MbPredictionMode::HPred => BPredictionMode::HePred,
+            MbPredictionMode::TmPred => BPredictionMode::TmPred,
+            _ => BPredictionMode::DcPred,
+        };
     }
 
-    let bmi = (*cur_mb).bmi[(b - 1) as usize];
-    if let BModeInfo::Intra(m) = bmi {
-        m
-    } else {
-        BPredictionMode::DcPred
+    match (*cur_mb).bmi[(b - 1) as usize] {
+        BModeInfo::Intra(m) => m,
+        _ => BPredictionMode::DcPred,
     }
 }
 
@@ -267,10 +255,9 @@ unsafe fn read_kf_modes(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo) {
     (*mi).mbmi.mode = read_kf_ymode(bc, VP8_KF_YMODE_PROB.as_ptr());
 
     if (*mi).mbmi.mode == MbPredictionMode::BPred {
-        let mut i: i32 = 0;
         (*mi).mbmi.is_4x4 = true;
 
-        loop {
+        for i in 0..16i32 {
             let a = above_block_mode(mi as *const ModeInfo, i, mis);
             let l = left_block_mode(mi as *const ModeInfo, i);
 
@@ -279,11 +266,6 @@ unsafe fn read_kf_modes(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo) {
                 VP8_KF_BMODE_PROB[a as usize][l as usize].as_ptr(),
             );
             (*mi).bmi[i as usize] = BModeInfo::Intra(m);
-
-            i += 1;
-            if i >= 16 {
-                break;
-            }
         }
     }
 
@@ -302,24 +284,13 @@ unsafe fn read_mvcomponent(r: *mut Vp8Reader<'_>, mvc: *const Prob) -> i32 {
 
     if vp8_read(r, *p.add(MVPIS_SHORT) as i32) != 0 {
         /* Large */
-        let mut i: i32 = 0;
-
-        loop {
+        for i in 0..3i32 {
             x += vp8_read(r, *p.add(MVP_BITS + i as usize) as i32) << i;
-            i += 1;
-            if i >= 3 {
-                break;
-            }
         }
 
-        i = MVLONG_WIDTH as i32 - 1; /* Skip bit 3, which is sometimes implicit */
-
-        loop {
+        /* Skip bit 3, which is sometimes implicit */
+        for i in (4..MVLONG_WIDTH as i32).rev() {
             x += vp8_read(r, *p.add(MVP_BITS + i as usize) as i32) << i;
-            i -= 1;
-            if i <= 3 {
-                break;
-            }
         }
 
         if (x & 0xFFF0) == 0 || vp8_read(r, *p.add(MVP_BITS + 3) as i32) != 0 {
@@ -356,11 +327,9 @@ unsafe fn read_mv(r: *mut Vp8Reader<'_>, mv: *mut Mv, mvc: *const Prob) {
 unsafe fn read_mvcontexts(bc: *mut Vp8Reader<'_>, mvc: *mut Prob) {
     // `mvc` is the flat probability array of the two MV_CONTEXT records
     // (length 2 * MVP_COUNT).
-    let mut i: i32 = 0;
-
-    loop {
-        let mut up: *const Prob = VP8_MV_UPDATE_PROBS[i as usize].prob.as_ptr();
-        let mut p: *mut Prob = mvc.add((i as usize) * MVP_COUNT);
+    for i in 0..2usize {
+        let mut up: *const Prob = VP8_MV_UPDATE_PROBS[i].prob.as_ptr();
+        let mut p: *mut Prob = mvc.add(i * MVP_COUNT);
         let pstop: *mut Prob = p.add(MVP_COUNT);
 
         loop {
@@ -375,10 +344,6 @@ unsafe fn read_mvcontexts(bc: *mut Vp8Reader<'_>, mvc: *mut Prob) {
             if p >= pstop {
                 break;
             }
-        }
-        i += 1;
-        if i >= 2 {
-            break;
         }
     }
 }
@@ -419,28 +384,14 @@ unsafe fn mb_mode_mv_init(pbi: *mut Vp8dComp<'_>) {
         (*pbi).prob_gf = vp8_read_literal(bc, 8) as Prob;
 
         if vp8_read_bit(bc) != 0 {
-            let mut i: i32 = 0;
-
-            loop {
-                (*pbi).common.fc.ymode_prob[i as usize] =
-                    vp8_read_literal(bc, 8) as Prob;
-                i += 1;
-                if i >= 4 {
-                    break;
-                }
+            for i in 0..4usize {
+                (*pbi).common.fc.ymode_prob[i] = vp8_read_literal(bc, 8) as Prob;
             }
         }
 
         if vp8_read_bit(bc) != 0 {
-            let mut i: i32 = 0;
-
-            loop {
-                (*pbi).common.fc.uv_mode_prob[i as usize] =
-                    vp8_read_literal(bc, 8) as Prob;
-                i += 1;
-                if i >= 3 {
-                    break;
-                }
+            for i in 0..3usize {
+                (*pbi).common.fc.uv_mode_prob[i] = vp8_read_literal(bc, 8) as Prob;
             }
         }
 
@@ -497,7 +448,6 @@ unsafe fn decode_split_mv(
     let mut s: i32; /* split configuration (16x8, 8x16, 8x8, 4x4) */
     /* number of partitions in the split configuration */
     let mut num_p: i32;
-    let mut j: i32 = 0;
 
     s = 3;
     num_p = 16;
@@ -510,7 +460,7 @@ unsafe fn decode_split_mv(
         }
     }
 
-    loop /* for each subset j */
+    for j in 0..num_p /* for each subset j */
     {
         let leftmv: u32;
         let abovemv: u32;
@@ -596,11 +546,6 @@ unsafe fn decode_split_mv(
                     break;
                 }
             }
-        }
-
-        j += 1;
-        if j >= num_p {
-            break;
         }
     }
 
@@ -833,15 +778,10 @@ unsafe fn read_mb_modes_mv(
         let ym = read_ymode(bc, (*pbi).common.fc.ymode_prob.as_ptr());
         (*mbmi).mode = ym;
         if ym == MbPredictionMode::BPred {
-            let mut j: i32 = 0;
             (*mbmi).is_4x4 = true;
-            loop {
+            for j in 0..16usize {
                 let m = read_bmode(bc, (*pbi).common.fc.bmode_prob.as_ptr());
-                (*mi).bmi[j as usize] = BModeInfo::Intra(m);
-                j += 1;
-                if j >= 16 {
-                    break;
-                }
+                (*mi).bmi[j] = BModeInfo::Intra(m);
             }
         }
 
@@ -917,31 +857,18 @@ unsafe fn decode_mb_mode_mvs(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo) {
 /// Source: `vp8/decoder/decodemv.c:516`.
 pub unsafe fn vp8_decode_mode_mvs(pbi: *mut Vp8dComp<'_>) {
     let mut mi: *mut ModeInfo = (*pbi).common.mi;
-    let mut mb_row: i32 = -1;
-    let mb_to_right_edge_start: i32;
 
     mb_mode_mv_init(pbi);
 
     (*pbi).mb.mb_to_top_edge = 0;
     (*pbi).mb.mb_to_bottom_edge = (((*pbi).common.mb_rows - 1) * 16) << 3;
-    mb_to_right_edge_start = (((*pbi).common.mb_cols - 1) * 16) << 3;
+    let mb_to_right_edge_start: i32 = (((*pbi).common.mb_cols - 1) * 16) << 3;
 
-    loop {
-        mb_row += 1;
-        if mb_row >= (*pbi).common.mb_rows {
-            break;
-        }
-        let mut mb_col: i32 = -1;
-
+    for _mb_row in 0..(*pbi).common.mb_rows {
         (*pbi).mb.mb_to_left_edge = 0;
         (*pbi).mb.mb_to_right_edge = mb_to_right_edge_start;
 
-        loop {
-            mb_col += 1;
-            if mb_col >= (*pbi).common.mb_cols {
-                break;
-            }
-
+        for _mb_col in 0..(*pbi).common.mb_cols {
             decode_mb_mode_mvs(pbi, mi);
 
             // (CONFIG_ERROR_CONCEALMENT branch omitted — minimal build.)

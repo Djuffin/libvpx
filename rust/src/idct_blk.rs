@@ -37,13 +37,8 @@ pub unsafe fn vp8_dequant_idct_add_y_block_c(
     stride: i32,
     mut eobs: *mut i8,
 ) {
-    let mut i: i32;
-    let mut j: i32;
-
-    i = 0;
-    while i < 4 {
-        j = 0;
-        while j < 4 {
+    for _ in 0..4 {
+        for _ in 0..4 {
             let eob = *eobs;
             eobs = eobs.offset(1);
             if eob > 1 {
@@ -61,11 +56,9 @@ pub unsafe fn vp8_dequant_idct_add_y_block_c(
 
             q = q.offset(16);
             dst = dst.offset(4);
-            j += 1;
         }
 
         dst = dst.offset((4 * stride - 16) as isize);
-        i += 1;
     }
 }
 
@@ -82,13 +75,8 @@ pub unsafe fn vp8_dequant_idct_add_uv_block_c(
     stride: i32,
     mut eobs: *mut i8,
 ) {
-    let mut i: i32;
-    let mut j: i32;
-
-    i = 0;
-    while i < 2 {
-        j = 0;
-        while j < 2 {
+    for _ in 0..2 {
+        for _ in 0..2 {
             let eob = *eobs;
             eobs = eobs.offset(1);
             if eob > 1 {
@@ -106,17 +94,13 @@ pub unsafe fn vp8_dequant_idct_add_uv_block_c(
 
             q = q.offset(16);
             dst_u = dst_u.offset(4);
-            j += 1;
         }
 
         dst_u = dst_u.offset((4 * stride - 8) as isize);
-        i += 1;
     }
 
-    i = 0;
-    while i < 2 {
-        j = 0;
-        while j < 2 {
+    for _ in 0..2 {
+        for _ in 0..2 {
             let eob = *eobs;
             eobs = eobs.offset(1);
             if eob > 1 {
@@ -134,10 +118,8 @@ pub unsafe fn vp8_dequant_idct_add_uv_block_c(
 
             q = q.offset(16);
             dst_v = dst_v.offset(4);
-            j += 1;
         }
 
         dst_v = dst_v.offset((4 * stride - 8) as isize);
-        i += 1;
     }
 }

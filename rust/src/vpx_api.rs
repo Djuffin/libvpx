@@ -26,7 +26,6 @@ pub use crate::types::{
     VPX_CODEC_MEM_ERROR, VPX_CODEC_OK, VPX_CODEC_UNSUP_BITSTREAM, VPX_CODEC_UNSUP_FEATURE,
 };
 
-pub type VpxCodecErrT = VpxCodecErr;
 pub type vpx_codec_err_t = VpxCodecErr;
 
 // ===========================================================================
@@ -90,8 +89,8 @@ pub const VPX_IMG_FMT_HIGHBITDEPTH: i32 = 0x800;
 
 /// `vpx_img_fmt_t` is a bit-OR-able set of `VPX_IMG_FMT_*` flag values
 /// plus a small index, so we expose it as a transparent `i32`.
-pub type vpx_img_fmt_t = i32;
-pub type VpxImgFmt = vpx_img_fmt_t;
+pub type VpxImgFmt = i32;
+pub type vpx_img_fmt_t = VpxImgFmt;
 
 pub const VPX_IMG_FMT_NONE: vpx_img_fmt_t = 0;
 pub const VPX_IMG_FMT_YV12: vpx_img_fmt_t =
@@ -110,8 +109,8 @@ pub const VPX_IMG_FMT_I44416: vpx_img_fmt_t =
 pub const VPX_IMG_FMT_I44016: vpx_img_fmt_t =
     VPX_IMG_FMT_I440 | VPX_IMG_FMT_HIGHBITDEPTH;
 
-pub type vpx_color_space_t = u32;
-pub type VpxColorSpace = vpx_color_space_t;
+pub type VpxColorSpace = u32;
+pub type vpx_color_space_t = VpxColorSpace;
 pub const VPX_CS_UNKNOWN: vpx_color_space_t = 0;
 pub const VPX_CS_BT_601: vpx_color_space_t = 1;
 pub const VPX_CS_BT_709: vpx_color_space_t = 2;
@@ -121,8 +120,8 @@ pub const VPX_CS_BT_2020: vpx_color_space_t = 5;
 pub const VPX_CS_RESERVED: vpx_color_space_t = 6;
 pub const VPX_CS_SRGB: vpx_color_space_t = 7;
 
-pub type vpx_color_range_t = u32;
-pub type VpxColorRange = vpx_color_range_t;
+pub type VpxColorRange = u32;
+pub type vpx_color_range_t = VpxColorRange;
 pub const VPX_CR_STUDIO_RANGE: vpx_color_range_t = 0;
 pub const VPX_CR_FULL_RANGE: vpx_color_range_t = 1;
 
@@ -168,7 +167,6 @@ pub struct VpxImage {
 }
 
 pub type vpx_image_t = VpxImage;
-pub type VpxImageT = VpxImage;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -180,7 +178,6 @@ pub struct VpxImageRect {
 }
 
 pub type vpx_image_rect_t = VpxImageRect;
-pub type VpxImageRectT = VpxImageRect;
 
 /// `vpx_bit_depth_t` (`vpx/vpx_codec.h:220`).
 #[repr(C)]
@@ -261,7 +258,6 @@ pub struct VpxCodecStreamInfo {
     pub is_kf: c_uint,
 }
 pub type vpx_codec_stream_info_t = VpxCodecStreamInfo;
-pub type VpxCodecStreamInfoT = VpxCodecStreamInfo;
 
 /// `vpx_codec_enc_cfg_t` — opaque to the dispatcher; codec-specific
 /// translation units carry the full layout.
@@ -340,7 +336,6 @@ pub struct VpxCodecAlgPriv {
     _opaque: [u8; 0],
 }
 pub type vpx_codec_alg_priv_t = VpxCodecAlgPriv;
-pub type VpxCodecAlgPrivT = VpxCodecAlgPriv;
 
 /// `vpx_codec_priv_enc_mr_cfg_t` (`vpx/internal/vpx_codec_internal.h:364`).
 #[repr(C)]
@@ -351,9 +346,10 @@ pub struct VpxCodecPrivEncMrCfg {
     pub mr_low_res_mode_info: *mut c_void,
 }
 pub type vpx_codec_priv_enc_mr_cfg_t = VpxCodecPrivEncMrCfg;
-pub type VpxCodecPrivEncMrCfgT = VpxCodecPrivEncMrCfg;
 
-
+/// `vpx_codec_iface_t` (`vpx/internal/vpx_codec_internal.h`). The
+/// dispatcher only inspects `name`, `abi_version`, and `caps`; the
+/// full vtable lives behind the `Decoder` trait object now.
 #[repr(C)]
 pub struct VpxCodecIface {
     pub name: *const c_char,
@@ -361,7 +357,6 @@ pub struct VpxCodecIface {
     pub caps: VpxCodecCaps,
 }
 pub type vpx_codec_iface_t = VpxCodecIface;
-pub type VpxCodecIfaceT = VpxCodecIface;
 
 unsafe impl Sync for VpxCodecIface {}
 
@@ -402,7 +397,6 @@ pub struct VpxCodecPriv {
     pub enc: VpxCodecPrivEnc,
 }
 pub type vpx_codec_priv_t = VpxCodecPriv;
-pub type VpxCodecPrivT = VpxCodecPriv;
 
 /// `vpx_codec_ctx_t::config` union (`vpx/vpx_codec.h:206`). We expose
 /// the union with its three arms (dec / enc / raw); all are pointer
@@ -435,7 +429,6 @@ pub struct VpxCodecCtx {
     pub trait_obj: Option<Box<dyn crate::codec::Decoder + 'static>>,
 }
 pub type vpx_codec_ctx_t = VpxCodecCtx;
-pub type VpxCodecCtxT = VpxCodecCtx;
 
 // ===========================================================================
 // Re-export of all public functions from the five consumer modules.

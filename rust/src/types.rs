@@ -5,7 +5,7 @@
 //! — there is intentionally no behavior here. Method bodies, allocation
 //! helpers, FFI shims and the bool-decoder hot path land in later phases.
 //!
-//! Layout decisions follow `documentation/rust_types.md`:
+//! Layout decisions follow `documentation/translation_summary.md` §3:
 //!   - direct C transliteration with raw `*mut u8` plane pointers,
 //!   - `#[repr(C)]` (and `align(16)` for the working MB) wherever bit
 //!     layout matters for compatibility with SIMD/assembly later,
@@ -89,8 +89,8 @@ pub fn mv_as_int(m: Mv) -> u32 {
 #[inline]
 pub fn mv_from_int(v: u32) -> Mv {
     Mv {
-        row: (v & 0xFFFF) as i16,
-        col: ((v >> 16) & 0xFFFF) as i16,
+        row: v as u16 as i16,
+        col: (v >> 16) as u16 as i16,
     }
 }
 

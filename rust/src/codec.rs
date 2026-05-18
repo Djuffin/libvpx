@@ -6,11 +6,12 @@
 
 use core::time::Duration;
 
+use crate::vp8_dx_iface::{Vp8PostprocCfg, VpxDecryptInit, VpxRefFrame};
 
 // Re-exports under idiomatic short names.
-pub use crate::vpx_api::VpxCodecErr as Error;
-pub use crate::vpx_api::VpxImage as Image;
-pub use crate::vpx_api::VpxCodecStreamInfo as StreamInfo;
+pub use crate::vpx_api::{
+    VpxCodecErr as Error, VpxCodecStreamInfo as StreamInfo, VpxImage as Image,
+};
 
 /// Frame-buffer allocator hook. Codecs that need externally-supplied
 /// frame buffers accept any implementor via a builder.
@@ -27,10 +28,12 @@ pub trait FrameBufferAllocator {
     fn release(&mut self, handle: FrameBufferHandle) -> Result<(), Error>;
 }
 
-/// Opaque handle to a frame buffer issued by a `FrameBufferAllocator`.
+/// Handle to a frame buffer issued by a [`FrameBufferAllocator`].
 ///
 /// Wraps the C `vpx_codec_frame_buffer_t` shape (data pointer + size +
-/// private slot). Constructible only by allocator implementations.
+/// private slot). Fields are `pub` so allocator implementations can
+/// populate them directly; ownership of the underlying allocation
+/// remains with the allocator.
 #[derive(Copy, Clone)]
 pub struct FrameBufferHandle {
     pub data: *mut u8,
@@ -47,15 +50,15 @@ pub struct FrameBufferHandle {
 pub enum ControlCmd<'a> {
     /// Replace a reference frame (last / golden / altref) with the
     /// supplied image. `VP8_SET_REFERENCE` in C.
-    SetReference(&'a crate::vp8_dx_iface::VpxRefFrame),
+    SetReference(&'a VpxRefFrame),
 
     /// Copy a reference frame out to the supplied image buffer.
     /// `VP8_COPY_REFERENCE` in C.
-    CopyReference(&'a mut crate::vp8_dx_iface::VpxRefFrame),
+    CopyReference(&'a mut VpxRefFrame),
 
     /// Apply post-processing config. `VP8_SET_POSTPROC` in C. The
     /// minimal build returns `Err(Error::Incapable)` for this.
-    SetPostproc(crate::vp8_dx_iface::Vp8PostprocCfg),
+    SetPostproc(Vp8PostprocCfg),
 
     /// Output: bitmask of which references the last frame refreshed.
     /// `VP8D_GET_LAST_REF_UPDATES` in C.
@@ -74,7 +77,7 @@ pub enum ControlCmd<'a> {
 
     /// Install (or clear) the per-frame decryption callback.
     /// `VPXD_SET_DECRYPTOR` in C. `None` clears.
-    SetDecryptor(Option<&'a crate::vp8_dx_iface::VpxDecryptInit>),
+    SetDecryptor(Option<&'a VpxDecryptInit>),
 }
 
 /// Decoder trait. One frame in, zero-or-one frame out.

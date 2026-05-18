@@ -66,29 +66,27 @@ static mut dc_pred: [[[Option<IntraPredFn>; NUM_SIZES]; 2]; 2] =
 /// (16 and 8) and chains into the per-4x4 initializer so a single
 /// `once()` call covers both layers of VP8 intra prediction.
 unsafe fn vp8_init_intra_predictors_internal() {
-    unsafe {
-        // INIT_SIZE(16);
-        pred[MbPredictionMode::VPred as usize][SIZE_16] = Some(vpx_v_predictor_16x16);
-        pred[MbPredictionMode::HPred as usize][SIZE_16] = Some(vpx_h_predictor_16x16);
-        pred[MbPredictionMode::TmPred as usize][SIZE_16] = Some(vpx_tm_predictor_16x16);
+    // INIT_SIZE(16);
+    pred[MbPredictionMode::VPred as usize][SIZE_16] = Some(vpx_v_predictor_16x16);
+    pred[MbPredictionMode::HPred as usize][SIZE_16] = Some(vpx_h_predictor_16x16);
+    pred[MbPredictionMode::TmPred as usize][SIZE_16] = Some(vpx_tm_predictor_16x16);
 
-        dc_pred[0][0][SIZE_16] = Some(vpx_dc_128_predictor_16x16);
-        dc_pred[0][1][SIZE_16] = Some(vpx_dc_top_predictor_16x16);
-        dc_pred[1][0][SIZE_16] = Some(vpx_dc_left_predictor_16x16);
-        dc_pred[1][1][SIZE_16] = Some(vpx_dc_predictor_16x16);
+    dc_pred[0][0][SIZE_16] = Some(vpx_dc_128_predictor_16x16);
+    dc_pred[0][1][SIZE_16] = Some(vpx_dc_top_predictor_16x16);
+    dc_pred[1][0][SIZE_16] = Some(vpx_dc_left_predictor_16x16);
+    dc_pred[1][1][SIZE_16] = Some(vpx_dc_predictor_16x16);
 
-        // INIT_SIZE(8);
-        pred[MbPredictionMode::VPred as usize][SIZE_8] = Some(vpx_v_predictor_8x8);
-        pred[MbPredictionMode::HPred as usize][SIZE_8] = Some(vpx_h_predictor_8x8);
-        pred[MbPredictionMode::TmPred as usize][SIZE_8] = Some(vpx_tm_predictor_8x8);
+    // INIT_SIZE(8);
+    pred[MbPredictionMode::VPred as usize][SIZE_8] = Some(vpx_v_predictor_8x8);
+    pred[MbPredictionMode::HPred as usize][SIZE_8] = Some(vpx_h_predictor_8x8);
+    pred[MbPredictionMode::TmPred as usize][SIZE_8] = Some(vpx_tm_predictor_8x8);
 
-        dc_pred[0][0][SIZE_8] = Some(vpx_dc_128_predictor_8x8);
-        dc_pred[0][1][SIZE_8] = Some(vpx_dc_top_predictor_8x8);
-        dc_pred[1][0][SIZE_8] = Some(vpx_dc_left_predictor_8x8);
-        dc_pred[1][1][SIZE_8] = Some(vpx_dc_predictor_8x8);
+    dc_pred[0][0][SIZE_8] = Some(vpx_dc_128_predictor_8x8);
+    dc_pred[0][1][SIZE_8] = Some(vpx_dc_top_predictor_8x8);
+    dc_pred[1][0][SIZE_8] = Some(vpx_dc_left_predictor_8x8);
+    dc_pred[1][1][SIZE_8] = Some(vpx_dc_predictor_8x8);
 
-        vp8_init_intra4x4_predictors_internal();
-    }
+    vp8_init_intra4x4_predictors_internal();
 }
 
 // ---------------------------------------------------------------------------
@@ -108,31 +106,24 @@ pub unsafe fn vp8_build_intra_predictors_mby_s(
     ypred_ptr: *mut u8,
     y_stride: i32,
 ) {
-    unsafe {
-        let mode: MbPredictionMode = (*(*x).mode_info_context).mbmi.mode;
-        // DECLARE_ALIGNED(16, uint8_t, yleft_col[16])
-        #[repr(align(16))]
-        struct Aligned16([u8; 16]);
-        let mut yleft_col_buf = Aligned16([0u8; 16]);
-        let yleft_col: *mut u8 = yleft_col_buf.0.as_mut_ptr();
-        let mut i: i32;
-        let fn_: IntraPredFn;
+    let mode: MbPredictionMode = (*(*x).mode_info_context).mbmi.mode;
+    // DECLARE_ALIGNED(16, uint8_t, yleft_col[16])
+    #[repr(align(16))]
+    struct Aligned16([u8; 16]);
+    let mut yleft_col_buf = Aligned16([0u8; 16]);
+    let yleft_col: *mut u8 = yleft_col_buf.0.as_mut_ptr();
 
-        i = 0;
-        while i < 16 {
-            *yleft_col.offset(i as isize) = *yleft.offset((i * left_stride) as isize);
-            i += 1;
-        }
-
-        if mode == MbPredictionMode::DcPred {
-            fn_ = dc_pred[(*x).left_available as usize][(*x).up_available as usize][SIZE_16]
-                .unwrap();
-        } else {
-            fn_ = pred[mode as usize][SIZE_16].unwrap();
-        }
-
-        fn_(ypred_ptr, y_stride as isize, yabove_row, yleft_col);
+    for i in 0..16i32 {
+        *yleft_col.offset(i as isize) = *yleft.offset((i * left_stride) as isize);
     }
+
+    let fn_: IntraPredFn = if mode == MbPredictionMode::DcPred {
+        dc_pred[(*x).left_available as usize][(*x).up_available as usize][SIZE_16].unwrap()
+    } else {
+        pred[mode as usize][SIZE_16].unwrap()
+    };
+
+    fn_(ypred_ptr, y_stride as isize, yabove_row, yleft_col);
 }
 
 /// `vp8_build_intra_predictors_mbuv_s` (vp8/common/reconintra.c:69).
@@ -151,43 +142,36 @@ pub unsafe fn vp8_build_intra_predictors_mbuv_s(
     vpred_ptr: *mut u8,
     pred_stride: i32,
 ) {
-    unsafe {
-        let uvmode: MbPredictionMode = (*(*x).mode_info_context).mbmi.uv_mode;
-        // The C source uses `#if HAVE_VSX` to reserve 16 bytes on PowerPC
-        // VSX builds (which load full 128-bit vectors). We unconditionally
-        // reserve 16 bytes — minor stack overhead, no UB on any backend.
-        let mut uleft_col: [u8; 16] = [0; 16];
-        let mut vleft_col: [u8; 16] = [0; 16];
-        let mut i: i32;
-        let fn_: IntraPredFn;
+    let uvmode: MbPredictionMode = (*(*x).mode_info_context).mbmi.uv_mode;
+    // The C source uses `#if HAVE_VSX` to reserve 16 bytes on PowerPC
+    // VSX builds (which load full 128-bit vectors). We unconditionally
+    // reserve 16 bytes — minor stack overhead, no UB on any backend.
+    let mut uleft_col: [u8; 16] = [0; 16];
+    let mut vleft_col: [u8; 16] = [0; 16];
 
-        i = 0;
-        while i < 8 {
-            uleft_col[i as usize] = *uleft.offset((i * left_stride) as isize);
-            vleft_col[i as usize] = *vleft.offset((i * left_stride) as isize);
-            i += 1;
-        }
-
-        if uvmode == MbPredictionMode::DcPred {
-            fn_ = dc_pred[(*x).left_available as usize][(*x).up_available as usize][SIZE_8]
-                .unwrap();
-        } else {
-            fn_ = pred[uvmode as usize][SIZE_8].unwrap();
-        }
-
-        fn_(
-            upred_ptr,
-            pred_stride as isize,
-            uabove_row,
-            uleft_col.as_ptr(),
-        );
-        fn_(
-            vpred_ptr,
-            pred_stride as isize,
-            vabove_row,
-            vleft_col.as_ptr(),
-        );
+    for i in 0..8i32 {
+        uleft_col[i as usize] = *uleft.offset((i * left_stride) as isize);
+        vleft_col[i as usize] = *vleft.offset((i * left_stride) as isize);
     }
+
+    let fn_: IntraPredFn = if uvmode == MbPredictionMode::DcPred {
+        dc_pred[(*x).left_available as usize][(*x).up_available as usize][SIZE_8].unwrap()
+    } else {
+        pred[uvmode as usize][SIZE_8].unwrap()
+    };
+
+    fn_(
+        upred_ptr,
+        pred_stride as isize,
+        uabove_row,
+        uleft_col.as_ptr(),
+    );
+    fn_(
+        vpred_ptr,
+        pred_stride as isize,
+        vabove_row,
+        vleft_col.as_ptr(),
+    );
 }
 
 /// `vp8_init_intra_predictors` (vp8/common/reconintra.c:102).
@@ -196,7 +180,5 @@ pub unsafe fn vp8_build_intra_predictors_mbuv_s(
 /// initializer in `once()` so multiple decoder instances and threads
 /// share the same populated tables safely.
 pub unsafe fn vp8_init_intra_predictors() {
-    unsafe {
-        once(vp8_init_intra_predictors_internal);
-    }
+    once(vp8_init_intra_predictors_internal);
 }

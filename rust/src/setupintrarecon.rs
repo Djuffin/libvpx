@@ -59,21 +59,15 @@ pub unsafe fn setup_intra_recon_left(
     y_stride: i32,
     uv_stride: i32,
 ) {
-    let mut i = 0;
-    while i < 16 {
+    for i in 0..16 {
         *y_buffer.offset((y_stride * i) as isize) = INTRA_RECON_LEFT_SEED;
-        i += 1;
     }
 
-    let mut i = 0;
-    while i < 8 {
+    for i in 0..8 {
         *u_buffer.offset((uv_stride * i) as isize) = INTRA_RECON_LEFT_SEED;
-        i += 1;
     }
 
-    let mut i = 0;
-    while i < 8 {
+    for i in 0..8 {
         *v_buffer.offset((uv_stride * i) as isize) = INTRA_RECON_LEFT_SEED;
-        i += 1;
     }
 }

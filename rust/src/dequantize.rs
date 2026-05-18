@@ -26,18 +26,14 @@ use crate::types::Blockd;
 /// `d->dqcoeff`. Used only for the Y2 second-order block (the rest of
 /// the MB uses the fused [`vp8_dequant_idct_add_c`] form).
 pub unsafe fn vp8_dequantize_b_c(d: *mut Blockd, DQC: *mut i16) {
-    let mut i: i32;
     let DQ: *mut i16 = (*d).dqcoeff;
     let Q: *mut i16 = (*d).qcoeff;
 
-    i = 0;
-    while i < 16 {
+    for i in 0..16isize {
         // `Q[i] * DQC[i]` is promoted to `int` in C and truncated back
         // to `short` on store — match with a wrapping i32 multiply.
-        let prod = (*Q.offset(i as isize) as i32)
-            .wrapping_mul(*DQC.offset(i as isize) as i32);
-        *DQ.offset(i as isize) = prod as i16;
-        i += 1;
+        let prod = (*Q.offset(i) as i32).wrapping_mul(*DQC.offset(i) as i32);
+        *DQ.offset(i) = prod as i16;
     }
 }
 
@@ -54,14 +50,9 @@ pub unsafe fn vp8_dequant_idct_add_c(
     dest: *mut u8,
     stride: i32,
 ) {
-    let mut i: i32;
-
-    i = 0;
-    while i < 16 {
-        let prod = (*dq.offset(i as isize) as i32)
-            .wrapping_mul(*input.offset(i as isize) as i32);
-        *input.offset(i as isize) = prod as i16;
-        i += 1;
+    for i in 0..16isize {
+        let prod = (*dq.offset(i) as i32).wrapping_mul(*input.offset(i) as i32);
+        *input.offset(i) = prod as i16;
     }
 
     vp8_short_idct4x4llm_c(input, dest, stride, dest, stride);

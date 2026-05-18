@@ -124,11 +124,8 @@ unsafe fn reset(worker: &mut VPxWorker) -> c_int {
     let mut ok: c_int = 1;
     worker.had_error = 0;
     if worker.status_ < VPX_WORKER_STATUS_OK {
-        if CONFIG_MULTITHREAD != 0 {
-            // Threaded path omitted; see C source.
-        } else {
-            worker.status_ = VPX_WORKER_STATUS_OK;
-        }
+        // Threaded path omitted; see C source.
+        worker.status_ = VPX_WORKER_STATUS_OK;
     } else if worker.status_ > VPX_WORKER_STATUS_OK {
         ok = sync(worker);
     }
@@ -148,22 +145,16 @@ unsafe fn execute(worker: &mut VPxWorker) {
 /// Kick the worker. Threaded build signals the condvar; single-thread
 /// build calls `execute()` inline.
 unsafe fn launch(worker: &mut VPxWorker) {
-    if CONFIG_MULTITHREAD != 0 {
-        // change_state(worker, VPX_WORKER_STATUS_WORKING);
-    } else {
-        execute(worker);
-    }
+    // Threaded build would: change_state(worker, VPX_WORKER_STATUS_WORKING).
+    execute(worker);
 }
 
 /// Terminate the worker. Threaded build joins the thread + frees impl;
 /// single-thread build only resets `status_`.
 unsafe fn end(worker: &mut VPxWorker) {
-    if CONFIG_MULTITHREAD != 0 {
-        // join + free impl_ — see C source.
-    } else {
-        worker.status_ = VPX_WORKER_STATUS_NOT_OK;
-        debug_assert!(worker.impl_.is_null());
-    }
+    // Threaded build would: join + free impl_ — see C source.
+    worker.status_ = VPX_WORKER_STATUS_NOT_OK;
+    debug_assert!(worker.impl_.is_null());
     debug_assert!(worker.status_ == VPX_WORKER_STATUS_NOT_OK);
 }
 

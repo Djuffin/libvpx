@@ -150,13 +150,9 @@ unsafe fn create_decompressor_inner(
 
 /// `static int get_free_fb(VP8_COMMON *)` — `vp8/decoder/onyxd_if.c:193`.
 unsafe fn get_free_fb(cm: *mut Vp8Common) -> i32 {
-    let mut i: i32 = 0;
-    while i < NUM_YV12_BUFFERS as i32 {
-        if (*cm).fb_idx_ref_cnt[i as usize] == 0 {
-            break;
-        }
-        i += 1;
-    }
+    let i = (0..NUM_YV12_BUFFERS as i32)
+        .find(|&i| (*cm).fb_idx_ref_cnt[i as usize] == 0)
+        .unwrap_or(NUM_YV12_BUFFERS as i32);
 
     debug_assert!(i < NUM_YV12_BUFFERS as i32);
     (*cm).fb_idx_ref_cnt[i as usize] = 1;
@@ -451,15 +447,13 @@ pub unsafe fn vp8dx_get_raw_frame(
     sd: *mut Yv12BufferConfig,
     flags: *mut Vp8PpFlags,
 ) -> i32 {
-    let mut ret: i32 = -1;
-
     if (*pbi).ready_for_new_data == 1 {
-        return ret;
+        return -1;
     }
 
     // ie no raw frame to show!!!
     if (*pbi).common.show_frame == 0 {
-        return ret;
+        return -1;
     }
 
     (*pbi).ready_for_new_data = 1;
@@ -467,7 +461,7 @@ pub unsafe fn vp8dx_get_raw_frame(
     // CONFIG_POSTPROC is disabled — cast flags to void as the C source does.
     let _ = flags;
 
-    if !(*pbi).common.frame_to_show.is_null() {
+    let ret = if !(*pbi).common.frame_to_show.is_null() {
         // Shallow descriptor copy — *sd shares plane buffers with the
         // decoder's frame_to_show until the next call to
         // vp8dx_receive_compressed_data.
@@ -475,10 +469,10 @@ pub unsafe fn vp8dx_get_raw_frame(
         (*sd).y_width = (*pbi).common.width;
         (*sd).y_height = (*pbi).common.height;
         (*sd).uv_height = (*pbi).common.height / 2;
-        ret = 0;
+        0
     } else {
-        ret = -1;
-    }
+        -1
+    };
 
     vpx_clear_system_state();
     ret
@@ -496,19 +490,15 @@ pub unsafe fn vp8dx_references_buffer(
 ) -> i32 {
     let mut mi: *const ModeInfo = (*oci).mi as *const ModeInfo;
 
-    let mut mb_row: i32 = 0;
-    while mb_row < (*oci).mb_rows {
-        let mut mb_col: i32 = 0;
-        while mb_col < (*oci).mb_cols {
+    for _ in 0..(*oci).mb_rows {
+        for _ in 0..(*oci).mb_cols {
             let mbmi: *const MbModeInfo = &(*mi).mbmi;
             if (*mbmi).ref_frame as i32 == ref_frame {
                 return 1;
             }
-            mb_col += 1;
             mi = mi.add(1);
         }
         mi = mi.add(1);
-        mb_row += 1;
     }
     0
 }

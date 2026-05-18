@@ -42,31 +42,28 @@ pub unsafe fn vpx_codec_dec_init_ver(
         return VPX_CODEC_INVALID_PARAM;
     };
 
-    let bail = |code: VpxCodecErr| -> VpxCodecErr { code };
+    // Each entry pairs a USE_* flag with the CAP_* bit the iface must
+    // advertise to honor it. Empty intersection => INCAPABLE.
+    const CAP_REQUIRED: &[(VpxCodecFlags, VpxCodecCaps)] = &[
+        (VPX_CODEC_USE_POSTPROC, VPX_CODEC_CAP_POSTPROC),
+        (VPX_CODEC_USE_ERROR_CONCEALMENT, VPX_CODEC_CAP_ERROR_CONCEALMENT),
+        (VPX_CODEC_USE_INPUT_FRAGMENTS, VPX_CODEC_CAP_INPUT_FRAGMENTS),
+    ];
 
-    if iface.abi_version != VPX_CODEC_INTERNAL_ABI_VERSION {
-        ctx.err = bail(VPX_CODEC_ABI_MISMATCH);
-        return ctx.err;
-    }
-    if (flags & VPX_CODEC_USE_POSTPROC) != 0 && (iface.caps & VPX_CODEC_CAP_POSTPROC) == 0 {
-        ctx.err = bail(VPX_CODEC_INCAPABLE);
-        return ctx.err;
-    }
-    if (flags & VPX_CODEC_USE_ERROR_CONCEALMENT) != 0
-        && (iface.caps & VPX_CODEC_CAP_ERROR_CONCEALMENT) == 0
+    let validation_err = if iface.abi_version != VPX_CODEC_INTERNAL_ABI_VERSION {
+        Some(VPX_CODEC_ABI_MISMATCH)
+    } else if (iface.caps & VPX_CODEC_CAP_DECODER) == 0
+        || CAP_REQUIRED
+            .iter()
+            .any(|&(flag, cap)| (flags & flag) != 0 && (iface.caps & cap) == 0)
     {
-        ctx.err = bail(VPX_CODEC_INCAPABLE);
-        return ctx.err;
-    }
-    if (flags & VPX_CODEC_USE_INPUT_FRAGMENTS) != 0
-        && (iface.caps & VPX_CODEC_CAP_INPUT_FRAGMENTS) == 0
-    {
-        ctx.err = bail(VPX_CODEC_INCAPABLE);
-        return ctx.err;
-    }
-    if (iface.caps & VPX_CODEC_CAP_DECODER) == 0 {
-        ctx.err = bail(VPX_CODEC_INCAPABLE);
-        return ctx.err;
+        Some(VPX_CODEC_INCAPABLE)
+    } else {
+        None
+    };
+    if let Some(e) = validation_err {
+        ctx.err = e;
+        return e;
     }
 
     // Reset the slot to known-initial state. The struct is no longer

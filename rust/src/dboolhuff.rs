@@ -107,11 +107,7 @@ pub unsafe fn vp8dx_bool_decoder_fill(br: *mut BoolDecoder<'_>) {
 
     if let Some(cb) = (*br).decrypt.as_mut() {
         // VPXMIN(sizeof(decrypted), bytes_left)
-        let n: usize = if decrypted.len() < bytes_left {
-            decrypted.len()
-        } else {
-            bytes_left
-        };
+        let n: usize = decrypted.len().min(bytes_left);
         let src_slice = core::slice::from_raw_parts(bufptr, n);
         cb(src_slice, &mut decrypted[..n]);
         bufptr = decrypted.as_ptr();
@@ -150,39 +146,32 @@ pub unsafe fn vp8dx_bool_decoder_fill(br: *mut BoolDecoder<'_>) {
 /// Source: `vp8/decoder/dboolhuff.h:54`.
 pub unsafe fn vp8dx_decode_bool(br: *mut BoolDecoder<'_>, probability: i32) -> i32 {
     let mut bit: u32 = 0;
-    let value: BdValue;
-    let split: u32;
-    let bigsplit: BdValue;
-    let mut count: i32;
-    let mut range: u32;
 
-    split = 1 + ((((*br).range - 1) * probability as u32) >> 8);
+    let split: u32 = 1 + ((((*br).range - 1) * probability as u32) >> 8);
 
     if (*br).count < 0 {
         vp8dx_bool_decoder_fill(br);
     }
 
     let mut value_local: BdValue = (*br).value;
-    count = (*br).count;
+    let mut count: i32 = (*br).count;
 
-    bigsplit = (split as BdValue) << (VP8_BD_VALUE_SIZE - 8);
+    let bigsplit: BdValue = (split as BdValue) << (VP8_BD_VALUE_SIZE - 8);
 
-    range = split;
+    let mut range: u32 = split;
 
     if value_local >= bigsplit {
         range = (*br).range - split;
-        value_local = value_local - bigsplit;
+        value_local -= bigsplit;
         bit = 1;
     }
 
-    {
-        let shift: u8 = VP8_NORM[(range as u8) as usize];
-        range <<= shift;
-        value_local <<= shift;
-        count -= shift as i32;
-    }
-    value = value_local;
-    (*br).value = value;
+    let shift: u8 = VP8_NORM[(range as u8) as usize];
+    range <<= shift;
+    value_local <<= shift;
+    count -= shift as i32;
+
+    (*br).value = value_local;
     (*br).count = count;
     (*br).range = range;
 

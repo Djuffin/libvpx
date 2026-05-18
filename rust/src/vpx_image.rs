@@ -37,20 +37,20 @@ const UINT_MAX: u32 = u32::MAX;
 
 /// `static int is_valid_img_fmt(vpx_img_fmt_t fmt)` — admission test
 /// for the format enum.
-unsafe fn is_valid_img_fmt(fmt: vpx_img_fmt_t) -> i32 {
-    match fmt {
+fn is_valid_img_fmt(fmt: vpx_img_fmt_t) -> bool {
+    matches!(
+        fmt,
         VPX_IMG_FMT_YV12
-        | VPX_IMG_FMT_I420
-        | VPX_IMG_FMT_I422
-        | VPX_IMG_FMT_I444
-        | VPX_IMG_FMT_I440
-        | VPX_IMG_FMT_NV12
-        | VPX_IMG_FMT_I42016
-        | VPX_IMG_FMT_I42216
-        | VPX_IMG_FMT_I44416
-        | VPX_IMG_FMT_I44016 => 1,
-        _ => 0,
-    }
+            | VPX_IMG_FMT_I420
+            | VPX_IMG_FMT_I422
+            | VPX_IMG_FMT_I444
+            | VPX_IMG_FMT_I440
+            | VPX_IMG_FMT_NV12
+            | VPX_IMG_FMT_I42016
+            | VPX_IMG_FMT_I42216
+            | VPX_IMG_FMT_I44416
+            | VPX_IMG_FMT_I44016
+    )
 }
 
 /// `static vpx_image_t *img_alloc_helper(...)` — common construction
@@ -64,21 +64,12 @@ unsafe fn img_alloc_helper(
     mut stride_align: u32,
     img_data: *mut u8,
 ) -> *mut vpx_image_t {
-    let h: u32;
-    let w: u32;
-    let xcs: u32;
-    let ycs: u32;
-    let bps: u32;
-    let mut s: u64;
-    let stride_in_bytes: i32;
-    let mut align: u32;
-
     'fail: {
         if !img.is_null() {
             ptr::write_bytes(img as *mut u8, 0, core::mem::size_of::<vpx_image_t>());
         }
 
-        if is_valid_img_fmt(fmt) == 0 {
+        if !is_valid_img_fmt(fmt) {
             break 'fail;
         }
 
@@ -112,7 +103,7 @@ unsafe fn img_alloc_helper(
         }
 
         /* Get sample size for this format */
-        bps = match fmt {
+        let bps: u32 = match fmt {
             VPX_IMG_FMT_I420 | VPX_IMG_FMT_YV12 | VPX_IMG_FMT_NV12 => 12,
             VPX_IMG_FMT_I422 | VPX_IMG_FMT_I440 => 16,
             VPX_IMG_FMT_I444 => 24,
@@ -125,7 +116,7 @@ unsafe fn img_alloc_helper(
         /* Get chroma shift values for this format */
         // For VPX_IMG_FMT_NV12, xcs needs to be 0 such that UV data is all
         // read at once.
-        xcs = match fmt {
+        let xcs: u32 = match fmt {
             VPX_IMG_FMT_I420
             | VPX_IMG_FMT_YV12
             | VPX_IMG_FMT_I422
@@ -134,7 +125,7 @@ unsafe fn img_alloc_helper(
             _ => 0,
         };
 
-        ycs = match fmt {
+        let ycs: u32 = match fmt {
             VPX_IMG_FMT_I420
             | VPX_IMG_FMT_NV12
             | VPX_IMG_FMT_I440
@@ -145,33 +136,37 @@ unsafe fn img_alloc_helper(
         };
 
         /* Calculate storage sizes. */
-        if !img_data.is_null() {
+        let (w, h) = if !img_data.is_null() {
             /* If the buffer was allocated externally, the width and height
              * shouldn't be adjusted. */
-            w = d_w;
-            h = d_h;
+            (d_w, d_h)
         } else {
             /* Calculate storage sizes given the chroma subsampling */
-            align = (1u32 << xcs) - 1;
-            w = (d_w + align) & !align;
+            let x_align = (1u32 << xcs) - 1;
+            let w = (d_w + x_align) & !x_align;
             debug_assert!(d_w <= w);
-            align = (1u32 << ycs) - 1;
-            h = (d_h + align) & !align;
+            let y_align = (1u32 << ycs) - 1;
+            let h = (d_h + y_align) & !y_align;
             debug_assert!(d_h <= h);
-        }
+            (w, h)
+        };
 
-        s = if (fmt & VPX_IMG_FMT_PLANAR) != 0 {
+        let mut s: u64 = if (fmt & VPX_IMG_FMT_PLANAR) != 0 {
             w as u64
         } else {
             (bps as u64) * (w as u64) / 8
         };
-        s = if (fmt & VPX_IMG_FMT_HIGHBITDEPTH) != 0 { s * 2 } else { s };
+        if (fmt & VPX_IMG_FMT_HIGHBITDEPTH) != 0 {
+            s *= 2;
+        }
         s = (s + stride_align as u64 - 1) & !((stride_align as u64) - 1);
         if s > INT_MAX_U64 {
             break 'fail;
         }
-        stride_in_bytes = s as i32;
-        s = if (fmt & VPX_IMG_FMT_HIGHBITDEPTH) != 0 { s / 2 } else { s };
+        let stride_in_bytes: i32 = s as i32;
+        if (fmt & VPX_IMG_FMT_HIGHBITDEPTH) != 0 {
+            s /= 2;
+        }
 
         /* Allocate the new image */
         if img.is_null() {
@@ -187,8 +182,7 @@ unsafe fn img_alloc_helper(
         (*img).img_data = img_data;
 
         if img_data.is_null() {
-            let alloc_size: u64;
-            alloc_size = if (fmt & VPX_IMG_FMT_PLANAR) != 0 {
+            let alloc_size: u64 = if (fmt & VPX_IMG_FMT_PLANAR) != 0 {
                 (h as u64) * s * (bps as u64) / 8
             } else {
                 (h as u64) * s

@@ -11,7 +11,8 @@
 //!   across the program's lifetime, thread-safely. Rust's
 //!   [`std::sync::Once`] is the exact semantic match.
 
-use std::sync::Once;
+use std::collections::HashMap;
+use std::sync::{Mutex, Once, OnceLock};
 
 /// `vpx_clear_system_state()` — no-op on non-x86/MMX builds. RFC 6386
 /// is silent; this is purely an `emms`-style FPU reset for SIMD paths.
@@ -34,17 +35,13 @@ pub fn vpx_clear_system_state() {}
 ///
 /// Safety: `func` must be safe to call from any thread.
 pub unsafe fn once(func: unsafe fn()) {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
-
     static GUARDS: OnceLock<Mutex<HashMap<usize, &'static Once>>> = OnceLock::new();
     let map = GUARDS.get_or_init(|| Mutex::new(HashMap::new()));
 
     let key = func as usize;
     let once_ref: &'static Once = {
         let mut guard = map.lock().unwrap();
-        *guard.entry(key).or_insert_with(|| Box::leak(Box::new(Once::new())))
+        guard.entry(key).or_insert_with(|| Box::leak(Box::new(Once::new())))
     };
 
     once_ref.call_once(|| func());

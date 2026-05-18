@@ -234,11 +234,9 @@ pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macrobloc
     let fc = &(*dx).common.fc as *const FrameContext;
     let eobs: *mut i8 = (*x).eobs.as_mut_ptr();
 
-    let mut i: i32;
     let mut nonzeros: i32;
     let mut eobtotal: i32 = 0;
 
-    let mut qcoeff_ptr: *mut i16;
     let mut coef_probs: ProbaArray;
     let mut a_ctx: *mut EntropyContext = (*x).above_context as *mut EntropyContext;
     let mut l_ctx: *mut EntropyContext = (*x).left_context as *mut EntropyContext;
@@ -246,7 +244,7 @@ pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macrobloc
     let mut l: *mut EntropyContext;
     let skip_dc: i32;
 
-    qcoeff_ptr = (*x).qcoeff.as_mut_ptr();
+    let mut qcoeff_ptr: *mut i16 = (*x).qcoeff.as_mut_ptr();
 
     if !(*(*x).mode_info_context).mbmi.is_4x4 {
         a = a_ctx.offset(8);
@@ -274,8 +272,7 @@ pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macrobloc
         skip_dc = 0;
     }
 
-    i = 0;
-    while i < 16 {
+    for i in 0..16i32 {
         a = a_ctx.offset((i & 3) as isize);
         l = l_ctx.offset(((i & 0xc) >> 2) as isize);
 
@@ -287,15 +284,13 @@ pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macrobloc
         *eobs.offset(i as isize) = nonzeros as i8;
         eobtotal += nonzeros;
         qcoeff_ptr = qcoeff_ptr.offset(16);
-        i += 1;
     }
 
     coef_probs = (*fc).coef_probs[2].as_ptr() as ProbaArray;
 
     a_ctx = a_ctx.offset(4);
     l_ctx = l_ctx.offset(4);
-    i = 16;
-    while i < 24 {
+    for i in 16..24i32 {
         a = a_ctx.offset((((i > 19) as i32) << 1) as isize + (i & 1) as isize);
         l = l_ctx.offset((((i > 19) as i32) << 1) as isize + ((i & 3) > 1) as isize);
 
@@ -306,7 +301,6 @@ pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macrobloc
         *eobs.offset(i as isize) = nonzeros as i8;
         eobtotal += nonzeros;
         qcoeff_ptr = qcoeff_ptr.offset(16);
-        i += 1;
     }
 
     eobtotal

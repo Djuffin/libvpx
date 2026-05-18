@@ -36,12 +36,9 @@ use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buf
 ///
 /// Source: `vp8/common/alloccommon.c:22`.
 pub unsafe fn vp8_de_alloc_frame_buffers(oci: *mut Vp8Common) {
-    let mut i: i32;
-    i = 0;
-    while i < NUM_YV12_BUFFERS as i32 {
-        vp8_yv12_de_alloc_frame_buffer(&mut (*oci).yv12_fb[i as usize]);
-        (*oci).fb_idx_ref_cnt[i as usize] = 0;
-        i += 1;
+    for i in 0..NUM_YV12_BUFFERS {
+        vp8_yv12_de_alloc_frame_buffer(&mut (*oci).yv12_fb[i]);
+        (*oci).fb_idx_ref_cnt[i] = 0;
     }
 
     vp8_yv12_de_alloc_frame_buffer(&mut (*oci).temp_scale_frame);
@@ -70,8 +67,6 @@ pub unsafe fn vp8_alloc_frame_buffers(
     mut width: i32,
     mut height: i32,
 ) -> i32 {
-    let mut i: i32;
-
     vp8_de_alloc_frame_buffers(oci);
 
     /* our internal buffers are always multiples of 16 */
@@ -83,10 +78,9 @@ pub unsafe fn vp8_alloc_frame_buffers(
         height += 16 - (height & 0xf);
     }
 
-    i = 0;
-    while i < NUM_YV12_BUFFERS as i32 {
+    for i in 0..NUM_YV12_BUFFERS {
         if vp8_yv12_alloc_frame_buffer(
-            &mut (*oci).yv12_fb[i as usize],
+            &mut (*oci).yv12_fb[i],
             width,
             height,
             VP8_BORDER_IN_PIXELS,
@@ -96,7 +90,6 @@ pub unsafe fn vp8_alloc_frame_buffers(
             vp8_de_alloc_frame_buffers(oci);
             return 1;
         }
-        i += 1;
     }
 
     (*oci).new_fb_idx = 0;

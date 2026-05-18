@@ -33,16 +33,6 @@ pub const VERSION_STRING_NOSP: &[u8] = b"v1.15.0\0";
 /// `VERSION_EXTRA` from `vpx_version.h`.
 pub const VERSION_EXTRA: &[u8] = b"\0";
 
-/// Stash `var` into `ctx.err` (if `ctx` is `Some`) and return it.
-/// Rust spelling of libvpx's `SAVE_STATUS` macro.
-#[inline]
-fn SAVE_STATUS(ctx: Option<&mut VpxCodecCtx>, var: VpxCodecErr) -> VpxCodecErr {
-    if let Some(c) = ctx {
-        c.err = var;
-    }
-    var
-}
-
 pub fn vpx_codec_version() -> c_int {
     VERSION_PACKED
 }
@@ -58,10 +48,10 @@ pub fn vpx_codec_version_extra_str() -> *const core::ffi::c_char {
 pub fn vpx_codec_iface_name(
     iface: Option<&VpxCodecIface>,
 ) -> *const core::ffi::c_char {
-    match iface {
-        Some(i) => i.name,
-        None => b"<invalid interface>\0".as_ptr() as *const core::ffi::c_char,
-    }
+    iface.map_or(
+        b"<invalid interface>\0".as_ptr() as *const core::ffi::c_char,
+        |i| i.name,
+    )
 }
 
 pub fn vpx_codec_err_to_string(err: VpxCodecErr) -> *const core::ffi::c_char {
@@ -85,10 +75,7 @@ pub fn vpx_codec_err_to_string(err: VpxCodecErr) -> *const core::ffi::c_char {
 pub fn vpx_codec_error(
     ctx: Option<&VpxCodecCtx>,
 ) -> *const core::ffi::c_char {
-    match ctx {
-        Some(c) => vpx_codec_err_to_string(c.err),
-        None => vpx_codec_err_to_string(VPX_CODEC_INVALID_PARAM),
-    }
+    vpx_codec_err_to_string(ctx.map_or(VPX_CODEC_INVALID_PARAM, |c| c.err))
 }
 
 pub unsafe fn vpx_codec_error_detail(
@@ -126,7 +113,7 @@ pub fn vpx_codec_destroy(ctx: Option<&mut VpxCodecCtx>) -> VpxCodecErr {
 }
 
 pub fn vpx_codec_get_caps(iface: Option<&VpxCodecIface>) -> VpxCodecCaps {
-    iface.map(|i| i.caps).unwrap_or(0)
+    iface.map_or(0, |i| i.caps)
 }
 
 /// `vpx_codec_control_`. Accepts the C-style `(ctrl_id, ap)` pair,
@@ -139,64 +126,61 @@ pub unsafe fn vpx_codec_control_(
 ) -> VpxCodecErr {
     let Some(c) = ctx else { return VPX_CODEC_INVALID_PARAM };
 
-    if ctrl_id == 0 {
-        c.err = VPX_CODEC_INVALID_PARAM;
-        return VPX_CODEC_INVALID_PARAM;
-    }
-    if c.iface.is_none() || c.trait_obj.is_none() {
-        c.err = VPX_CODEC_ERROR;
-        return VPX_CODEC_ERROR;
-    }
+    let res = if ctrl_id == 0 {
+        VPX_CODEC_INVALID_PARAM
+    } else if c.iface.is_none() || c.trait_obj.is_none() {
+        VPX_CODEC_ERROR
+    } else {
+        // Build the typed ControlCmd from the legacy (ctrl_id, ap) pair.
+        // Ap is null-checked per-arm; the SET_DECRYPTOR arm accepts null
+        // (means "clear").
+        let cmd: Result<ControlCmd<'_>, VpxCodecErr> = match ctrl_id {
+            VP8_SET_REFERENCE if !ap.is_null() => {
+                Ok(ControlCmd::SetReference(&*(ap as *const VpxRefFrame)))
+            }
+            VP8_COPY_REFERENCE if !ap.is_null() => {
+                Ok(ControlCmd::CopyReference(&mut *(ap as *mut VpxRefFrame)))
+            }
+            VP8_SET_POSTPROC if !ap.is_null() => {
+                Ok(ControlCmd::SetPostproc(*(ap as *const Vp8PostprocCfg)))
+            }
+            VP8D_GET_LAST_REF_UPDATES if !ap.is_null() => {
+                Ok(ControlCmd::GetLastRefUpdates(&mut *(ap as *mut i32)))
+            }
+            VP8D_GET_FRAME_CORRUPTED if !ap.is_null() => {
+                Ok(ControlCmd::GetFrameCorrupted(&mut *(ap as *mut i32)))
+            }
+            VP8D_GET_LAST_REF_USED if !ap.is_null() => {
+                Ok(ControlCmd::GetLastRefUsed(&mut *(ap as *mut i32)))
+            }
+            VPXD_GET_LAST_QUANTIZER if !ap.is_null() => {
+                Ok(ControlCmd::GetLastQuantizer(&mut *(ap as *mut i32)))
+            }
+            VPXD_SET_DECRYPTOR => {
+                let init = if ap.is_null() {
+                    None
+                } else {
+                    Some(&*(ap as *const VpxDecryptInit))
+                };
+                Ok(ControlCmd::SetDecryptor(init))
+            }
+            VP8_SET_REFERENCE
+            | VP8_COPY_REFERENCE
+            | VP8_SET_POSTPROC
+            | VP8D_GET_LAST_REF_UPDATES
+            | VP8D_GET_FRAME_CORRUPTED
+            | VP8D_GET_LAST_REF_USED
+            | VPXD_GET_LAST_QUANTIZER => Err(VPX_CODEC_INVALID_PARAM),
+            _ => Err(VPX_CODEC_INCAPABLE),
+        };
 
-    // Build the typed ControlCmd from the legacy (ctrl_id, ap) pair.
-    // Ap is null-checked per-arm; the SET_DECRYPTOR arm accepts null
-    // (means "clear").
-    let cmd: Result<ControlCmd<'_>, VpxCodecErr> = match ctrl_id {
-        VP8_SET_REFERENCE if !ap.is_null() => {
-            Ok(ControlCmd::SetReference(&*(ap as *const VpxRefFrame)))
-        }
-        VP8_COPY_REFERENCE if !ap.is_null() => {
-            Ok(ControlCmd::CopyReference(&mut *(ap as *mut VpxRefFrame)))
-        }
-        VP8_SET_POSTPROC if !ap.is_null() => {
-            Ok(ControlCmd::SetPostproc(*(ap as *const Vp8PostprocCfg)))
-        }
-        VP8D_GET_LAST_REF_UPDATES if !ap.is_null() => {
-            Ok(ControlCmd::GetLastRefUpdates(&mut *(ap as *mut i32)))
-        }
-        VP8D_GET_FRAME_CORRUPTED if !ap.is_null() => {
-            Ok(ControlCmd::GetFrameCorrupted(&mut *(ap as *mut i32)))
-        }
-        VP8D_GET_LAST_REF_USED if !ap.is_null() => {
-            Ok(ControlCmd::GetLastRefUsed(&mut *(ap as *mut i32)))
-        }
-        VPXD_GET_LAST_QUANTIZER if !ap.is_null() => {
-            Ok(ControlCmd::GetLastQuantizer(&mut *(ap as *mut i32)))
-        }
-        VPXD_SET_DECRYPTOR => {
-            let init = if ap.is_null() {
-                None
-            } else {
-                Some(&*(ap as *const VpxDecryptInit))
-            };
-            Ok(ControlCmd::SetDecryptor(init))
-        }
-        VP8_SET_REFERENCE
-        | VP8_COPY_REFERENCE
-        | VP8_SET_POSTPROC
-        | VP8D_GET_LAST_REF_UPDATES
-        | VP8D_GET_FRAME_CORRUPTED
-        | VP8D_GET_LAST_REF_USED
-        | VPXD_GET_LAST_QUANTIZER => Err(VPX_CODEC_INVALID_PARAM),
-        _ => Err(VPX_CODEC_INCAPABLE),
-    };
-
-    let res = match cmd {
-        Ok(cmd) => match c.trait_obj.as_mut().unwrap().control(cmd) {
-            Ok(()) => VPX_CODEC_OK,
+        match cmd {
+            Ok(cmd) => match c.trait_obj.as_mut().unwrap().control(cmd) {
+                Ok(()) => VPX_CODEC_OK,
+                Err(e) => e,
+            },
             Err(e) => e,
-        },
-        Err(e) => e,
+        }
     };
     c.err = res;
     res

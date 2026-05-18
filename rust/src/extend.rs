@@ -23,29 +23,23 @@ pub unsafe fn vp8_extend_mb_row(
     mut u_ptr: *mut u8,
     mut v_ptr: *mut u8,
 ) {
-    unsafe {
-        y_ptr = y_ptr.offset(((*ybf).y_stride * 14) as isize);
-        u_ptr = u_ptr.offset(((*ybf).uv_stride * 6) as isize);
-        v_ptr = v_ptr.offset(((*ybf).uv_stride * 6) as isize);
+    y_ptr = y_ptr.offset(((*ybf).y_stride * 14) as isize);
+    u_ptr = u_ptr.offset(((*ybf).uv_stride * 6) as isize);
+    v_ptr = v_ptr.offset(((*ybf).uv_stride * 6) as isize);
 
-        let mut i = 0;
-        while i < 4 {
-            *y_ptr.offset(i as isize) = *y_ptr.offset(-1);
-            *u_ptr.offset(i as isize) = *u_ptr.offset(-1);
-            *v_ptr.offset(i as isize) = *v_ptr.offset(-1);
-            i += 1;
-        }
+    for i in 0..4 {
+        *y_ptr.offset(i) = *y_ptr.offset(-1);
+        *u_ptr.offset(i) = *u_ptr.offset(-1);
+        *v_ptr.offset(i) = *v_ptr.offset(-1);
+    }
 
-        y_ptr = y_ptr.offset((*ybf).y_stride as isize);
-        u_ptr = u_ptr.offset((*ybf).uv_stride as isize);
-        v_ptr = v_ptr.offset((*ybf).uv_stride as isize);
+    y_ptr = y_ptr.offset((*ybf).y_stride as isize);
+    u_ptr = u_ptr.offset((*ybf).uv_stride as isize);
+    v_ptr = v_ptr.offset((*ybf).uv_stride as isize);
 
-        let mut i = 0;
-        while i < 4 {
-            *y_ptr.offset(i as isize) = *y_ptr.offset(-1);
-            *u_ptr.offset(i as isize) = *u_ptr.offset(-1);
-            *v_ptr.offset(i as isize) = *v_ptr.offset(-1);
-            i += 1;
-        }
+    for i in 0..4 {
+        *y_ptr.offset(i) = *y_ptr.offset(-1);
+        *u_ptr.offset(i) = *u_ptr.offset(-1);
+        *v_ptr.offset(i) = *v_ptr.offset(-1);
     }
 }

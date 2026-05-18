@@ -6,10 +6,6 @@
 //! `VPX_CODEC_INCAPABLE`. A real `Encoder` surface lives at
 //! `crate::codec::Encoder`.
 
-#![allow(dead_code)]
-#![allow(non_snake_case)]
-#![allow(non_camel_case_types)]
-#![allow(unused_variables)]
 #![allow(clippy::missing_safety_doc)]
 
 use core::ffi::{c_int, c_ulong};

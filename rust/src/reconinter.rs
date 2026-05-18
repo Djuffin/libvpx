@@ -92,13 +92,11 @@ pub unsafe fn vp8_copy_mem16x16_c(
     mut dst: *mut u8,
     dst_stride: i32,
 ) {
-    let mut r: i32 = 0;
-    while r < 16 {
+    for _ in 0..16 {
         core::ptr::copy_nonoverlapping(src, dst, 16);
 
         src = src.offset(src_stride as isize);
         dst = dst.offset(dst_stride as isize);
-        r += 1;
     }
 }
 
@@ -112,13 +110,11 @@ pub unsafe fn vp8_copy_mem8x8_c(
     mut dst: *mut u8,
     dst_stride: i32,
 ) {
-    let mut r: i32 = 0;
-    while r < 8 {
+    for _ in 0..8 {
         core::ptr::copy_nonoverlapping(src, dst, 8);
 
         src = src.offset(src_stride as isize);
         dst = dst.offset(dst_stride as isize);
-        r += 1;
     }
 }
 
@@ -132,13 +128,11 @@ pub unsafe fn vp8_copy_mem8x4_c(
     mut dst: *mut u8,
     dst_stride: i32,
 ) {
-    let mut r: i32 = 0;
-    while r < 4 {
+    for _ in 0..4 {
         core::ptr::copy_nonoverlapping(src, dst, 8);
 
         src = src.offset(src_stride as isize);
         dst = dst.offset(dst_stride as isize);
-        r += 1;
     }
 }
 
@@ -674,13 +668,8 @@ unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
 ///
 /// Source: `vp8/common/reconinter.c:456`.
 unsafe fn build_4x4uvmvs(x: *mut Macroblockd) {
-    let mut i: i32;
-    let mut j: i32;
-
-    i = 0;
-    while i < 2 {
-        j = 0;
-        while j < 2 {
+    for i in 0..2i32 {
+        for j in 0..2i32 {
             let yoffset: i32 = i * 8 + j * 2;
             let uoffset: i32 = 16 + i * 2 + j;
             let voffset: i32 = 20 + i * 2 + j;
@@ -717,10 +706,7 @@ unsafe fn build_4x4uvmvs(x: *mut Macroblockd) {
 
             let u_mv = bmi_mv(&(*x).block[uoffset as usize].bmi);
             (*x).block[voffset as usize].bmi = BModeInfo::Mv(u_mv);
-
-            j += 1;
         }
-        i += 1;
     }
 }
 

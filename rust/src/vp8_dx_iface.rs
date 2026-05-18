@@ -183,7 +183,7 @@ unsafe fn vp8_peek_si_internal(
         let mut clear_buffer: [u8; 10] = [0; 10];
         let mut clear: *const u8 = data;
         if let Some(cb) = decrypt {
-            let n = vpx_min(clear_buffer.len() as usize, data_sz as usize);
+            let n = vpx_min(clear_buffer.len(), data_sz as usize);
             let src = core::slice::from_raw_parts(data, n);
             cb(src, &mut clear_buffer[..n]);
             clear = clear_buffer.as_ptr();
@@ -229,13 +229,11 @@ pub unsafe fn vp8_get_si(
     ctx: &Vp8AlgPriv<'static>,
     si: *mut VpxCodecStreamInfo,
 ) -> VpxCodecErr {
-    let sz: u32;
-
-    if (*si).sz as usize >= core::mem::size_of::<Vp8StreamInfo>() {
-        sz = core::mem::size_of::<Vp8StreamInfo>() as u32;
+    let sz: u32 = if (*si).sz as usize >= core::mem::size_of::<Vp8StreamInfo>() {
+        core::mem::size_of::<Vp8StreamInfo>() as u32
     } else {
-        sz = core::mem::size_of::<VpxCodecStreamInfo>() as u32;
-    }
+        core::mem::size_of::<VpxCodecStreamInfo>() as u32
+    };
 
     ptr::copy_nonoverlapping(
         &ctx.si as *const Vp8StreamInfo as *const u8,
@@ -473,14 +471,11 @@ pub unsafe fn vp8_decode(
         if resolution_change != 0 {
             (*pc).width = (*ctx).si.w as i32;
             (*pc).height = (*ctx).si.h as i32;
-            match vp8_decode_resolution_change(pbi, w, h) {
-                Ok(()) => {}
-                Err(_) => {
-                    res = update_error_state(ctx, &(*pbi).common.error);
-                    (*ctx).fragments.count = 0;
-                    (*ctx).decrypt = (*pbi).decrypt.take();
-                    return res;
-                }
+            if vp8_decode_resolution_change(pbi, w, h).is_err() {
+                res = update_error_state(ctx, &(*pbi).common.error);
+                (*ctx).fragments.count = 0;
+                (*ctx).decrypt = (*pbi).decrypt.take();
+                return res;
             }
 
             // required to get past the first get_free_fb() call
@@ -490,7 +485,7 @@ pub unsafe fn vp8_decode(
         // update the pbi fragment data
         (*pbi).fragments = (*ctx).fragments;
         (*ctx).user_priv = user_priv;
-        if let Err(_) = vp8dx_receive_compressed_data(pbi) {
+        if vp8dx_receive_compressed_data(pbi).is_err() {
             (*pc).yv12_fb[(*pc).lst_fb_idx as usize].corrupted = 1;
             if (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] > 0 {
                 (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] -= 1;
@@ -570,7 +565,6 @@ pub unsafe fn vp8_get_frame(
     if (*iter).is_null() && !(*ctx).yv12_frame_buffers.pbi[0].is_null() {
         let mut sd: Yv12BufferConfig = core::mem::zeroed();
         let mut flags: Vp8PpFlags = Vp8PpFlags::default();
-        vp8_zero(&mut flags);
 
         if ((*ctx).base.init_flags & VPX_CODEC_USE_POSTPROC) != 0 {
             flags.post_proc_flag = (*ctx).postproc_cfg.post_proc_flag;
