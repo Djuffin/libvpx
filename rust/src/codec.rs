@@ -6,7 +6,6 @@
 
 use core::time::Duration;
 
-use crate::vpx_api::{VpxCodecErr, VpxCodecStreamInfo, VpxImage};
 
 // Re-exports under idiomatic short names.
 pub use crate::vpx_api::VpxCodecErr as Error;

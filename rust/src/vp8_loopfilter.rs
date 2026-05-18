@@ -19,7 +19,7 @@
 use core::ptr;
 
 use crate::types::{
-    FrameType, LoopFilterInfo, LoopFilterInfoN, LoopFilterType, Macroblockd,
+    FrameType, LoopFilterInfo, LoopFilterInfoN, Macroblockd,
     MbPredictionMode, ModeInfo, Vp8Common, INTRA_FRAME, MAX_LOOP_FILTER,
     MAX_MB_SEGMENTS, MAX_REF_FRAMES, SIMD_WIDTH,
 };
@@ -34,9 +34,6 @@ const SEGMENT_ABSDATA: u8 = 1;
 /// `MB_LVL_ALT_LF` — index into `segment_feature_data` for the alt-LF
 /// feature. Matches the `MbLevelFeature::AltLf` discriminant.
 const MB_LVL_ALT_LF: usize = 1;
-
-/// `PARTIAL_FRAME_FRACTION` (`vp8/common/loopfilter.h:25`).
-const PARTIAL_FRAME_FRACTION: i32 = 8;
 
 // ---------------------------------------------------------------------------
 // extern dependencies (translated in other modules).
@@ -194,10 +191,9 @@ pub unsafe fn vp8_loop_filter_update_sharpness(
         i = 0;
         while i <= MAX_LOOP_FILTER as i32 {
             let filt_lvl: i32 = i;
-            let mut block_inside_limit: i32 = 0;
 
             /* Set loop filter paramaeters that control sharpness. */
-            block_inside_limit = filt_lvl >> ((sharpness_lvl > 0) as i32);
+            let mut block_inside_limit: i32 = filt_lvl >> ((sharpness_lvl > 0) as i32);
             block_inside_limit = block_inside_limit >> ((sharpness_lvl > 4) as i32);
 
             if sharpness_lvl > 0 {

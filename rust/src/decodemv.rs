@@ -26,7 +26,7 @@ use crate::tables::{
     VP8_YMODE_TREE,
 };
 use crate::types::{
-    BModeInfo, BPredictionMode, BoolDecoder, FrameType, Macroblockd, MbModeInfo,
+    BModeInfo, BPredictionMode, FrameType, Macroblockd, MbModeInfo,
     MbPredictionMode, ModeInfo, Mv, MvReferenceFrame, Vp8Reader, Vp8dComp,
 };
 
@@ -50,7 +50,6 @@ const LEFT_TOP_MARGIN: i32 = 16 << 3;
 /// `RIGHT_BOTTOM_MARGIN` (findnearmv.h:33).
 const RIGHT_BOTTOM_MARGIN: i32 = 16 << 3;
 
-use crate::dboolhuff::vp8dx_bool_error;
 
 // ===========================================================================
 // `treereader.h` wrappers — re-exported from `treereader.rs`.

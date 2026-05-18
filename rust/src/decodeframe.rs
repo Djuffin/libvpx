@@ -23,7 +23,7 @@ use crate::tables::{
     VP8_COEF_UPDATE_PROBS, VP8_DEFAULT_MV_CONTEXT, VP8_MB_FEATURE_DATA_BITS,
 };
 use crate::types::{
-    Blockd, BoolDecoder, ClampType, EntropyContextPlanes, FrameType, LoopFilterType, Macroblockd,
+    Blockd, ClampType, EntropyContextPlanes, FrameType, LoopFilterType, Macroblockd,
     MbLevelFeature, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame, TokenPartition,
     Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig, MAX_MB_SEGMENTS, MAX_MODE_LF_DELTAS,
     MAX_REF_FRAMES, MAX_REF_LF_DELTAS, MB_FEATURE_TREE_PROBS, MB_LVL_MAX,
@@ -1101,7 +1101,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     let mut data: *const u8 = (*pbi).fragments.ptrs[0];
     let data_sz: c_uint = (*pbi).fragments.sizes[0];
     let data_end: *const u8 = data.offset(data_sz as isize);
-    let mut first_partition_length_in_bytes: c_int;
+    let first_partition_length_in_bytes: c_int;
 
     let mut i: c_int;
     let mut j: c_int;

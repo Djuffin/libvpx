@@ -1,3 +1,4 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 //! Port of `test/test_vector_test.cc` to Rust integration tests.
 //!
 //! Iterates the 62 VP8 conformance vectors, decodes every frame through

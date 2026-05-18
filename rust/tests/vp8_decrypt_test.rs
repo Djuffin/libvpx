@@ -56,12 +56,14 @@ unsafe extern "C" fn test_decrypt_cb(
     output: *mut u8,
     count: i32,
 ) {
-    let base = decrypt_state as *const u8;
-    let offset = input.offset_from(base) as usize;
-    let n = count as usize;
-    let in_slice = core::slice::from_raw_parts(input, n);
-    let out_slice = core::slice::from_raw_parts_mut(output, n);
-    encrypt_buffer(in_slice, out_slice, offset);
+    unsafe {
+        let base = decrypt_state as *const u8;
+        let offset = input.offset_from(base) as usize;
+        let n = count as usize;
+        let in_slice = core::slice::from_raw_parts(input, n);
+        let out_slice = core::slice::from_raw_parts_mut(output, n);
+        encrypt_buffer(in_slice, out_slice, offset);
+    }
 }
 
 /// Minimal IVF reader (one helper at a time — easier than sharing a

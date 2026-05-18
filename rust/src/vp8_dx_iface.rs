@@ -11,10 +11,10 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
-use core::ffi::{c_char, c_uint, c_void};
+use core::ffi::{c_char, c_void};
 use core::ptr;
 
-use crate::types::{FragmentData, FrameBuffers, Vp8dConfig, Vp8dComp, Vp8PpFlags, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, MAX_FB_MT_DEC, VP8_BORDER_IN_PIXELS};
+use crate::types::{FragmentData, FrameBuffers, Vp8dConfig, Vp8dComp, Vp8PpFlags, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, VP8_BORDER_IN_PIXELS};
 use crate::vpx_api::*;
 use crate::vpx_codec::vpx_internal_error;
 use crate::onyxd_if::{
@@ -129,7 +129,6 @@ use crate::rtcd::vp8_rtcd;
 use crate::vpx_dsp_rtcd::vpx_dsp_rtcd;
 use crate::vpx_scale_rtcd::vpx_scale_rtcd;
 
-use crate::vpx_ports::vpx_clear_system_state;
 
 use crate::types::{
     ALTREF_FRAME, GOLDEN_FRAME, LAST_FRAME, VP8_ALTR_FRAME, VP8_GOLD_FRAME,
@@ -393,7 +392,6 @@ pub unsafe fn vp8_decode(
     if update_fragments(ctx, data, data_sz, &mut res_local) <= 0 {
         return res_local;
     }
-    res = res_local;
 
     // Determine the stream parameters. Note that we rely on peek_si to
     // validate that we have a buffer that does not wrap around the top

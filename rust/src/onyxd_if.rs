@@ -24,8 +24,8 @@ use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{
-    FragmentData, FrameBuffers, MbModeInfo, ModeInfo, MvReferenceFrame, Vp8Common,
-    Vp8dComp, Vp8dConfig, Vp8PpFlags, VpxResult, Yv12BufferConfig, MAX_FB_MT_DEC, NUM_YV12_BUFFERS,
+    FragmentData, FrameBuffers, MbModeInfo, ModeInfo, Vp8Common,
+    Vp8dComp, Vp8dConfig, Vp8PpFlags, VpxResult, Yv12BufferConfig, NUM_YV12_BUFFERS,
 };
 
 // ===========================================================================
@@ -35,7 +35,7 @@ use crate::types::{
 /// `vpx_codec_err_t` — public libvpx error code (`vpx/vpx_codec.h`). Only
 /// the two values produced by this file are spelled out; the rest are
 /// passed through opaquely.
-use crate::vpx_api::{VpxCodecErr, VPX_CODEC_ERROR, VPX_CODEC_OK};
+use crate::vpx_api::{VPX_CODEC_ERROR, VPX_CODEC_OK};
 
 use crate::types::{
     ALTREF_FRAME, GOLDEN_FRAME, INTRA_FRAME, LAST_FRAME, VP8_ALTR_FRAME,

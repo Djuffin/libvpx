@@ -12,7 +12,7 @@
 #![allow(unused_variables)]
 #![allow(clippy::missing_safety_doc)]
 
-use core::ffi::{c_int, c_ulong, c_void};
+use core::ffi::{c_int, c_ulong};
 use core::ptr;
 
 use crate::vpx_api::*;

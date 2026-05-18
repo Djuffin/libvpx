@@ -16,7 +16,7 @@ use core::ptr;
 
 use crate::types::{
     ClampType, EntropyContextPlanes, LoopFilterType, ModeInfo, TokenPartition,
-    Vp8Common, Yv12BufferConfig, MAX_REF_FRAMES, NUM_YV12_BUFFERS, VP8_BORDER_IN_PIXELS,
+    Vp8Common, MAX_REF_FRAMES, NUM_YV12_BUFFERS, VP8_BORDER_IN_PIXELS,
 };
 
 // ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ use crate::types::{
 
 use crate::entropymode::{vp8_default_bmode_probs, vp8_init_mbmode_probs};
 use crate::systemdependent::vp8_machine_specific_config;
-use crate::vpx_mem::{vpx_calloc, vpx_free, vpx_memalign};
+use crate::vpx_mem::{vpx_calloc, vpx_free};
 use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buffer};
 
 // ---------------------------------------------------------------------------

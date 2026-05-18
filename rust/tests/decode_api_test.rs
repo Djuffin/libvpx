@@ -1,3 +1,4 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 //! Port of `test/decode_api_test.cc` (gtest) to Rust integration tests.
 //!
 //! VP9-specific cases are dropped (no VP9 in this crate). The remaining

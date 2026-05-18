@@ -1,3 +1,4 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 //! Port of `test/invalid_file_test.cc` to Rust integration tests.
 //!
 //! For each corrupt VP8 IVF, decode every frame and verify the returned

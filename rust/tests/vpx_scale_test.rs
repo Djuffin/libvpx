@@ -1,3 +1,4 @@
+#![allow(unsafe_op_in_unsafe_fn)]
 //! Port of `test/vpx_scale_test.cc` + `test/vpx_scale_test.h` to Rust
 //! integration tests.
 //!

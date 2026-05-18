@@ -8,12 +8,6 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_assignments)]
-#![allow(unused_mut)]
-#![allow(unused_unsafe)]
 #![allow(static_mut_refs)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
