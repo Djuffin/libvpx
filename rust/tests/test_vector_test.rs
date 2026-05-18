@@ -22,7 +22,7 @@ use md5::{Digest, Md5};
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
 use vp8_decoder_rs::vpx_api::{
     vpx_codec_ctx_t, vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy,
-    vpx_codec_get_frame, vpx_codec_iface_t, vpx_image_t, VPX_CODEC_OK,
+    vpx_codec_get_frame, vpx_image_t, VPX_CODEC_OK,
     VPX_DECODER_ABI_VERSION, VPX_IMG_FMT_HIGHBITDEPTH,
 };
 
@@ -175,17 +175,17 @@ fn read_md5_lines(path: &PathBuf) -> Vec<String> {
 // ---------------------------------------------------------------------
 
 unsafe fn init_dec() -> vpx_codec_ctx_t {
-    let iface = vpx_codec_vp8_dx() as *mut vpx_codec_iface_t;
-    let mut dec_uninit = MaybeUninit::<vpx_codec_ctx_t>::uninit();
+    let iface = vpx_codec_vp8_dx();
+    let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
     let init_res = vpx_codec_dec_init_ver(
-        dec_uninit.as_mut_ptr(),
-        iface,
-        ptr::null(),
+        Some(dec.assume_init_mut()),
+        Some(iface),
+        None,
         0,
         VPX_DECODER_ABI_VERSION,
     );
     assert_eq!(init_res, VPX_CODEC_OK, "dec_init failed");
-    dec_uninit.assume_init()
+    dec.assume_init()
 }
 
 /// Decode at most `max_packets` IVF packets from `name`, asserting
@@ -210,27 +210,24 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
         if matches!(max_packets, Some(limit) if packets_decoded >= limit) {
             break;
         }
-        let res = vpx_codec_decode(
-            &mut dec,
-            packet.as_ptr(),
-            packet.len() as u32,
-            ptr::null_mut(),
-            0,
-        );
+        let res = vpx_codec_decode(Some(&mut dec), &packet, ptr::null_mut(), 0);
         assert_eq!(res, VPX_CODEC_OK,
             "vpx_codec_decode failed on {name} packet {packets_decoded}");
         packets_decoded += 1;
 
         let mut iter: *const core::ffi::c_void = ptr::null();
-        let mut img = vpx_codec_get_frame(&mut dec, &mut iter);
-        while !img.is_null() {
-            assert!(frame_no < expected.len(),
-                "{name}: more decoded frames than md5 lines");
-            let got = md5_of_image(&*img);
-            assert_eq!(got, expected[frame_no],
-                "{name}: md5 mismatch at frame {frame_no}");
-            frame_no += 1;
-            img = vpx_codec_get_frame(&mut dec, &mut iter);
+        loop {
+            match vpx_codec_get_frame(Some(&mut dec), &mut iter) {
+                Some(img) => {
+                    assert!(frame_no < expected.len(),
+                        "{name}: more decoded frames than md5 lines");
+                    let got = md5_of_image(img);
+                    assert_eq!(got, expected[frame_no],
+                        "{name}: md5 mismatch at frame {frame_no}");
+                    frame_no += 1;
+                }
+                None => break,
+            }
         }
     }
 
@@ -239,7 +236,7 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
             "{name}: decoded {frame_no} frames, md5 file has {}", expected.len());
     }
 
-    assert_eq!(vpx_codec_destroy(&mut dec), VPX_CODEC_OK);
+    assert_eq!(vpx_codec_destroy(Some(&mut dec)), VPX_CODEC_OK);
 }
 
 /// Generates one `#[test] fn keyframe_NNN()` per VP8 conformance vector.

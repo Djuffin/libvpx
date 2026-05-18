@@ -629,9 +629,9 @@ pub static mut VPX_CODEC_VP8_DX_ALGO: VpxCodecIface = VpxCodecIface {
         | VPX_CODEC_CAP_INPUT_FRAGMENTS,
 };
 
-/// VP8 decoder iface descriptor pointer.
-pub unsafe fn vpx_codec_vp8_dx() -> *mut VpxCodecIface {
-    &raw mut VPX_CODEC_VP8_DX_ALGO
+/// VP8 decoder iface descriptor.
+pub fn vpx_codec_vp8_dx() -> &'static VpxCodecIface {
+    unsafe { &*ptr::addr_of!(VPX_CODEC_VP8_DX_ALGO) }
 }
 
 // ===========================================================================
@@ -682,15 +682,6 @@ impl Vp8Decoder {
     /// Raw pointer into the underlying `Vp8AlgPriv`.
     pub fn as_ptr(&self) -> *mut Vp8AlgPriv<'static> {
         self.priv_
-    }
-
-    /// Stash a `user_priv` pointer that will be tagged onto the next
-    /// emitted `VpxImage`. Mirrors `vp8_decode`'s `user_priv` param,
-    /// which the trait API dropped.
-    pub unsafe fn set_user_priv(&mut self, user_priv: *mut c_void) {
-        if !self.priv_.is_null() {
-            (*self.priv_).user_priv = user_priv;
-        }
     }
 }
 

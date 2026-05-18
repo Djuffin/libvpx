@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
 use vp8_decoder_rs::vpx_api::{
     vpx_codec_ctx_t, vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy,
-    vpx_codec_iface_t, VpxCodecErr, VPX_CODEC_CORRUPT_FRAME, VPX_CODEC_OK,
+    VpxCodecErr, VPX_CODEC_CORRUPT_FRAME, VPX_CODEC_OK,
     VPX_DECODER_ABI_VERSION,
 };
 
@@ -89,13 +89,13 @@ unsafe fn run_invalid_file(name: &str) {
 
     let mut reader = IvfReader::open(&ivf_path).expect("open ivf");
 
-    let iface = vpx_codec_vp8_dx() as *mut vpx_codec_iface_t;
-    let mut dec_uninit = MaybeUninit::<vpx_codec_ctx_t>::uninit();
+    let iface = vpx_codec_vp8_dx();
+    let mut dec_uninit = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
     assert_eq!(
         vpx_codec_dec_init_ver(
-            dec_uninit.as_mut_ptr(),
-            iface,
-            ptr::null(),
+            Some(dec_uninit.assume_init_mut()),
+            Some(iface),
+            None,
             0,
             VPX_DECODER_ABI_VERSION,
         ),
@@ -110,13 +110,7 @@ unsafe fn run_invalid_file(name: &str) {
             frame_no < expected.len(),
             "{name}: more input frames than .res lines",
         );
-        let res = vpx_codec_decode(
-            &mut dec,
-            packet.as_ptr(),
-            packet.len() as u32,
-            ptr::null_mut(),
-            0,
-        );
+        let res = vpx_codec_decode(Some(&mut dec), &packet, ptr::null_mut(), 0);
         assert_eq!(
             res, expected[frame_no],
             "{name} frame {frame_no}: decoder returned {res:?}, .res expected {:?}",
@@ -131,7 +125,7 @@ unsafe fn run_invalid_file(name: &str) {
         expected.len(),
     );
 
-    assert_eq!(vpx_codec_destroy(&mut dec), VPX_CODEC_OK);
+    assert_eq!(vpx_codec_destroy(Some(&mut dec)), VPX_CODEC_OK);
 }
 
 // `InvalidFileTest` — C: `kVP8InvalidFileTests`.

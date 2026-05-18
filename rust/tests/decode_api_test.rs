@@ -3,82 +3,65 @@
 //! tests. VP9-specific cases are dropped (no VP9 in this crate).
 
 use core::mem::MaybeUninit;
-use core::ptr;
 
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
 use vp8_decoder_rs::vpx_api::{
     vpx_codec_ctx_t, vpx_codec_dec_cfg_t, vpx_codec_dec_init_ver, vpx_codec_decode,
     vpx_codec_destroy, vpx_codec_error, vpx_codec_error_detail, vpx_codec_get_caps,
-    vpx_codec_iface_t, VpxCodecCaps, VpxCodecErr, VpxCodecFlags, VPX_CODEC_CAP_HIGHBITDEPTH,
+    VpxCodecErr, VpxCodecFlags, VPX_CODEC_CAP_HIGHBITDEPTH,
     VPX_CODEC_INCAPABLE, VPX_CODEC_INVALID_PARAM, VPX_CODEC_OK, VPX_CODEC_UNSUP_BITSTREAM,
     VPX_CODEC_USE_ERROR_CONCEALMENT, VPX_CODEC_USE_INPUT_FRAGMENTS, VPX_DECODER_ABI_VERSION,
+    VpxCodecIface,
 };
 
 unsafe fn dec_init(
-    ctx: *mut vpx_codec_ctx_t,
-    iface: *mut vpx_codec_iface_t,
+    ctx: Option<&mut vpx_codec_ctx_t>,
+    iface: Option<&'static VpxCodecIface>,
     flags: VpxCodecFlags,
 ) -> VpxCodecErr {
-    vpx_codec_dec_init_ver(ctx, iface, ptr::null_mut(), flags, VPX_DECODER_ABI_VERSION)
+    vpx_codec_dec_init_ver(ctx, iface, None, flags, VPX_DECODER_ABI_VERSION)
 }
 
 /// C: `TEST(DecodeAPI, InvalidParams)` — null-pointer arm only. The
 /// iface-loop arm is in `invalid_params_via_iface` below.
 #[test]
 fn invalid_params_null_ptrs() {
-    let mut buf = [0u8; 1];
-    let mut dec = MaybeUninit::<vpx_codec_ctx_t>::uninit();
+    let buf = [0u8; 1];
+    let mut dec_storage = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
 
     unsafe {
-        assert_eq!(dec_init(ptr::null_mut(), ptr::null_mut(), 0), VPX_CODEC_INVALID_PARAM);
-        assert_eq!(dec_init(dec.as_mut_ptr(), ptr::null_mut(), 0), VPX_CODEC_INVALID_PARAM);
+        assert_eq!(dec_init(None, None, 0), VPX_CODEC_INVALID_PARAM);
+        assert_eq!(
+            dec_init(Some(dec_storage.assume_init_mut()), None, 0),
+            VPX_CODEC_INVALID_PARAM
+        );
 
+        // ctx == None
         assert_eq!(
-            vpx_codec_decode(ptr::null_mut(), ptr::null(), 0, ptr::null_mut(), 0),
+            vpx_codec_decode(None, &[], core::ptr::null_mut(), 0),
             VPX_CODEC_INVALID_PARAM
         );
         assert_eq!(
-            vpx_codec_decode(ptr::null_mut(), buf.as_mut_ptr(), 0, ptr::null_mut(), 0),
+            vpx_codec_decode(None, &buf, core::ptr::null_mut(), 0),
             VPX_CODEC_INVALID_PARAM
         );
-        assert_eq!(
-            vpx_codec_decode(
-                ptr::null_mut(),
-                buf.as_mut_ptr(),
-                buf.len() as u32,
-                ptr::null_mut(),
-                0
-            ),
-            VPX_CODEC_INVALID_PARAM
-        );
-        assert_eq!(
-            vpx_codec_decode(
-                ptr::null_mut(),
-                ptr::null(),
-                buf.len() as u32,
-                ptr::null_mut(),
-                0
-            ),
-            VPX_CODEC_INVALID_PARAM
-        );
-        assert_eq!(vpx_codec_destroy(ptr::null_mut()), VPX_CODEC_INVALID_PARAM);
+        assert_eq!(vpx_codec_destroy(None), VPX_CODEC_INVALID_PARAM);
 
-        // vpx_codec_error(null) returns "<invalid interface>" / generic message,
-        // never null.
-        assert!(!vpx_codec_error(ptr::null()).is_null());
-        // vpx_codec_error_detail(null) returns null.
-        assert!(vpx_codec_error_detail(ptr::null()).is_null());
+        // Error queries handle None.
+        assert!(!vpx_codec_error(None).is_null());
+        assert!(vpx_codec_error_detail(None).is_null());
     }
 }
 
 /// C: `TEST(DecodeAPI, HighBitDepthCapability)`.
 #[test]
 fn high_bit_depth_capability() {
-    let vp8_iface = unsafe { vpx_codec_vp8_dx() };
-    let vp8_caps: VpxCodecCaps =
-        unsafe { vpx_codec_get_caps(vp8_iface as *mut vpx_codec_iface_t) };
-    assert_eq!(vp8_caps & VPX_CODEC_CAP_HIGHBITDEPTH, 0,
-        "VP8 must not advertise HighBitDepth capability");
+    let vp8_iface = vpx_codec_vp8_dx();
+    assert_eq!(
+        vpx_codec_get_caps(Some(vp8_iface)) & VPX_CODEC_CAP_HIGHBITDEPTH,
+        0,
+        "VP8 must not advertise HighBitDepth capability"
+    );
 }
 
 /// C: `TEST(DecodeAPI, InvalidParams)` — iface-loop arm. C iterates
@@ -86,25 +69,29 @@ fn high_bit_depth_capability() {
 #[test]
 fn invalid_params_via_iface() {
     unsafe {
-        let iface = vpx_codec_vp8_dx() as *mut vpx_codec_iface_t;
-        let mut dec = MaybeUninit::<vpx_codec_ctx_t>::uninit();
+        let iface = vpx_codec_vp8_dx();
+        let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
         let buf = [0u8; 1];
 
-        assert_eq!(dec_init(ptr::null_mut(), iface, 0), VPX_CODEC_INVALID_PARAM);
-        assert_eq!(dec_init(dec.as_mut_ptr(), iface, 0), VPX_CODEC_OK);
+        assert_eq!(dec_init(None, Some(iface), 0), VPX_CODEC_INVALID_PARAM);
         assert_eq!(
-            vpx_codec_decode(dec.as_mut_ptr(), buf.as_ptr(), 1, ptr::null_mut(), 0),
+            dec_init(Some(dec.assume_init_mut()), Some(iface), 0),
+            VPX_CODEC_OK
+        );
+        assert_eq!(
+            vpx_codec_decode(Some(dec.assume_init_mut()), &buf, core::ptr::null_mut(), 0),
             VPX_CODEC_UNSUP_BITSTREAM
         );
+        // Empty buffer is the only "no data" shape now (the null+nonzero
+        // and nonzero+null combos are unrepresentable through `&[u8]`).
         assert_eq!(
-            vpx_codec_decode(dec.as_mut_ptr(), ptr::null(), 1, ptr::null_mut(), 0),
-            VPX_CODEC_INVALID_PARAM
+            vpx_codec_decode(Some(dec.assume_init_mut()), &[], core::ptr::null_mut(), 0),
+            VPX_CODEC_OK
         );
         assert_eq!(
-            vpx_codec_decode(dec.as_mut_ptr(), buf.as_ptr(), 0, ptr::null_mut(), 0),
-            VPX_CODEC_INVALID_PARAM
+            vpx_codec_destroy(Some(dec.assume_init_mut())),
+            VPX_CODEC_OK
         );
-        assert_eq!(vpx_codec_destroy(dec.as_mut_ptr()), VPX_CODEC_OK);
     }
 }
 
@@ -113,11 +100,15 @@ fn invalid_params_via_iface() {
 #[test]
 fn optional_params() {
     unsafe {
-        let iface = vpx_codec_vp8_dx() as *mut vpx_codec_iface_t;
-        let mut dec = MaybeUninit::<vpx_codec_ctx_t>::uninit();
+        let iface = vpx_codec_vp8_dx();
+        let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
 
         assert_eq!(
-            dec_init(dec.as_mut_ptr(), iface, VPX_CODEC_USE_ERROR_CONCEALMENT),
+            dec_init(
+                Some(dec.assume_init_mut()),
+                Some(iface),
+                VPX_CODEC_USE_ERROR_CONCEALMENT
+            ),
             VPX_CODEC_INCAPABLE
         );
     }
@@ -127,25 +118,25 @@ fn optional_params() {
 #[test]
 fn vp8_flush_with_no_fragments() {
     unsafe {
-        let iface = vpx_codec_vp8_dx() as *mut vpx_codec_iface_t;
-        let mut dec = MaybeUninit::<vpx_codec_ctx_t>::uninit();
+        let iface = vpx_codec_vp8_dx();
+        let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
         let cfg = vpx_codec_dec_cfg_t { threads: 1, w: 0, h: 0 };
         let flags: VpxCodecFlags = VPX_CODEC_USE_INPUT_FRAGMENTS;
 
         assert_eq!(
             vpx_codec_dec_init_ver(
-                dec.as_mut_ptr(),
-                iface,
-                &cfg,
+                Some(dec.assume_init_mut()),
+                Some(iface),
+                Some(&cfg),
                 flags,
                 VPX_DECODER_ABI_VERSION
             ),
             VPX_CODEC_OK
         );
         assert_eq!(
-            vpx_codec_decode(dec.as_mut_ptr(), ptr::null(), 0, ptr::null_mut(), 0),
+            vpx_codec_decode(Some(dec.assume_init_mut()), &[], core::ptr::null_mut(), 0),
             VPX_CODEC_OK
         );
-        assert_eq!(vpx_codec_destroy(dec.as_mut_ptr()), VPX_CODEC_OK);
+        assert_eq!(vpx_codec_destroy(Some(dec.assume_init_mut())), VPX_CODEC_OK);
     }
 }

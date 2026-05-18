@@ -416,16 +416,23 @@ pub union VpxCodecCtxConfig {
 }
 
 /// `vpx_codec_ctx_t` (`vpx/vpx_codec.h:200`).
-#[repr(C)]
 pub struct VpxCodecCtx {
     pub name: *const c_char,
-    pub iface: *mut VpxCodecIface,
+    /// Iface descriptor; `None` until `vpx_codec_dec_init_ver` binds
+    /// one. The `static mut VPX_CODEC_VP8_DX_ALGO` outlives any
+    /// `VpxCodecCtx`, so the `'static` lifetime is sound.
+    pub iface: Option<&'static VpxCodecIface>,
     pub err: VpxCodecErr,
     pub err_detail: *const c_char,
     pub init_flags: VpxCodecFlags,
     pub config: VpxCodecCtxConfig,
+    /// Sentinel pointer into the boxed decoder's `Vp8AlgPriv`. Used
+    /// by `vpx_codec_error_detail` to read the err_detail field;
+    /// otherwise dispatch goes through `trait_obj` directly.
     pub priv_: *mut VpxCodecPriv,
-    pub trait_obj: *mut c_void,
+    /// Boxed [`crate::codec::Decoder`] trait object. `None` before
+    /// `vpx_codec_dec_init_ver` succeeds.
+    pub trait_obj: Option<Box<dyn crate::codec::Decoder + 'static>>,
 }
 pub type vpx_codec_ctx_t = VpxCodecCtx;
 pub type VpxCodecCtxT = VpxCodecCtx;

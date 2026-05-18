@@ -17,7 +17,7 @@ use vp8_decoder_rs::vp8_dx_iface::{VpxDecryptInit, VPXD_SET_DECRYPTOR};
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
 use vp8_decoder_rs::vpx_api::{
     vpx_codec_control_, vpx_codec_ctx_t, vpx_codec_dec_init_ver, vpx_codec_decode,
-    vpx_codec_destroy, vpx_codec_iface_t, VPX_CODEC_OK, VPX_DECODER_ABI_VERSION,
+    vpx_codec_destroy, VPX_CODEC_OK, VPX_DECODER_ABI_VERSION,
 };
 
 const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
@@ -97,13 +97,13 @@ fn decrypt_works_vp8() {
         let path = dir.join("vp80-00-comprehensive-001.ivf");
         let mut video = Ivf::open(&path);
 
-        let iface = vpx_codec_vp8_dx() as *mut vpx_codec_iface_t;
-        let mut dec_uninit = MaybeUninit::<vpx_codec_ctx_t>::uninit();
+        let iface = vpx_codec_vp8_dx();
+        let mut dec_uninit = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
         assert_eq!(
             vpx_codec_dec_init_ver(
-                dec_uninit.as_mut_ptr(),
-                iface,
-                ptr::null(),
+                Some(dec_uninit.assume_init_mut()),
+                Some(iface),
+                None,
                 0,
                 VPX_DECODER_ABI_VERSION,
             ),
@@ -114,13 +114,7 @@ fn decrypt_works_vp8() {
         // Frame 0: plain decode (sanity).
         let frame0 = video.next_packet().expect("frame 0");
         assert_eq!(
-            vpx_codec_decode(
-                &mut dec,
-                frame0.as_ptr(),
-                frame0.len() as u32,
-                ptr::null_mut(),
-                0
-            ),
+            vpx_codec_decode(Some(&mut dec), &frame0, ptr::null_mut(), 0),
             VPX_CODEC_OK,
         );
 
@@ -138,7 +132,7 @@ fn decrypt_works_vp8() {
         };
         assert_eq!(
             vpx_codec_control_(
-                &mut dec,
+                Some(&mut dec),
                 VPXD_SET_DECRYPTOR,
                 &mut di as *mut VpxDecryptInit as *mut c_void,
             ),
@@ -146,17 +140,11 @@ fn decrypt_works_vp8() {
         );
 
         assert_eq!(
-            vpx_codec_decode(
-                &mut dec,
-                encrypted.as_ptr(),
-                encrypted.len() as u32,
-                ptr::null_mut(),
-                0
-            ),
+            vpx_codec_decode(Some(&mut dec), &encrypted, ptr::null_mut(), 0),
             VPX_CODEC_OK,
             "encrypted frame failed to decode through cb",
         );
 
-        assert_eq!(vpx_codec_destroy(&mut dec), VPX_CODEC_OK);
+        assert_eq!(vpx_codec_destroy(Some(&mut dec)), VPX_CODEC_OK);
     }
 }

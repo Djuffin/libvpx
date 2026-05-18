@@ -13,55 +13,49 @@
 #![allow(clippy::missing_safety_doc)]
 
 use core::ffi::{c_int, c_ulong};
-use core::ptr;
 
 use crate::vpx_api::*;
 
-
-pub unsafe fn vpx_codec_enc_init_ver(
-    _ctx: *mut VpxCodecCtx,
-    _iface: *mut VpxCodecIface,
-    _cfg: *const VpxCodecEncCfg,
+pub fn vpx_codec_enc_init_ver(
+    _ctx: Option<&mut VpxCodecCtx>,
+    _iface: Option<&VpxCodecIface>,
+    _cfg: Option<&VpxCodecEncCfg>,
     _flags: VpxCodecFlags,
     _ver: c_int,
 ) -> VpxCodecErr {
     VPX_CODEC_INCAPABLE
 }
 
-
-pub unsafe fn vpx_codec_enc_init_multi_ver(
-    _ctx: *mut VpxCodecCtx,
-    _iface: *mut VpxCodecIface,
-    _cfg: *const VpxCodecEncCfg,
+pub fn vpx_codec_enc_init_multi_ver(
+    _ctx: Option<&mut VpxCodecCtx>,
+    _iface: Option<&VpxCodecIface>,
+    _cfg: Option<&VpxCodecEncCfg>,
     _num_enc: c_int,
     _flags: VpxCodecFlags,
-    _dsf: *mut VpxRational,
+    _dsf: Option<&mut VpxRational>,
     _ver: c_int,
 ) -> VpxCodecErr {
     VPX_CODEC_INCAPABLE
 }
 
-
-pub unsafe fn vpx_codec_enc_config_default(
-    _iface: *mut VpxCodecIface,
-    _cfg: *mut VpxCodecEncCfg,
+pub fn vpx_codec_enc_config_default(
+    _iface: Option<&VpxCodecIface>,
+    _cfg: Option<&mut VpxCodecEncCfg>,
     _usage: c_int,
 ) -> VpxCodecErr {
     VPX_CODEC_INCAPABLE
 }
 
-
-pub unsafe fn vpx_codec_enc_config_set(
-    _ctx: *mut VpxCodecCtx,
-    _cfg: *const VpxCodecEncCfg,
+pub fn vpx_codec_enc_config_set(
+    _ctx: Option<&mut VpxCodecCtx>,
+    _cfg: Option<&VpxCodecEncCfg>,
 ) -> VpxCodecErr {
     VPX_CODEC_INCAPABLE
 }
 
-
-pub unsafe fn vpx_codec_encode(
-    _ctx: *mut VpxCodecCtx,
-    _img: *const VpxImage,
+pub fn vpx_codec_encode(
+    _ctx: Option<&mut VpxCodecCtx>,
+    _img: Option<&VpxImage>,
     _pts: VpxCodecPts,
     _duration: c_ulong,
     _flags: VpxEncFrameFlags,
@@ -70,50 +64,44 @@ pub unsafe fn vpx_codec_encode(
     VPX_CODEC_INCAPABLE
 }
 
-
-pub unsafe fn vpx_codec_get_cx_data(
-    _ctx: *mut VpxCodecCtx,
-    _iter: *mut VpxCodecIter,
-) -> *const VpxCodecCxPkt {
-    ptr::null()
+pub fn vpx_codec_get_cx_data<'a>(
+    _ctx: Option<&'a mut VpxCodecCtx>,
+    _iter: &mut VpxCodecIter,
+) -> Option<&'a VpxCodecCxPkt> {
+    None
 }
 
-
-pub unsafe fn vpx_codec_get_global_headers(
-    _ctx: *mut VpxCodecCtx,
-) -> *mut VpxFixedBuf {
-    ptr::null_mut()
+pub fn vpx_codec_get_global_headers(
+    _ctx: Option<&mut VpxCodecCtx>,
+) -> Option<&VpxFixedBuf> {
+    None
 }
 
-
-pub unsafe fn vpx_codec_get_preview_frame(
-    _ctx: *mut VpxCodecCtx,
-) -> *mut VpxImage {
-    ptr::null_mut()
+pub fn vpx_codec_get_preview_frame(
+    _ctx: Option<&mut VpxCodecCtx>,
+) -> Option<&VpxImage> {
+    None
 }
 
-
-pub unsafe fn vpx_codec_set_cx_data_buf(
-    _ctx: *mut VpxCodecCtx,
-    _buf: *const VpxFixedBuf,
+pub fn vpx_codec_set_cx_data_buf(
+    _ctx: Option<&mut VpxCodecCtx>,
+    _buf: Option<&VpxFixedBuf>,
     _pad_before: c_int,
     _pad_after: c_int,
 ) -> VpxCodecErr {
     VPX_CODEC_INCAPABLE
 }
 
-
-pub unsafe fn vpx_codec_pkt_list_add(
-    _list: *mut VpxCodecPktList,
-    _pkt: *const VpxCodecCxPkt,
+pub fn vpx_codec_pkt_list_add(
+    _list: Option<&mut VpxCodecPktList>,
+    _pkt: Option<&VpxCodecCxPkt>,
 ) -> c_int {
     -1
 }
 
-
-pub unsafe fn vpx_codec_pkt_list_get(
-    _list: *mut VpxCodecPktList,
-    _iter: *mut VpxCodecIter,
-) -> *const VpxCodecCxPkt {
-    ptr::null()
+pub fn vpx_codec_pkt_list_get<'a>(
+    _list: Option<&'a VpxCodecPktList>,
+    _iter: &mut VpxCodecIter,
+) -> Option<&'a VpxCodecCxPkt> {
+    None
 }
