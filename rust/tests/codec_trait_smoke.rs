@@ -95,9 +95,8 @@ fn trait_decodes_first_keyframe() {
     let packet = read_ivf_first_packet(&dir.join(name));
     let expected = first_md5(&dir.join(format!("{name}.md5")));
 
-    let mut decoder: Box<dyn Decoder> = Box::new(unsafe {
-        Vp8Decoder::new(0).expect("decoder init")
-    });
+    let mut decoder: Box<dyn Decoder> =
+        Box::new(Vp8Decoder::new(0).expect("decoder init"));
 
     decoder.decode(&packet, Duration::ZERO).expect("decode");
     let img = decoder.get_frame().expect("got frame");

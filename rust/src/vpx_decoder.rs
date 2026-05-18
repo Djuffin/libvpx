@@ -83,14 +83,15 @@ pub unsafe fn vpx_codec_dec_init_ver(
     // VP8 is currently the only algorithm; when VP9 lands a small
     // per-algo registry will choose between constructors.
     match Vp8Decoder::new(flags) {
-        Ok(dec) => {
+        Ok(mut dec) => {
+            let priv_ptr = dec.as_ptr();
             if let Some(c) = cfg {
-                (*dec.as_ptr()).cfg = *c;
+                (*priv_ptr).cfg = *c;
             }
             // priv_ is a non-null sentinel for initialized-state
             // checks elsewhere; it points at the same Vp8AlgPriv the
             // boxed trait object owns.
-            ctx.priv_ = dec.as_ptr() as *mut VpxCodecPriv;
+            ctx.priv_ = priv_ptr as *mut VpxCodecPriv;
             ctx.trait_obj = Some(Box::new(dec));
             ctx.err = VPX_CODEC_OK;
             VPX_CODEC_OK

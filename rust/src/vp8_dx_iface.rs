@@ -115,7 +115,6 @@ pub struct Vp8AlgPriv<'a> {
 // translated separately).
 // ===========================================================================
 
-use crate::vpx_mem::{vpx_calloc, vpx_free};
 
 // From `vp8/decoder/onyxd_if.rs`. The `*_inner` adapter calls below
 // import the new-style `VpxResult`-returning helpers directly.
@@ -158,16 +157,6 @@ unsafe fn vp8_zero<T>(t: &mut T) {
 // ===========================================================================
 // `vp8_dx_iface.c` static helpers
 // ===========================================================================
-
-/// `vp8_destroy` — `vp8/vp8_dx_iface.c:119`. Internal teardown used by
-/// `Vp8Decoder::Drop`.
-pub unsafe fn vp8_destroy(ctx: *mut Vp8AlgPriv<'static>) -> VpxCodecErr {
-    vp8_remove_decoder_instances(&mut (*ctx).yv12_frame_buffers);
-
-    vpx_free(ctx as *mut c_void);
-
-    VPX_CODEC_OK
-}
 
 /// `vp8_peek_si_internal` — `vp8/vp8_dx_iface.c:127`.
 unsafe fn vp8_peek_si_internal(
@@ -237,7 +226,7 @@ pub unsafe fn vp8_peek_si(
 
 /// `vp8_get_si` — `vp8/vp8_dx_iface.c:183`. Vtable `dec.get_si` slot.
 pub unsafe fn vp8_get_si(
-    ctx: *mut Vp8AlgPriv<'static>,
+    ctx: &Vp8AlgPriv<'static>,
     si: *mut VpxCodecStreamInfo,
 ) -> VpxCodecErr {
     let sz: u32;
@@ -249,7 +238,7 @@ pub unsafe fn vp8_get_si(
     }
 
     ptr::copy_nonoverlapping(
-        &(*ctx).si as *const Vp8StreamInfo as *const u8,
+        &ctx.si as *const Vp8StreamInfo as *const u8,
         si as *mut u8,
         sz as usize,
     );
@@ -652,61 +641,55 @@ pub fn vpx_codec_vp8_dx() -> &'static VpxCodecIface {
 
 use crate::codec::{ControlCmd, Decoder, Error, Image};
 
-/// Newtype wrapper owning a `Vp8AlgPriv` allocated via libvpx's
-/// `vpx_calloc`. Dropping the `Box<Vp8Decoder>` runs `vp8_destroy`,
-/// which calls `vpx_free` — keeping allocator/deallocator matched.
+/// Decoder handle owning a boxed [`Vp8AlgPriv`].
 ///
 /// `iter` mirrors the C `vpx_codec_iter_t` flip-flop: reset to null on
 /// each `decode()` call, advanced by `get_frame()`. Lets the trait
 /// `get_frame` return `Some` on the first call after a decode and
 /// `None` thereafter without exposing the iter to callers.
 pub struct Vp8Decoder {
-    priv_: *mut Vp8AlgPriv<'static>,
+    priv_: Box<Vp8AlgPriv<'static>>,
     iter: VpxCodecIter,
 }
 
 impl Vp8Decoder {
-    /// Construct a new VP8 decoder over a freshly-zeroed
-    /// `Vp8AlgPriv` (the analogue of libvpx's `vp8_init`).
-    pub unsafe fn new(init_flags: VpxCodecFlags) -> Result<Self, Error> {
-        let priv_ =
-            vpx_calloc(1, core::mem::size_of::<Vp8AlgPriv<'static>>())
-                as *mut Vp8AlgPriv<'static>;
-        if priv_.is_null() {
-            return Err(VPX_CODEC_MEM_ERROR);
-        }
+    /// Construct a new VP8 decoder over a freshly-zeroed `Vp8AlgPriv`.
+    pub fn new(init_flags: VpxCodecFlags) -> Result<Self, Error> {
+        // SAFETY: all fields of `Vp8AlgPriv` are zero-init valid —
+        // primitive ints, raw pointers (null), arrays of the same, and
+        // `Option<Box<dyn FnMut + 'static>>` which uses null-pointer
+        // optimization on the data pointer (zero ↦ None).
+        let mut priv_: Box<Vp8AlgPriv<'static>> =
+            Box::new(unsafe { core::mem::zeroed() });
 
         vp8_rtcd();
         vpx_dsp_rtcd();
         vpx_scale_rtcd();
 
-        (*priv_).base.init_flags = init_flags;
-        (*priv_).si.sz = core::mem::size_of::<Vp8StreamInfo>() as u32;
-        // `vpx_calloc` already zeroed everything, so `decrypt` is
-        // already `None` (Box<dyn Trait> uses null-pointer
-        // optimization on the data pointer).
-        (*priv_).fragments.count = 0;
-        (*priv_).fragments.enabled =
+        priv_.base.init_flags = init_flags;
+        priv_.si.sz = core::mem::size_of::<Vp8StreamInfo>() as u32;
+        priv_.fragments.enabled =
             ((init_flags & VPX_CODEC_USE_INPUT_FRAGMENTS) != 0) as i32;
 
         Ok(Vp8Decoder { priv_, iter: ptr::null() })
     }
 
-    /// Raw pointer into the underlying `Vp8AlgPriv`.
-    pub fn as_ptr(&self) -> *mut Vp8AlgPriv<'static> {
-        self.priv_
+    /// Raw pointer into the underlying `Vp8AlgPriv`. Used by
+    /// `vpx_codec_dec_init_ver` to stash a sentinel into
+    /// `VpxCodecCtx.priv_`. The pointer is valid for the lifetime of
+    /// the boxed decoder.
+    pub fn as_ptr(&mut self) -> *mut Vp8AlgPriv<'static> {
+        &raw mut *self.priv_
     }
 }
 
 impl Drop for Vp8Decoder {
     fn drop(&mut self) {
-        // Matches the C `vp8_destroy` cleanup — frees decoder
-        // instances first, then the `Vp8AlgPriv` itself.
+        // Release the YV12 frame buffer pool and the inner Vp8dComp
+        // instances (each one's own `vpx_calloc` allocation). The Box
+        // drop that follows reclaims the `Vp8AlgPriv` shell.
         unsafe {
-            if !self.priv_.is_null() {
-                let _ = vp8_destroy(self.priv_);
-                self.priv_ = ptr::null_mut();
-            }
+            vp8_remove_decoder_instances(&mut self.priv_.yv12_frame_buffers);
         }
     }
 }
@@ -722,14 +705,14 @@ impl Decoder for Vp8Decoder {
             // Reset the iter so the next get_frame() reports the
             // newly-decoded image instead of replaying the previous one.
             self.iter = core::ptr::null();
-            let err = vp8_decode(self.priv_, ptr, len, ptr::null_mut());
+            let err = vp8_decode(&raw mut *self.priv_, ptr, len, ptr::null_mut());
             if err == VPX_CODEC_OK { Ok(()) } else { Err(err) }
         }
     }
 
     fn get_frame(&mut self) -> Option<&Image> {
         unsafe {
-            let img = vp8_get_frame(self.priv_, &mut self.iter);
+            let img = vp8_get_frame(&raw mut *self.priv_, &mut self.iter);
             if img.is_null() {
                 None
             } else {
@@ -740,16 +723,16 @@ impl Decoder for Vp8Decoder {
 
     fn control(&mut self, cmd: ControlCmd<'_>) -> Result<(), Error> {
         unsafe {
-            let ctx = self.priv_;
+            let ctx: &mut Vp8AlgPriv<'static> = &mut self.priv_;
             match cmd {
                 ControlCmd::SetReference(frame) => {
                     let mut sd: Yv12BufferConfig = core::mem::zeroed();
                     image2yuvconfig(&frame.img, &mut sd);
-                    if (*ctx).yv12_frame_buffers.pbi[0].is_null() {
+                    if ctx.yv12_frame_buffers.pbi[0].is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
                     vp8dx_set_reference(
-                        (*ctx).yv12_frame_buffers.pbi[0],
+                        ctx.yv12_frame_buffers.pbi[0],
                         frame.frame_type,
                         &mut sd,
                     )
@@ -757,11 +740,11 @@ impl Decoder for Vp8Decoder {
                 ControlCmd::CopyReference(frame) => {
                     let mut sd: Yv12BufferConfig = core::mem::zeroed();
                     image2yuvconfig(&frame.img, &mut sd);
-                    if (*ctx).yv12_frame_buffers.pbi[0].is_null() {
+                    if ctx.yv12_frame_buffers.pbi[0].is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
                     vp8dx_get_reference(
-                        (*ctx).yv12_frame_buffers.pbi[0],
+                        ctx.yv12_frame_buffers.pbi[0],
                         frame.frame_type,
                         &mut sd,
                     )
@@ -771,7 +754,7 @@ impl Decoder for Vp8Decoder {
                     Err(VPX_CODEC_INCAPABLE)
                 }
                 ControlCmd::GetLastRefUpdates(out) => {
-                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    let pbi = ctx.yv12_frame_buffers.pbi[0];
                     if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
@@ -781,7 +764,7 @@ impl Decoder for Vp8Decoder {
                     Ok(())
                 }
                 ControlCmd::GetFrameCorrupted(out) => {
-                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    let pbi = ctx.yv12_frame_buffers.pbi[0];
                     if pbi.is_null() {
                         return Err(VPX_CODEC_INVALID_PARAM);
                     }
@@ -793,7 +776,7 @@ impl Decoder for Vp8Decoder {
                     Ok(())
                 }
                 ControlCmd::GetLastRefUsed(out) => {
-                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    let pbi = ctx.yv12_frame_buffers.pbi[0];
                     if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
@@ -814,7 +797,7 @@ impl Decoder for Vp8Decoder {
                     Ok(())
                 }
                 ControlCmd::GetLastQuantizer(out) => {
-                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    let pbi = ctx.yv12_frame_buffers.pbi[0];
                     if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
@@ -822,7 +805,7 @@ impl Decoder for Vp8Decoder {
                     Ok(())
                 }
                 ControlCmd::SetDecryptor(init) => {
-                    (*ctx).decrypt = init.and_then(|i| {
+                    ctx.decrypt = init.and_then(|i| {
                         let cb_fn = i.decrypt_cb?;
                         let state = i.decrypt_state;
                         let boxed: DecryptCb =
@@ -855,7 +838,7 @@ impl Decoder for Vp8Decoder {
         unsafe {
             let mut si: VpxCodecStreamInfo = core::mem::zeroed();
             si.sz = core::mem::size_of::<VpxCodecStreamInfo>() as u32;
-            let res = vp8_get_si(self.priv_, &mut si);
+            let res = vp8_get_si(&self.priv_, &mut si);
             if res == VPX_CODEC_OK { Ok(si) } else { Err(res) }
         }
     }

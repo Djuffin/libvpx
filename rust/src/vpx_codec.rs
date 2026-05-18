@@ -106,7 +106,9 @@ pub unsafe fn vpx_codec_error_detail(
 }
 
 /// `vpx_codec_destroy`. Drops the boxed [`Decoder`] trait object,
-/// which in turn runs `Vp8Decoder::Drop` → `vp8_destroy` → `vpx_free`.
+/// which in turn runs `Vp8Decoder::Drop` (frees the YV12 frame buffer
+/// pool and the inner `Vp8dComp` instances; the `Box` drop reclaims
+/// the `Vp8AlgPriv` shell).
 pub fn vpx_codec_destroy(ctx: Option<&mut VpxCodecCtx>) -> VpxCodecErr {
     let Some(c) = ctx else { return VPX_CODEC_INVALID_PARAM };
 
