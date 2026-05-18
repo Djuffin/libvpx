@@ -810,26 +810,13 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
 // read_partition_size — decodeframe.c:663
 // ---------------------------------------------------------------------------
 
-/// Wrap the FFI `vpx_decrypt_cb` stored on `pbi` in the Box<dyn FnMut>
-/// closure shape expected by `vp8dx_start_decode` / the bool decoder.
-/// Each call builds a fresh closure capturing `(fn_ptr, state)` by
-/// copy — both are `Copy`, so this is cheap.
-unsafe fn bridge_decrypt_cb(
-    pbi: *mut Vp8dComp<'static>,
-) -> Option<crate::types::DecryptCb<'static>> {
-    let cb = (*pbi).decrypt_cb?;
-    let state = (*pbi).decrypt_state;
-    Some(Box::new(move |input: &[u8], output: &mut [u8]| {
-        cb(state, input.as_ptr(), output.as_mut_ptr(), input.len() as i32);
-    }))
-}
-
 /// `read_partition_size` (vp8/decoder/decodeframe.c:663). Static helper.
 unsafe fn read_partition_size(pbi: *mut Vp8dComp<'static>, cx_size_in: *const u8) -> c_uint {
     let mut temp: [u8; 3] = [0; 3];
     let mut cx_size: *const u8 = cx_size_in;
-    if let Some(cb) = (*pbi).decrypt_cb {
-        cb((*pbi).decrypt_state, cx_size, temp.as_mut_ptr(), 3);
+    if let Some(cb) = (*pbi).decrypt.as_mut() {
+        let src = core::slice::from_raw_parts(cx_size, 3);
+        cb(src, &mut temp);
         cx_size = temp.as_ptr();
     }
     (*cx_size.add(0) as c_uint)
@@ -989,7 +976,7 @@ unsafe fn setup_token_decoder(
             bool_decoder,
             (*pbi).fragments.ptrs[partition_idx as usize],
             (*pbi).fragments.sizes[partition_idx as usize],
-            bridge_decrypt_cb(pbi),
+            (*pbi).decrypt.as_deref_mut(),
         ) != 0
         {
             return vpx_internal_error(
@@ -1133,9 +1120,10 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     } else {
         let mut clear_buffer: [u8; 10] = [0; 10];
         let mut clear: *const u8 = data;
-        if let Some(cb) = (*pbi).decrypt_cb {
-            let n = core::cmp::min(clear_buffer.len(), data_sz as usize) as i32;
-            cb((*pbi).decrypt_state, data, clear_buffer.as_mut_ptr(), n);
+        if let Some(cb) = (*pbi).decrypt.as_mut() {
+            let n = core::cmp::min(clear_buffer.len(), data_sz as usize);
+            let src = core::slice::from_raw_parts(data, n);
+            cb(src, &mut clear_buffer[..n]);
             clear = clear_buffer.as_ptr();
         }
 
@@ -1219,7 +1207,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
         bc,
         data,
         ((data_end as isize) - (data as isize)) as c_uint,
-        bridge_decrypt_cb(pbi),
+        (*pbi).decrypt.as_deref_mut(),
     ) != 0
     {
         return vpx_internal_error(

@@ -15,7 +15,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use crate::tables::VP8_NORM;
-use crate::types::{BdValue, BoolDecoder, DecryptCb, BD_VALUE_BITS, VP8_LOTS_OF_BITS};
+use crate::types::{BdValue, BoolDecoder, DecryptCbMut, BD_VALUE_BITS, VP8_LOTS_OF_BITS};
 
 // ---------------------------------------------------------------------------
 // Local constants mirroring the C `#define`s in `dboolhuff.h`.
@@ -46,7 +46,7 @@ pub unsafe fn vp8dx_start_decode<'a>(
     br: *mut BoolDecoder<'a>,
     source: *const u8,
     source_sz: u32,
-    decrypt_cb: Option<DecryptCb<'a>>,
+    decrypt_cb: Option<DecryptCbMut<'a>>,
 ) -> i32 {
     if source_sz != 0 && source.is_null() {
         return 1;
