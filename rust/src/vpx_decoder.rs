@@ -30,7 +30,7 @@ unsafe fn save_status(ctx: *mut VpxCodecCtx, var: VpxCodecErr) -> VpxCodecErr {
 }
 
 // ===========================================================================
-// Public-API dispatcher functions (literal C→Rust transliteration).
+// Public-API dispatcher functions.
 // ===========================================================================
 
 /// `vpx_codec_dec_init_ver` — bind a context to an algorithm.

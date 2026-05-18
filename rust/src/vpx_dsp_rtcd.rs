@@ -47,19 +47,9 @@ fn setup_rtcd_internal() {
 }
 
 /// Public entry point of the cross-codec DSP RTCD subsystem.
-///
-/// Direct transliteration of:
-///
-/// ```c
-/// void vpx_dsp_rtcd(void) { once(setup_rtcd_internal); }
-/// ```
-///
-/// Guarantees that `setup_rtcd_internal` runs exactly once over the program's
-/// lifetime, regardless of how many threads race to enter this function.
-/// Name kept verbatim (no `vpx_dsp_rtcd_rs` etc.) per the literal-translation
-/// rule.
-
-pub extern "C" fn vpx_dsp_rtcd() {
+/// Guarantees `setup_rtcd_internal` runs exactly once, regardless
+/// of how many threads race to enter.
+pub fn vpx_dsp_rtcd() {
     SETUP_RTCD_ONCE.call_once(setup_rtcd_internal);
 }
 

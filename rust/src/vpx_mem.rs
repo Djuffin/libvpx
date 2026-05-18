@@ -147,7 +147,7 @@ unsafe fn get_actual_malloc_address(mem: *mut c_void) -> (*mut c_void, size_t) {
 /// a power of two), valid for `size` bytes of access, or `NULL` on
 /// overflow / OOM.
 
-pub unsafe extern "C" fn vpx_memalign(align: size_t, size: size_t) -> *mut c_void {
+pub unsafe fn vpx_memalign(align: size_t, size: size_t) -> *mut c_void {
     let mut x: *mut c_void = ptr::null_mut();
     let aligned_size: u64 = get_aligned_malloc_size(size, align);
     if !check_size_argument_overflow(1, aligned_size) {
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn vpx_memalign(align: size_t, size: size_t) -> *mut c_voi
 
 /// `void *vpx_malloc(size_t size);` — `vpx_memalign(DEFAULT_ALIGNMENT, size)`.
 
-pub unsafe extern "C" fn vpx_malloc(size: size_t) -> *mut c_void {
+pub unsafe fn vpx_malloc(size: size_t) -> *mut c_void {
     vpx_memalign(DEFAULT_ALIGNMENT, size)
 }
 
@@ -183,7 +183,7 @@ pub unsafe extern "C" fn vpx_malloc(size: size_t) -> *mut c_void {
 /// allocation. Routes through `vpx_malloc` so the stash header is set
 /// up correctly (libc `calloc` would not be `vpx_free`-safe).
 
-pub unsafe extern "C" fn vpx_calloc(num: size_t, size: size_t) -> *mut c_void {
+pub unsafe fn vpx_calloc(num: size_t, size: size_t) -> *mut c_void {
     if !check_size_argument_overflow(num as u64, size as u64) {
         return ptr::null_mut();
     }
@@ -200,7 +200,7 @@ pub unsafe extern "C" fn vpx_calloc(num: size_t, size: size_t) -> *mut c_void {
 /// `NULL`. `memblk` must have been returned by one of the `vpx_*`
 /// allocators; passing anything else is undefined behaviour.
 
-pub unsafe extern "C" fn vpx_free(memblk: *mut c_void) {
+pub unsafe fn vpx_free(memblk: *mut c_void) {
     if !memblk.is_null() {
         let (addr, total) = get_actual_malloc_address(memblk);
         // Reconstruct the same Layout used by `vpx_memalign`.

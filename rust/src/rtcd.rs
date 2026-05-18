@@ -37,6 +37,6 @@ fn setup_rtcd_internal() {
 /// `void vp8_rtcd(void) { once(setup_rtcd_internal); }` from
 /// `vp8/common/rtcd.c:15`.
 
-pub extern "C" fn vp8_rtcd() {
+pub fn vp8_rtcd() {
     RTCD_ONCE.call_once(setup_rtcd_internal);
 }

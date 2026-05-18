@@ -1,17 +1,13 @@
-//! Consolidated public API surface for the Rust port of libvpx.
+//! Consolidated public API surface — types and constants spanning
+//! the `vpx/vpx_codec.h`, `vpx/vpx_decoder.h`, `vpx/vpx_encoder.h`,
+//! `vpx/vpx_image.h`, and `vpx/internal/vpx_codec_internal.h`
+//! headers. Re-exports the entry points from the consumer modules
+//! (`vpx_codec`, `vpx_decoder`, `vpx_encoder`, `vpx_image`,
+//! `vp8_dx_iface`) so callers can `use crate::vpx_api::*;`.
 //!
-//! This module is the single source of truth for the C-public types,
-//! constants, and function-pointer typedefs that span the
-//! `vpx/vpx_codec.h`, `vpx/vpx_decoder.h`, `vpx/vpx_encoder.h`,
-//! `vpx/vpx_image.h`, and `vpx/internal/vpx_codec_internal.h` headers.
-//!
-//! Five consumer modules (`vpx_codec`, `vpx_decoder`, `vpx_encoder`,
-//! `vpx_image`, `vp8_dx_iface`) previously re-declared these types
-//! independently, producing inter-module conflicts. They now `use
-//! crate::vpx_api::*;` and rely on the definitions here.
-//!
-//! For C-FFI naming symmetry, lowercase aliases (`vpx_codec_err_t`,
-//! `vpx_image_t`, …) are exposed alongside the CamelCase Rust spellings.
+//! Lowercase aliases (`vpx_codec_err_t`, `vpx_image_t`, …) exist
+//! alongside the CamelCase Rust spellings for naming symmetry with
+//! the original C headers.
 
 #![allow(dead_code)]
 #![allow(non_snake_case)]

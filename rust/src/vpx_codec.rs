@@ -39,13 +39,8 @@ pub const VERSION_STRING_NOSP: &[u8] = b"v1.15.0\0";
 /// `VERSION_EXTRA` from `vpx_version.h`.
 pub const VERSION_EXTRA: &[u8] = b"\0";
 
-// ===========================================================================
-// `SAVE_STATUS` macro (vpx_codec.c:22).
-//
-// Original C: `#define SAVE_STATUS(ctx, var) (ctx ? (ctx->err = var) : var)`
-// Stashes the return value into `ctx->err` while also returning it.
-// ===========================================================================
-
+/// Stash `var` into `ctx->err` (if `ctx` non-null) and return it.
+/// Rust spelling of libvpx's `SAVE_STATUS` macro.
 #[inline]
 unsafe fn SAVE_STATUS(ctx: *mut VpxCodecCtx, var: VpxCodecErr) -> VpxCodecErr {
     if !ctx.is_null() {
@@ -189,13 +184,8 @@ pub unsafe fn vpx_codec_get_caps(iface: *mut VpxCodecIface) -> VpxCodecCaps {
     }
 }
 
-// ===========================================================================
-// Control trampoline (vpx_codec.c:89–114).
-// ===========================================================================
-
 /// `vpx_codec_control_`. Accepts the C-style `(ctrl_id, ap)` pair,
 /// maps it to a typed [`ControlCmd`], and dispatches via the trait.
-
 pub unsafe fn vpx_codec_control_(
     ctx: *mut VpxCodecCtx,
     ctrl_id: c_int,

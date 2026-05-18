@@ -1,9 +1,13 @@
 //! vp8-decoder-rs — Rust port of the libvpx VP8 decoder.
 //!
-//! Module layout mirrors the C source tree (`vp8/common/`, `vp8/decoder/`,
-//! `vpx/src/`, `vpx_dsp/`, `vpx_mem/`, `vpx_scale/`, `vpx_util/`). Each
-//! module is a literal transliteration of one `.c` file; cross-file
-//! references are stitched via plain `use crate::module::name;` imports.
+//! The decoder kernel modules (vp8/common/, vp8/decoder/, vpx_dsp/,
+//! vpx_mem/, vpx_scale/, vpx_util/) mirror the libvpx C source layout
+//! one file per module and stay close to literal transliterations.
+//!
+//! The public API surface ([`codec`], [`vpx_api`], [`vpx_codec`],
+//! [`vpx_decoder`], [`vp8_dx_iface`]) is shaped around the
+//! [`Decoder`](codec::Decoder) trait and is no longer a literal
+//! translation — see `documentation/translation_summary.md`.
 
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]

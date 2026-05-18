@@ -1,17 +1,6 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-//! Port of `test/decode_api_test.cc` (gtest) to Rust integration tests.
-//!
-//! VP9-specific cases are dropped (no VP9 in this crate). The remaining
-//! VP8-relevant cases split in two:
-//!   - null-pointer guards on the public API surface — run today;
-//!   - cases that actually instantiate the decoder via the VP8 iface
-//!     vtable — `#[ignore]` until the local `Vp8DxIface` shape in
-//!     `vp8_dx_iface.rs` is unified with the canonical `VpxCodecIface`
-//!     in `vpx_api.rs` (the two structs use different fn-pointer ABIs).
-//!
-//! The HighBitDepthCapability test relies on the `caps` field being at
-//! the same byte offset in both iface flavors (it is — they share the
-//! same `name, abi_version, caps` prefix).
+//! Port of `test/decode_api_test.cc` (gtest) to Rust integration
+//! tests. VP9-specific cases are dropped (no VP9 in this crate).
 
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -34,8 +23,7 @@ unsafe fn dec_init(
 }
 
 /// C: `TEST(DecodeAPI, InvalidParams)` — null-pointer arm only. The
-/// loop over `kCodecs` that exercises the iface vtable is in
-/// `invalid_params_via_iface` below, currently `#[ignore]`.
+/// iface-loop arm is in `invalid_params_via_iface` below.
 #[test]
 fn invalid_params_null_ptrs() {
     let mut buf = [0u8; 1];
@@ -83,10 +71,7 @@ fn invalid_params_null_ptrs() {
     }
 }
 
-/// C: `TEST(DecodeAPI, HighBitDepthCapability)`. The `caps` field is the
-/// 3rd member of both `VpxCodecIface` and `Vp8DxIface` and lives at the
-/// same byte offset (matching prefix `name, abi_version, caps`), so the
-/// pointer-cast read is well-defined.
+/// C: `TEST(DecodeAPI, HighBitDepthCapability)`.
 #[test]
 fn high_bit_depth_capability() {
     let vp8_iface = unsafe { vpx_codec_vp8_dx() };
@@ -95,12 +80,6 @@ fn high_bit_depth_capability() {
     assert_eq!(vp8_caps & VPX_CODEC_CAP_HIGHBITDEPTH, 0,
         "VP8 must not advertise HighBitDepth capability");
 }
-
-// ---------------------------------------------------------------------
-// Below: cases that require the full decoder pipeline. Blocked until
-// `Vp8DxIface` and `VpxCodecIface` are unified (both must use
-// `extern "C"` fn pointers).
-// ---------------------------------------------------------------------
 
 /// C: `TEST(DecodeAPI, InvalidParams)` — iface-loop arm. C iterates
 /// `kCodecs[]` which, in this build, contains only VP8.

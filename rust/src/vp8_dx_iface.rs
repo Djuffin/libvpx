@@ -1,10 +1,7 @@
-//! Literal Rust translation of `vp8/vp8_dx_iface.c` — the VP8 decoder's
-//! `vpx_codec_iface_t` adapter. See documentation/vp8_files/vp8_dx_iface.md.
-//!
-//! Public types and constants come from `crate::vpx_api`. Concrete
-//! adapter-private structs (`Vp8AlgPriv`, frame-buffer wrapper, etc.)
-//! stay local since they describe state internal to this translation
-//! unit.
+//! VP8 decoder adapter — the [`Decoder`](crate::codec::Decoder)
+//! implementation and the private `Vp8AlgPriv` state it owns.
+//! Translated from `vp8/vp8_dx_iface.c`; public types come from
+//! `crate::vpx_api`.
 
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
@@ -79,7 +76,9 @@ pub struct VpxRefFrame {
     pub img: VpxImage,
 }
 
-/// Control IDs used by `vp8_ctf_maps` (`vpx/vp8.h`, `vpx/vp8dx.h`).
+/// Control IDs from `vpx/vp8.h`, `vpx/vp8dx.h`. Used by
+/// `vpx_codec_control_` to map a legacy ctrl_id onto a typed
+/// [`crate::codec::ControlCmd`] variant.
 pub const VP8_SET_REFERENCE: i32 = 1;
 pub const VP8_COPY_REFERENCE: i32 = 2;
 pub const VP8_SET_POSTPROC: i32 = 3;
@@ -89,9 +88,8 @@ pub const VP8D_GET_LAST_REF_USED: i32 = 11;
 pub const VPXD_GET_LAST_QUANTIZER: i32 = 12;
 pub const VPXD_SET_DECRYPTOR: i32 = 13;
 
-/// `vpx_codec_alg_priv_t` for the VP8 decoder (`vp8_dx_iface.c:44-64`).
-/// Concrete adapter-private state — distinct from `vpx_api::VpxCodecAlgPriv`
-/// (the opaque pointer type used in the iface vtable).
+/// VP8-decoder private state (`vp8_dx_iface.c:44-64`'s
+/// `vpx_codec_alg_priv_t`). Owned by [`Vp8Decoder`].
 #[repr(C)]
 pub struct Vp8AlgPriv<'a> {
     pub base: VpxCodecPriv,
@@ -656,8 +654,8 @@ pub struct Vp8Decoder {
 }
 
 impl Vp8Decoder {
-    /// Construct a new VP8 decoder. Equivalent to `vp8_init` over a
-    /// freshly-zeroed context.
+    /// Construct a new VP8 decoder over a freshly-zeroed
+    /// `Vp8AlgPriv` (the analogue of libvpx's `vp8_init`).
     pub unsafe fn new(init_flags: VpxCodecFlags) -> Result<Self, Error> {
         let priv_ =
             vpx_calloc(1, core::mem::size_of::<Vp8AlgPriv<'static>>())
@@ -666,8 +664,6 @@ impl Vp8Decoder {
             return Err(VPX_CODEC_MEM_ERROR);
         }
 
-        // Mirrors vp8_init_ctx / vp8_init bodies but operates directly
-        // on the Vp8AlgPriv (no VpxCodecCtx wrapper required).
         vp8_rtcd();
         vpx_dsp_rtcd();
         vpx_scale_rtcd();
