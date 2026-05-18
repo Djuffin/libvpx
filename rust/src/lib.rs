@@ -43,7 +43,6 @@ pub mod reconintra4x4;
 pub mod rtcd;
 pub mod setupintrarecon;
 pub mod swapyv12buffer;
-pub mod systemdependent;
 pub mod vp8_loopfilter;
 
 // ---- vp8/decoder/ ----
@@ -84,6 +83,3 @@ pub mod vpx_thread;
 
 // ---- vpx_ports/ (header-only shims) ----
 pub mod vpx_ports;
-
-// ---- generated ----
-pub mod vpx_config;

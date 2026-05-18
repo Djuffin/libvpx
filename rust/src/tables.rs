@@ -385,11 +385,3 @@ pub const INTRA_RECON_ABOVE_SEED: u8 = 127;
 /// left-of-frame samples to be filled with 129.
 pub const INTRA_RECON_LEFT_SEED: u8 = 129;
 
-// ---------------------------------------------------------------------------
-// treecoder.c — only `vp8_prob_half` is data; the rest is code (translated
-// in a later phase). `vpx_config.c` carries only the build-config string.
-// ---------------------------------------------------------------------------
-
-/// `vpx_codec_build_config` string baked in at configure time.
-pub const VPX_CODEC_BUILD_CONFIG: &str = "--target=generic-gnu --disable-vp9 --disable-vp8-encoder --disable-postproc --disable-error-concealment --disable-multithread --disable-spatial-resampling --disable-examples --disable-tools --disable-docs --enable-unit-tests --enable-debug";
-

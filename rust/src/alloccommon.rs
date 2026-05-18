@@ -24,7 +24,6 @@ use crate::types::{
 // ---------------------------------------------------------------------------
 
 use crate::entropymode::{vp8_default_bmode_probs, vp8_init_mbmode_probs};
-use crate::systemdependent::vp8_machine_specific_config;
 use crate::vpx_mem::{vpx_calloc, vpx_free};
 use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buffer};
 
@@ -202,7 +201,9 @@ pub unsafe fn vp8_setup_version(cm: *mut Vp8Common) {
 ///
 /// Source: `vp8/common/alloccommon.c:169`.
 pub unsafe fn vp8_create_common(oci: *mut Vp8Common) {
-    vp8_machine_specific_config(oci);
+    // `vp8_machine_specific_config` in the C source either runs a CPU
+    // probe (multithread builds) or is a no-op (single-thread). With
+    // `--disable-multithread` it's a no-op, so the call is omitted.
 
     vp8_init_mbmode_probs(&mut *oci);
     vp8_default_bmode_probs(&mut (*oci).fc.bmode_prob);
