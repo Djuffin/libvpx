@@ -20,7 +20,18 @@ use vp8_decoder_rs::vpx_api::{
     vpx_codec_destroy, vpx_codec_iface_t, VPX_CODEC_OK, VPX_DECODER_ABI_VERSION,
 };
 
-const TEST_DATA_DIR: &str = "/home/eugene/projects/libvpx/vp8_only";
+const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
+
+fn test_data_dir(test_name: &str) -> Option<PathBuf> {
+    if TEST_DATA_DIR.is_empty() {
+        eprintln!(
+            "skipping {test_name}: VP8 test data not available \
+             (set LIBVPX_TEST_DATA_PATH or ensure network access at build time)"
+        );
+        return None;
+    }
+    Some(PathBuf::from(TEST_DATA_DIR))
+}
 
 /// XOR key used by the test (C: `test_key`).
 #[rustfmt::skip]
@@ -79,8 +90,9 @@ impl Ivf {
 
 #[test]
 fn decrypt_works_vp8() {
+    let Some(dir) = test_data_dir("decrypt_works_vp8") else { return };
     unsafe {
-        let path = PathBuf::from(TEST_DATA_DIR).join("vp80-00-comprehensive-001.ivf");
+        let path = dir.join("vp80-00-comprehensive-001.ivf");
         let mut video = Ivf::open(&path);
 
         let iface = vpx_codec_vp8_dx() as *mut vpx_codec_iface_t;

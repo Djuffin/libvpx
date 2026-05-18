@@ -4,10 +4,11 @@
 //! the public API, and verifies the per-frame MD5 against the canonical
 //! `<filename>.md5` companion file.
 //!
-//! Test data is sourced from the local libvpx build tree
-//! (`/home/eugene/projects/libvpx/vp8_only/`) — hardcoded path for now.
-//! A future iteration can read `$LIBVPX_TEST_DATA_PATH` like the C suite
-//! does.
+//! Test data is discovered at build time by `build.rs`: it honours
+//! `$LIBVPX_TEST_DATA_PATH`, probes a few conventional locations, and
+//! falls back to downloading from the WebM project storage bucket. If
+//! none of that works the tests skip themselves at runtime rather than
+//! failing.
 
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -24,11 +25,23 @@ use vp8_decoder_rs::vpx_api::{
     VPX_DECODER_ABI_VERSION, VPX_IMG_FMT_HIGHBITDEPTH,
 };
 
-/// Directory containing the IVF + `.md5` files. Hardcoded against the
-/// libvpx checkout used during initial bring-up; swap for a
-/// `$LIBVPX_TEST_DATA_PATH` lookup once the suite leaves the prototype
-/// phase.
-const TEST_DATA_DIR: &str = "/home/eugene/projects/libvpx/vp8_only";
+/// Build-time-discovered test data location (see `build.rs`). Empty
+/// string if neither the local probe nor the download fallback
+/// succeeded — tests skip silently in that case.
+const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
+
+/// Returns `Some(dir)` if test data is available, otherwise prints a
+/// skip notice and returns `None`. Callers `return` on `None`.
+fn test_data_dir(test_name: &str) -> Option<PathBuf> {
+    if TEST_DATA_DIR.is_empty() {
+        eprintln!(
+            "skipping {test_name}: VP8 test data not available \
+             (set LIBVPX_TEST_DATA_PATH or ensure network access at build time)"
+        );
+        return None;
+    }
+    Some(PathBuf::from(TEST_DATA_DIR))
+}
 
 /// The 62 VP8 conformance test vectors (`test/test_vectors.cc:18-51`).
 #[rustfmt::skip]
@@ -182,8 +195,9 @@ unsafe fn init_dec() -> vpx_codec_ctx_t {
 /// invisible keyframe (0 images out, only "didn't crash" verified).
 /// `max_packets = None` decodes the whole file.
 unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
-    let ivf_path = PathBuf::from(TEST_DATA_DIR).join(name);
-    let md5_path = PathBuf::from(TEST_DATA_DIR).join(format!("{name}.md5"));
+    let Some(dir) = test_data_dir(name) else { return };
+    let ivf_path = dir.join(name);
+    let md5_path = dir.join(format!("{name}.md5"));
     let expected = read_md5_lines(&md5_path);
 
     let mut reader = IvfReader::open(&ivf_path).expect("open ivf");

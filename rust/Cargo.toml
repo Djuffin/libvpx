@@ -2,9 +2,10 @@
 name = "vp8-decoder-rs"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [features]
-# Thread pool — `CONFIG_MULTITHREAD` in the C build. Off in `vp8_only`.
+# Thread pool — `CONFIG_MULTITHREAD` in the C build.
 multithread = []
 
 [dependencies]

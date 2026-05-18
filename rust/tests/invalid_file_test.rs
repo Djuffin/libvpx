@@ -9,8 +9,8 @@
 //! peek-test class overrides `HandlePeekResult` to no-op, which is
 //! implicit here (we never call peek).
 //!
-//! Test data is sourced from the local libvpx build tree
-//! (`/home/eugene/projects/libvpx/vp8_only/`).
+//! Test data is discovered at build time by `build.rs`. If discovery
+//! fails the tests skip themselves rather than failing.
 
 use core::mem::MaybeUninit;
 use core::ptr;
@@ -25,7 +25,18 @@ use vp8_decoder_rs::vpx_api::{
     VPX_DECODER_ABI_VERSION,
 };
 
-const TEST_DATA_DIR: &str = "/home/eugene/projects/libvpx/vp8_only";
+const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
+
+fn test_data_dir(test_name: &str) -> Option<PathBuf> {
+    if TEST_DATA_DIR.is_empty() {
+        eprintln!(
+            "skipping {test_name}: VP8 test data not available \
+             (set LIBVPX_TEST_DATA_PATH or ensure network access at build time)"
+        );
+        return None;
+    }
+    Some(PathBuf::from(TEST_DATA_DIR))
+}
 
 // --- IVF reader (same shape as test_vector_test) -------------------------
 
@@ -70,8 +81,9 @@ fn read_res_file(path: &PathBuf) -> Vec<VpxCodecErr> {
 }
 
 unsafe fn run_invalid_file(name: &str) {
-    let ivf_path = PathBuf::from(TEST_DATA_DIR).join(name);
-    let res_path = PathBuf::from(TEST_DATA_DIR).join(format!("{name}.res"));
+    let Some(dir) = test_data_dir(name) else { return };
+    let ivf_path = dir.join(name);
+    let res_path = dir.join(format!("{name}.res"));
     let expected = read_res_file(&res_path);
 
     let mut reader = IvfReader::open(&ivf_path).expect("open ivf");
