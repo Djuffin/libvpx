@@ -7,9 +7,9 @@ use core::ptr;
 use std::ffi::c_uint;
 
 use vp8_decoder_rs::vpx_api::{
-    vpx_image_t, vpx_img_alloc, vpx_img_free, vpx_img_set_rect, vpx_img_wrap,
-    VPX_IMG_FMT_I420, VPX_IMG_FMT_I42016, VPX_IMG_FMT_I444, VPX_IMG_FMT_NONE, VPX_IMG_FMT_NV12,
-    VPX_IMG_FMT_YV12, VPX_PLANE_U, VPX_PLANE_V, VPX_PLANE_Y,
+    VPX_IMG_FMT_I420, VPX_IMG_FMT_I444, VPX_IMG_FMT_I42016, VPX_IMG_FMT_NONE, VPX_IMG_FMT_NV12,
+    VPX_IMG_FMT_YV12, VPX_PLANE_U, VPX_PLANE_V, VPX_PLANE_Y, vpx_image_t, vpx_img_alloc,
+    vpx_img_free, vpx_img_set_rect, vpx_img_wrap,
 };
 
 /// C: `TEST(VpxImageTest, VpxImgWrapInvalidAlign)`.
@@ -32,9 +32,19 @@ fn vpx_img_wrap_invalid_align() {
     // `align = 31` is not a power of two → `vpx_img_wrap` must return null.
     let align: c_uint = 31;
     let r = unsafe {
-        vpx_img_wrap(img_ptr, VPX_IMG_FMT_I444, W as c_uint, H as c_uint, align, buf.as_mut_ptr())
+        vpx_img_wrap(
+            img_ptr,
+            VPX_IMG_FMT_I444,
+            W as c_uint,
+            H as c_uint,
+            align,
+            buf.as_mut_ptr(),
+        )
     };
-    assert!(r.is_null(), "vpx_img_wrap should fail on non-power-of-2 align");
+    assert!(
+        r.is_null(),
+        "vpx_img_wrap should fail on non-power-of-2 align"
+    );
 }
 
 /// C: `TEST(VpxImageTest, VpxImgSetRectOverflow)`.
@@ -47,9 +57,7 @@ fn vpx_img_set_rect_overflow() {
     let mut img: MaybeUninit<vpx_image_t> = MaybeUninit::uninit();
     let img_ptr = img.as_mut_ptr();
     let align: c_uint = 32;
-    let wrapped = unsafe {
-        vpx_img_wrap(img_ptr, VPX_IMG_FMT_I444, W, H, align, buf.as_mut_ptr())
-    };
+    let wrapped = unsafe { vpx_img_wrap(img_ptr, VPX_IMG_FMT_I444, W, H, align, buf.as_mut_ptr()) };
     assert_eq!(wrapped, img_ptr, "vpx_img_wrap should succeed");
 
     assert_eq!(unsafe { vpx_img_set_rect(img_ptr, 0, 0, W, H) }, 0);
@@ -66,9 +74,7 @@ fn vpx_img_set_rect_overflow() {
 #[test]
 fn vpx_img_alloc_none() {
     let mut img: MaybeUninit<vpx_image_t> = MaybeUninit::uninit();
-    let r = unsafe {
-        vpx_img_alloc(img.as_mut_ptr(), VPX_IMG_FMT_NONE, 128, 128, 32)
-    };
+    let r = unsafe { vpx_img_alloc(img.as_mut_ptr(), VPX_IMG_FMT_NONE, 128, 128, 32) };
     assert!(r.is_null(), "alloc with VPX_IMG_FMT_NONE must fail");
 }
 
@@ -82,10 +88,19 @@ fn vpx_img_alloc_nv12() {
 
     unsafe {
         // NV12 packs U and V interleaved into one plane → both share stride.
-        assert_eq!((*img_ptr).stride[VPX_PLANE_U], (*img_ptr).stride[VPX_PLANE_Y]);
-        assert_eq!((*img_ptr).stride[VPX_PLANE_V], (*img_ptr).stride[VPX_PLANE_U]);
+        assert_eq!(
+            (*img_ptr).stride[VPX_PLANE_U],
+            (*img_ptr).stride[VPX_PLANE_Y]
+        );
+        assert_eq!(
+            (*img_ptr).stride[VPX_PLANE_V],
+            (*img_ptr).stride[VPX_PLANE_U]
+        );
         // V plane pointer is U + 1 (interleaved layout).
-        assert_eq!((*img_ptr).planes[VPX_PLANE_V], (*img_ptr).planes[VPX_PLANE_U].add(1));
+        assert_eq!(
+            (*img_ptr).planes[VPX_PLANE_V],
+            (*img_ptr).planes[VPX_PLANE_U].add(1)
+        );
         vpx_img_free(img_ptr);
     }
 }

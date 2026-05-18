@@ -25,8 +25,8 @@
 use core::ffi::c_void;
 
 use crate::tables::{
-    MvContext, Prob, BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, PREV_COEF_CONTEXTS,
-    QINDEX_RANGE, VP8_BINTRAMODES, VP8_SUBMVREFS, VP8_UV_MODES, VP8_YMODES,
+    BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MvContext, PREV_COEF_CONTEXTS, Prob, QINDEX_RANGE,
+    VP8_BINTRAMODES, VP8_SUBMVREFS, VP8_UV_MODES, VP8_YMODES,
 };
 
 // ===========================================================================
@@ -546,8 +546,7 @@ pub struct FrameContext {
     pub ymode_prob: [Prob; VP8_YMODES - 1],
     pub uv_mode_prob: [Prob; VP8_UV_MODES - 1],
     pub sub_mv_ref_prob: [Prob; VP8_SUBMVREFS - 1],
-    pub coef_probs:
-        [[[[Prob; ENTROPY_NODES]; PREV_COEF_CONTEXTS]; COEF_BANDS]; BLOCK_TYPES],
+    pub coef_probs: [[[[Prob; ENTROPY_NODES]; PREV_COEF_CONTEXTS]; COEF_BANDS]; BLOCK_TYPES],
     /// `[0] = row`, `[1] = col` MV component probs.
     pub mvc: [MvContext; 2],
 }

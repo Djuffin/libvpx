@@ -7,9 +7,9 @@
 use std::os::raw::c_int;
 
 use vp8_decoder_rs::filter::{
-    vp8_bilinear_predict16x16_c, vp8_bilinear_predict4x4_c, vp8_bilinear_predict8x4_c,
-    vp8_bilinear_predict8x8_c, vp8_sixtap_predict16x16_c, vp8_sixtap_predict4x4_c,
-    vp8_sixtap_predict8x4_c, vp8_sixtap_predict8x8_c,
+    vp8_bilinear_predict4x4_c, vp8_bilinear_predict8x4_c, vp8_bilinear_predict8x8_c,
+    vp8_bilinear_predict16x16_c, vp8_sixtap_predict4x4_c, vp8_sixtap_predict8x4_c,
+    vp8_sixtap_predict8x8_c, vp8_sixtap_predict16x16_c,
 };
 
 type PredictFn = unsafe extern "C" fn(
@@ -55,7 +55,12 @@ impl PaddedDst {
     fn new(width: usize, height: usize) -> Self {
         let stride = BORDER + width + BORDER;
         let total = stride * (BORDER + height + BORDER);
-        Self { buf: vec![BORDER_FILL; total], stride, width, height }
+        Self {
+            buf: vec![BORDER_FILL; total],
+            stride,
+            width,
+            height,
+        }
     }
 
     fn dst_ptr(&mut self) -> *mut u8 {
@@ -75,8 +80,10 @@ impl PaddedDst {
     fn check_border(&self) -> bool {
         for y in 0..(BORDER + self.height + BORDER) {
             for x in 0..self.stride {
-                let in_active =
-                    y >= BORDER && y < BORDER + self.height && x >= BORDER && x < BORDER + self.width;
+                let in_active = y >= BORDER
+                    && y < BORDER + self.height
+                    && x >= BORDER
+                    && x < BORDER + self.width;
                 if !in_active && self.buf[y * self.stride + x] != BORDER_FILL {
                     return false;
                 }
@@ -113,12 +120,18 @@ fn test_with_random_data(width: usize, height: usize, predict: PredictFn) {
             padded.reset();
             dst_c.iter_mut().for_each(|b| *b = 0);
 
-            let src_base =
-                unsafe { src.as_mut_ptr().add(SRC_STRIDE * 2 + 2) };
+            let src_base = unsafe { src.as_mut_ptr().add(SRC_STRIDE * 2 + 2) };
 
             // Reference (= same function in our build).
             unsafe {
-                predict(src_base, SRC_STRIDE as c_int, xoffset, yoffset, dst_c.as_mut_ptr(), 16);
+                predict(
+                    src_base,
+                    SRC_STRIDE as c_int,
+                    xoffset,
+                    yoffset,
+                    dst_c.as_mut_ptr(),
+                    16,
+                );
             }
             // UUT writes into the padded destination.
             unsafe {
@@ -135,7 +148,10 @@ fn test_with_random_data(width: usize, height: usize, predict: PredictFn) {
             for y in 0..height {
                 let a = padded.row(y);
                 let b = &dst_c[y * 16..y * 16 + width];
-                assert_eq!(a, b, "row {y} differs at xoffset={xoffset}, yoffset={yoffset}");
+                assert_eq!(
+                    a, b,
+                    "row {y} differs at xoffset={xoffset}, yoffset={yoffset}"
+                );
             }
             assert!(
                 padded.check_border(),
@@ -162,10 +178,16 @@ fn test_with_unaligned_dst(width: usize, height: usize, predict: PredictFn) {
             for b in src.iter_mut() {
                 *b = rng.rand_u8();
             }
-            let src_base =
-                unsafe { src.as_mut_ptr().add(SRC_STRIDE * 2 + 2) };
+            let src_base = unsafe { src.as_mut_ptr().add(SRC_STRIDE * 2 + 2) };
             unsafe {
-                predict(src_base, SRC_STRIDE as c_int, xoffset, yoffset, dst_c.as_mut_ptr(), 16);
+                predict(
+                    src_base,
+                    SRC_STRIDE as c_int,
+                    xoffset,
+                    yoffset,
+                    dst_c.as_mut_ptr(),
+                    16,
+                );
             }
             for i in 1..4 {
                 padded.reset();
@@ -202,23 +224,53 @@ fn test_with_unaligned_dst(width: usize, height: usize, predict: PredictFn) {
 // SixtapPredict variants — TestWithRandomData
 // ------------------------------------------------------------------
 
-#[test] fn sixtap_random_16x16() { test_with_random_data(16, 16, vp8_sixtap_predict16x16_c); }
-#[test] fn sixtap_random_8x8()   { test_with_random_data(8, 8,  vp8_sixtap_predict8x8_c); }
-#[test] fn sixtap_random_8x4()   { test_with_random_data(8, 4,  vp8_sixtap_predict8x4_c); }
-#[test] fn sixtap_random_4x4()   { test_with_random_data(4, 4,  vp8_sixtap_predict4x4_c); }
+#[test]
+fn sixtap_random_16x16() {
+    test_with_random_data(16, 16, vp8_sixtap_predict16x16_c);
+}
+#[test]
+fn sixtap_random_8x8() {
+    test_with_random_data(8, 8, vp8_sixtap_predict8x8_c);
+}
+#[test]
+fn sixtap_random_8x4() {
+    test_with_random_data(8, 4, vp8_sixtap_predict8x4_c);
+}
+#[test]
+fn sixtap_random_4x4() {
+    test_with_random_data(4, 4, vp8_sixtap_predict4x4_c);
+}
 
-#[test] fn sixtap_unaligned_4x4() { test_with_unaligned_dst(4, 4, vp8_sixtap_predict4x4_c); }
+#[test]
+fn sixtap_unaligned_4x4() {
+    test_with_unaligned_dst(4, 4, vp8_sixtap_predict4x4_c);
+}
 
 // ------------------------------------------------------------------
 // BilinearPredict variants — TestWithRandomData
 // ------------------------------------------------------------------
 
-#[test] fn bilinear_random_16x16() { test_with_random_data(16, 16, vp8_bilinear_predict16x16_c); }
-#[test] fn bilinear_random_8x8()   { test_with_random_data(8, 8,  vp8_bilinear_predict8x8_c); }
-#[test] fn bilinear_random_8x4()   { test_with_random_data(8, 4,  vp8_bilinear_predict8x4_c); }
-#[test] fn bilinear_random_4x4()   { test_with_random_data(4, 4,  vp8_bilinear_predict4x4_c); }
+#[test]
+fn bilinear_random_16x16() {
+    test_with_random_data(16, 16, vp8_bilinear_predict16x16_c);
+}
+#[test]
+fn bilinear_random_8x8() {
+    test_with_random_data(8, 8, vp8_bilinear_predict8x8_c);
+}
+#[test]
+fn bilinear_random_8x4() {
+    test_with_random_data(8, 4, vp8_bilinear_predict8x4_c);
+}
+#[test]
+fn bilinear_random_4x4() {
+    test_with_random_data(4, 4, vp8_bilinear_predict4x4_c);
+}
 
-#[test] fn bilinear_unaligned_4x4() { test_with_unaligned_dst(4, 4, vp8_bilinear_predict4x4_c); }
+#[test]
+fn bilinear_unaligned_4x4() {
+    test_with_unaligned_dst(4, 4, vp8_bilinear_predict4x4_c);
+}
 
 // ------------------------------------------------------------------
 // SixtapPredict 16x16 — TestWithPresetData

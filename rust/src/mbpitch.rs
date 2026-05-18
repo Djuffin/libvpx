@@ -16,32 +16,35 @@ use crate::types::Macroblockd;
 pub unsafe fn vp8_setup_block_dptrs(x: *mut Macroblockd) {
     for r in 0..4i32 {
         for c in 0..4i32 {
-            (*x).block[(r * 4 + c) as usize].predictor =
-                (*x).predictor.as_mut_ptr().offset((r * 4 * 16 + c * 4) as isize);
+            (*x).block[(r * 4 + c) as usize].predictor = (*x)
+                .predictor
+                .as_mut_ptr()
+                .offset((r * 4 * 16 + c * 4) as isize);
         }
     }
 
     for r in 0..2i32 {
         for c in 0..2i32 {
-            (*x).block[(16 + r * 2 + c) as usize].predictor =
-                (*x).predictor.as_mut_ptr().offset((256 + r * 4 * 8 + c * 4) as isize);
+            (*x).block[(16 + r * 2 + c) as usize].predictor = (*x)
+                .predictor
+                .as_mut_ptr()
+                .offset((256 + r * 4 * 8 + c * 4) as isize);
         }
     }
 
     for r in 0..2i32 {
         for c in 0..2i32 {
-            (*x).block[(20 + r * 2 + c) as usize].predictor =
-                (*x).predictor.as_mut_ptr().offset((320 + r * 4 * 8 + c * 4) as isize);
+            (*x).block[(20 + r * 2 + c) as usize].predictor = (*x)
+                .predictor
+                .as_mut_ptr()
+                .offset((320 + r * 4 * 8 + c * 4) as isize);
         }
     }
 
     for r in 0..25i32 {
-        (*x).block[r as usize].qcoeff =
-            (*x).qcoeff.as_mut_ptr().offset((r * 16) as isize);
-        (*x).block[r as usize].dqcoeff =
-            (*x).dqcoeff.as_mut_ptr().offset((r * 16) as isize);
-        (*x).block[r as usize].eob =
-            (*x).eobs.as_mut_ptr().offset(r as isize);
+        (*x).block[r as usize].qcoeff = (*x).qcoeff.as_mut_ptr().offset((r * 16) as isize);
+        (*x).block[r as usize].dqcoeff = (*x).dqcoeff.as_mut_ptr().offset((r * 16) as isize);
+        (*x).block[r as usize].eob = (*x).eobs.as_mut_ptr().offset(r as isize);
     }
 }
 
@@ -53,8 +56,7 @@ pub unsafe fn vp8_setup_block_dptrs(x: *mut Macroblockd) {
 pub unsafe fn vp8_build_block_doffsets(x: *mut Macroblockd) {
     // y blocks
     for block in 0..16i32 {
-        (*x).block[block as usize].offset =
-            (block >> 2) * 4 * (*x).dst.y_stride + (block & 3) * 4;
+        (*x).block[block as usize].offset = (block >> 2) * 4 * (*x).dst.y_stride + (block & 3) * 4;
     }
 
     // U and V blocks

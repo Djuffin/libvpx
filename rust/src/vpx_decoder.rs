@@ -11,10 +11,10 @@
 use core::ffi::c_void;
 use core::ptr;
 
+use crate::codec::Decoder;
+use crate::vp8_dx_iface::Vp8Decoder;
 use crate::vpx_api::*;
 use crate::vpx_codec::vpx_codec_destroy;
-use crate::vp8_dx_iface::Vp8Decoder;
-use crate::codec::Decoder;
 
 /// Stash `var` into `ctx.err` (if `ctx` is `Some`) and return it.
 #[inline]
@@ -36,7 +36,9 @@ pub unsafe fn vpx_codec_dec_init_ver(
     if ver != VPX_DECODER_ABI_VERSION {
         return save_status(ctx, VPX_CODEC_ABI_MISMATCH);
     }
-    let Some(ctx) = ctx else { return VPX_CODEC_INVALID_PARAM };
+    let Some(ctx) = ctx else {
+        return VPX_CODEC_INVALID_PARAM;
+    };
     let Some(iface) = iface else {
         ctx.err = VPX_CODEC_INVALID_PARAM;
         return VPX_CODEC_INVALID_PARAM;
@@ -46,7 +48,10 @@ pub unsafe fn vpx_codec_dec_init_ver(
     // advertise to honor it. Empty intersection => INCAPABLE.
     const CAP_REQUIRED: &[(VpxCodecFlags, VpxCodecCaps)] = &[
         (VPX_CODEC_USE_POSTPROC, VPX_CODEC_CAP_POSTPROC),
-        (VPX_CODEC_USE_ERROR_CONCEALMENT, VPX_CODEC_CAP_ERROR_CONCEALMENT),
+        (
+            VPX_CODEC_USE_ERROR_CONCEALMENT,
+            VPX_CODEC_CAP_ERROR_CONCEALMENT,
+        ),
         (VPX_CODEC_USE_INPUT_FRAGMENTS, VPX_CODEC_CAP_INPUT_FRAGMENTS),
     ];
 
@@ -73,7 +78,9 @@ pub unsafe fn vpx_codec_dec_init_ver(
     ctx.name = Some(iface.name);
     ctx.priv_ = ptr::null_mut();
     ctx.init_flags = flags;
-    ctx.config.dec = cfg.map(|c| c as *const VpxCodecDecCfg).unwrap_or(ptr::null());
+    ctx.config.dec = cfg
+        .map(|c| c as *const VpxCodecDecCfg)
+        .unwrap_or(ptr::null());
     ctx.trait_obj = None;
 
     // VP8 is currently the only algorithm; when VP9 lands a small
@@ -111,7 +118,9 @@ pub fn vpx_codec_peek_stream_info(
     if iface.is_none() || data.is_empty() {
         return VPX_CODEC_INVALID_PARAM;
     }
-    let Some(si) = si else { return VPX_CODEC_INVALID_PARAM };
+    let Some(si) = si else {
+        return VPX_CODEC_INVALID_PARAM;
+    };
     if (si.sz as usize) < core::mem::size_of::<VpxCodecStreamInfo>() {
         return VPX_CODEC_INVALID_PARAM;
     }
@@ -133,7 +142,9 @@ pub unsafe fn vpx_codec_get_stream_info(
     ctx: Option<&mut VpxCodecCtx>,
     si: Option<&mut VpxCodecStreamInfo>,
 ) -> VpxCodecErr {
-    let Some(ctx) = ctx else { return VPX_CODEC_INVALID_PARAM };
+    let Some(ctx) = ctx else {
+        return VPX_CODEC_INVALID_PARAM;
+    };
     let Some(si) = si else {
         ctx.err = VPX_CODEC_INVALID_PARAM;
         return VPX_CODEC_INVALID_PARAM;
@@ -169,7 +180,9 @@ pub fn vpx_codec_decode(
     user_priv: *mut c_void,
     _deadline: i64,
 ) -> VpxCodecErr {
-    let Some(ctx) = ctx else { return VPX_CODEC_INVALID_PARAM };
+    let Some(ctx) = ctx else {
+        return VPX_CODEC_INVALID_PARAM;
+    };
     if ctx.iface.is_none() || ctx.trait_obj.is_none() {
         ctx.err = VPX_CODEC_ERROR;
         return VPX_CODEC_ERROR;

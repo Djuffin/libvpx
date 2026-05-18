@@ -106,8 +106,7 @@ unsafe fn vp8_filter(mask: i8, hev: Uc, op1: *mut u8, op0: *mut u8, oq0: *mut u8
     filter_value &= hev as i8;
 
     /* inner taps */
-    filter_value =
-        vp8_signed_char_clamp(filter_value as i32 + 3 * (qs0 as i32 - ps0 as i32));
+    filter_value = vp8_signed_char_clamp(filter_value as i32 + 3 * (qs0 as i32 - ps0 as i32));
     filter_value &= mask;
 
     /* save bottom 3 bits so that we round one side +4 and the other +3
@@ -229,14 +228,7 @@ unsafe fn loop_filter_vertical_edge_c(
             *s.offset(1),
         ) as i32;
 
-        vp8_filter(
-            mask,
-            hev as u8,
-            s.offset(-2),
-            s.offset(-1),
-            s,
-            s.offset(1),
-        );
+        vp8_filter(mask, hev as u8, s.offset(-2), s.offset(-1), s, s.offset(1));
 
         s = s.offset(p as isize);
         i += 1;
@@ -280,8 +272,7 @@ unsafe fn vp8_mbfilter(
 
     /* add outer taps if we have high edge variance */
     filter_value = vp8_signed_char_clamp(ps1 as i32 - qs1 as i32);
-    filter_value =
-        vp8_signed_char_clamp(filter_value as i32 + 3 * (qs0 as i32 - ps0 as i32));
+    filter_value = vp8_signed_char_clamp(filter_value as i32 + 3 * (qs0 as i32 - ps0 as i32));
     filter_value &= mask;
 
     Filter2 = filter_value;
@@ -471,8 +462,7 @@ unsafe fn vp8_simple_filter(mask: i8, op1: *mut u8, op0: *mut u8, oq0: *mut u8, 
     let mut u: i8;
 
     filter_value = vp8_signed_char_clamp(p1 as i32 - q1 as i32);
-    filter_value =
-        vp8_signed_char_clamp(filter_value as i32 + 3 * (q0 as i32 - p0 as i32));
+    filter_value = vp8_signed_char_clamp(filter_value as i32 + 3 * (q0 as i32 - p0 as i32));
     filter_value &= mask;
 
     /* save bottom 3 bits so that we round one side +4 and the other +3 */
@@ -550,7 +540,13 @@ pub unsafe fn vp8_loop_filter_simple_vertical_edge_c(
             *y_ptr.offset(0),
             *y_ptr.offset(1),
         );
-        vp8_simple_filter(mask, y_ptr.offset(-2), y_ptr.offset(-1), y_ptr, y_ptr.offset(1));
+        vp8_simple_filter(
+            mask,
+            y_ptr.offset(-2),
+            y_ptr.offset(-1),
+            y_ptr,
+            y_ptr.offset(1),
+        );
         y_ptr = y_ptr.offset(y_stride as isize);
         i += 1;
         if i >= 16 {
@@ -573,14 +569,7 @@ pub unsafe fn vp8_loop_filter_mbh_c(
     uv_stride: i32,
     lfi: *mut LoopFilterInfo,
 ) {
-    mbloop_filter_horizontal_edge_c(
-        y_ptr,
-        y_stride,
-        (*lfi).mblim,
-        (*lfi).lim,
-        (*lfi).hev_thr,
-        2,
-    );
+    mbloop_filter_horizontal_edge_c(y_ptr, y_stride, (*lfi).mblim, (*lfi).lim, (*lfi).hev_thr, 2);
 
     if !u_ptr.is_null() {
         mbloop_filter_horizontal_edge_c(
@@ -619,14 +608,7 @@ pub unsafe fn vp8_loop_filter_mbv_c(
     uv_stride: i32,
     lfi: *mut LoopFilterInfo,
 ) {
-    mbloop_filter_vertical_edge_c(
-        y_ptr,
-        y_stride,
-        (*lfi).mblim,
-        (*lfi).lim,
-        (*lfi).hev_thr,
-        2,
-    );
+    mbloop_filter_vertical_edge_c(y_ptr, y_stride, (*lfi).mblim, (*lfi).lim, (*lfi).hev_thr, 2);
 
     if !u_ptr.is_null() {
         mbloop_filter_vertical_edge_c(
@@ -718,16 +700,8 @@ pub unsafe fn vp8_loop_filter_bh_c(
 /// # Safety
 /// `blimit` must point to at least one byte.
 pub unsafe fn vp8_loop_filter_bhs_c(y_ptr: *mut u8, y_stride: i32, blimit: *const u8) {
-    vp8_loop_filter_simple_horizontal_edge_c(
-        y_ptr.offset(4 * y_stride as isize),
-        y_stride,
-        blimit,
-    );
-    vp8_loop_filter_simple_horizontal_edge_c(
-        y_ptr.offset(8 * y_stride as isize),
-        y_stride,
-        blimit,
-    );
+    vp8_loop_filter_simple_horizontal_edge_c(y_ptr.offset(4 * y_stride as isize), y_stride, blimit);
+    vp8_loop_filter_simple_horizontal_edge_c(y_ptr.offset(8 * y_stride as isize), y_stride, blimit);
     vp8_loop_filter_simple_horizontal_edge_c(
         y_ptr.offset(12 * y_stride as isize),
         y_stride,

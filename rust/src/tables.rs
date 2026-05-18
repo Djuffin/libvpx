@@ -384,4 +384,3 @@ pub const INTRA_RECON_ABOVE_SEED: u8 = 127;
 /// Left-column seed byte for intra reconstruction; RFC 6386 §12.2 requires
 /// left-of-frame samples to be filled with 129.
 pub const INTRA_RECON_LEFT_SEED: u8 = 129;
-

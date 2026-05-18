@@ -44,12 +44,7 @@ pub unsafe fn vp8_dequantize_b_c(d: *mut Blockd, DQC: *mut i16) {
 /// residual onto `dest` (stride `stride`), then zeros the 16-short
 /// `input` buffer (32 bytes) so the next pass over this MB starts
 /// from a clean slate.
-pub unsafe fn vp8_dequant_idct_add_c(
-    input: *mut i16,
-    dq: *mut i16,
-    dest: *mut u8,
-    stride: i32,
-) {
+pub unsafe fn vp8_dequant_idct_add_c(input: *mut i16, dq: *mut i16, dest: *mut u8, stride: i32) {
     for i in 0..16isize {
         let prod = (*dq.offset(i) as i32).wrapping_mul(*input.offset(i) as i32);
         *input.offset(i) = prod as i16;

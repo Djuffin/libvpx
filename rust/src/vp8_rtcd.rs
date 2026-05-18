@@ -10,8 +10,7 @@
 //! initialised by `vp8_rtcd()` (see `crate::rtcd`).
 
 pub use crate::dequantize::{
-    vp8_dequant_idct_add_c as vp8_dequant_idct_add,
-    vp8_dequantize_b_c as vp8_dequantize_b,
+    vp8_dequant_idct_add_c as vp8_dequant_idct_add, vp8_dequantize_b_c as vp8_dequantize_b,
 };
 
 pub use crate::idct_blk::{
@@ -20,8 +19,7 @@ pub use crate::idct_blk::{
 };
 
 pub use crate::idctllm::{
-    vp8_dc_only_idct_add_c as vp8_dc_only_idct_add,
-    vp8_short_idct4x4llm_c as vp8_short_idct4x4llm,
+    vp8_dc_only_idct_add_c as vp8_dc_only_idct_add, vp8_short_idct4x4llm_c as vp8_short_idct4x4llm,
     vp8_short_inv_walsh4x4_1_c as vp8_short_inv_walsh4x4_1,
     vp8_short_inv_walsh4x4_c as vp8_short_inv_walsh4x4,
 };

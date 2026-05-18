@@ -70,12 +70,10 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
         b1 = (*ip.offset(0) as i32) - (*ip.offset(8) as i32);
 
         temp1 = ((*ip.offset(4) as i32) * sinpi8sqrt2) >> 16;
-        temp2 = (*ip.offset(12) as i32)
-            + (((*ip.offset(12) as i32) * cospi8sqrt2minus1) >> 16);
+        temp2 = (*ip.offset(12) as i32) + (((*ip.offset(12) as i32) * cospi8sqrt2minus1) >> 16);
         c1 = temp1 - temp2;
 
-        temp1 = (*ip.offset(4) as i32)
-            + (((*ip.offset(4) as i32) * cospi8sqrt2minus1) >> 16);
+        temp1 = (*ip.offset(4) as i32) + (((*ip.offset(4) as i32) * cospi8sqrt2minus1) >> 16);
         temp2 = ((*ip.offset(12) as i32) * sinpi8sqrt2) >> 16;
         d1 = temp1 + temp2;
 
@@ -98,12 +96,10 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
         b1 = (*ip.offset(0) as i32) - (*ip.offset(2) as i32);
 
         temp1 = ((*ip.offset(1) as i32) * sinpi8sqrt2) >> 16;
-        temp2 = (*ip.offset(3) as i32)
-            + (((*ip.offset(3) as i32) * cospi8sqrt2minus1) >> 16);
+        temp2 = (*ip.offset(3) as i32) + (((*ip.offset(3) as i32) * cospi8sqrt2minus1) >> 16);
         c1 = temp1 - temp2;
 
-        temp1 = (*ip.offset(1) as i32)
-            + (((*ip.offset(1) as i32) * cospi8sqrt2minus1) >> 16);
+        temp1 = (*ip.offset(1) as i32) + (((*ip.offset(1) as i32) * cospi8sqrt2minus1) >> 16);
         temp2 = ((*ip.offset(3) as i32) * sinpi8sqrt2) >> 16;
         d1 = temp1 + temp2;
 
@@ -192,10 +188,7 @@ pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
 /// scattering the 16 recovered luma DCs into the DC slot of each Y
 /// residual block (`mb_dqcoeff[i * 16]`).
 
-pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
-    input: *mut i16,
-    mb_dqcoeff: *mut i16,
-) {
+pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *mut i16) {
     let mut output: [i16; 16] = [0; 16];
     let mut a1: i32;
     let mut b1: i32;
@@ -226,7 +219,6 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
 
     ip = output.as_mut_ptr();
     op = output.as_mut_ptr();
-
     for _ in 0..4 {
         a1 = (*ip.offset(0) as i32) + (*ip.offset(3) as i32);
         b1 = (*ip.offset(1) as i32) + (*ip.offset(2) as i32);
@@ -246,7 +238,6 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
         ip = ip.offset(4);
         op = op.offset(4);
     }
-
     for i in 0..16 {
         *mb_dqcoeff.offset((i * 16) as isize) = output[i as usize];
     }
@@ -259,10 +250,7 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
 /// `vp8_short_inv_walsh4x4_1_c` — fast path when only the WHT DC is
 /// non-zero; every Y block gets the same recovered DC.
 
-pub unsafe extern "C" fn vp8_short_inv_walsh4x4_1_c(
-    input: *mut i16,
-    mb_dqcoeff: *mut i16,
-) {
+pub unsafe extern "C" fn vp8_short_inv_walsh4x4_1_c(input: *mut i16, mb_dqcoeff: *mut i16) {
     let a1: i32 = ((*input.offset(0) as i32) + 3) >> 3;
 
     for i in 0..16 {

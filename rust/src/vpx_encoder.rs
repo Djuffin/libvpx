@@ -67,15 +67,11 @@ pub fn vpx_codec_get_cx_data<'a>(
     None
 }
 
-pub fn vpx_codec_get_global_headers(
-    _ctx: Option<&mut VpxCodecCtx>,
-) -> Option<&VpxFixedBuf> {
+pub fn vpx_codec_get_global_headers(_ctx: Option<&mut VpxCodecCtx>) -> Option<&VpxFixedBuf> {
     None
 }
 
-pub fn vpx_codec_get_preview_frame(
-    _ctx: Option<&mut VpxCodecCtx>,
-) -> Option<&VpxImage> {
+pub fn vpx_codec_get_preview_frame(_ctx: Option<&mut VpxCodecCtx>) -> Option<&VpxImage> {
     None
 }
 

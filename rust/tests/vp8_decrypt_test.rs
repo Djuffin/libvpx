@@ -13,11 +13,11 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::PathBuf;
 
-use vp8_decoder_rs::vp8_dx_iface::{VpxDecryptInit, VPXD_SET_DECRYPTOR};
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
+use vp8_decoder_rs::vp8_dx_iface::{VPXD_SET_DECRYPTOR, VpxDecryptInit};
 use vp8_decoder_rs::vpx_api::{
-    vpx_codec_control_, vpx_codec_ctx_t, vpx_codec_dec_init_ver, vpx_codec_decode,
-    vpx_codec_destroy, VPX_CODEC_OK, VPX_DECODER_ABI_VERSION,
+    VPX_CODEC_OK, VPX_DECODER_ABI_VERSION, vpx_codec_control_, vpx_codec_ctx_t,
+    vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy,
 };
 
 const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
@@ -92,7 +92,9 @@ impl Ivf {
 
 #[test]
 fn decrypt_works_vp8() {
-    let Some(dir) = test_data_dir("decrypt_works_vp8") else { return };
+    let Some(dir) = test_data_dir("decrypt_works_vp8") else {
+        return;
+    };
     unsafe {
         let path = dir.join("vp80-00-comprehensive-001.ivf");
         let mut video = Ivf::open(&path);

@@ -10,7 +10,7 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 
-use crate::types::{Blockd, BModeInfo, Macroblockd, MbPredictionMode, Mv, SubpixFn};
+use crate::types::{BModeInfo, Blockd, Macroblockd, MbPredictionMode, Mv, SubpixFn};
 
 // ===========================================================================
 // External dependencies (sub-pel filter kernels — defined in `filter.c`
@@ -169,7 +169,6 @@ pub unsafe fn vp8_build_inter_predictors_b(
     pre_stride: i32,
     sppf: SubpixFn,
 ) {
-
     let mut pred_ptr: *mut u8 = (*d).predictor;
     let mut ptr: *mut u8;
     let mv = bmi_mv(&(*d).bmi);
@@ -277,7 +276,6 @@ unsafe fn build_inter_predictors_b(
     pre_stride: i32,
     sppf: SubpixFn,
 ) {
-
     let mut ptr: *mut u8;
     let mv = bmi_mv(&(*d).bmi);
     ptr = base_pre
@@ -404,8 +402,7 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
 
     // C tests `_16x16mv.as_int & 0x00070007`; mirror by packing into the
     // same layout `entropymode::mv_as_int` uses (col<<16 | row).
-    let mut as_int: u32 =
-        ((_16x16mv.col as u16 as u32) << 16) | (_16x16mv.row as u16 as u32);
+    let mut as_int: u32 = ((_16x16mv.col as u16 as u32) << 16) | (_16x16mv.row as u16 as u32);
 
     if (as_int & 0x0007_0007) != 0 {
         ((*x).subpixel_predict16x16)(

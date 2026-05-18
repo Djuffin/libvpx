@@ -14,7 +14,9 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
-use crate::tables::{VP8_BILINEAR_FILTERS, VP8_FILTER_SHIFT, VP8_FILTER_WEIGHT, VP8_SUB_PEL_FILTERS};
+use crate::tables::{
+    VP8_BILINEAR_FILTERS, VP8_FILTER_SHIFT, VP8_FILTER_WEIGHT, VP8_SUB_PEL_FILTERS,
+};
 
 // ---------------------------------------------------------------------------
 // Re-exports of the tap tables under their original C identifiers.
@@ -53,8 +55,7 @@ unsafe fn filter_block2d_first_pass(
                 + (*src_ptr.offset(-1 * pixel_step as isize) as i32)
                     * (*vp8_filter.offset(1) as i32)
                 + (*src_ptr.offset(0) as i32) * (*vp8_filter.offset(2) as i32)
-                + (*src_ptr.offset(pixel_step as isize) as i32)
-                    * (*vp8_filter.offset(3) as i32)
+                + (*src_ptr.offset(pixel_step as isize) as i32) * (*vp8_filter.offset(3) as i32)
                 + (*src_ptr.offset(2 * pixel_step as isize) as i32)
                     * (*vp8_filter.offset(4) as i32)
                 + (*src_ptr.offset(3 * pixel_step as isize) as i32)

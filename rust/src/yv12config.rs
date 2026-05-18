@@ -57,7 +57,11 @@ pub unsafe fn vp8_yv12_de_alloc_frame_buffer(ybf: *mut Yv12BufferConfig) -> i32 
         // buffer_alloc isn't accessed by most functions. Rather y_buffer,
         // u_buffer and v_buffer point to buffer_alloc and are used. Clear
         // out all of this so that a freed pointer isn't inadvertently used.
-        ptr::write_bytes(ybf as *mut u8, 0u8, core::mem::size_of::<Yv12BufferConfig>());
+        ptr::write_bytes(
+            ybf as *mut u8,
+            0u8,
+            core::mem::size_of::<Yv12BufferConfig>(),
+        );
     } else {
         return -1;
     }

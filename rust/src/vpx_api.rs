@@ -21,9 +21,9 @@ use core::ffi::{c_int, c_long, c_uint, c_ulong, c_void};
 // ===========================================================================
 
 pub use crate::types::{
-    VpxCodecErr, VpxResult, VPX_CODEC_ABI_MISMATCH, VPX_CODEC_CORRUPT_FRAME,
-    VPX_CODEC_ERROR, VPX_CODEC_INCAPABLE, VPX_CODEC_INVALID_PARAM, VPX_CODEC_LIST_END,
-    VPX_CODEC_MEM_ERROR, VPX_CODEC_OK, VPX_CODEC_UNSUP_BITSTREAM, VPX_CODEC_UNSUP_FEATURE,
+    VPX_CODEC_ABI_MISMATCH, VPX_CODEC_CORRUPT_FRAME, VPX_CODEC_ERROR, VPX_CODEC_INCAPABLE,
+    VPX_CODEC_INVALID_PARAM, VPX_CODEC_LIST_END, VPX_CODEC_MEM_ERROR, VPX_CODEC_OK,
+    VPX_CODEC_UNSUP_BITSTREAM, VPX_CODEC_UNSUP_FEATURE, VpxCodecErr, VpxResult,
 };
 
 pub type vpx_codec_err_t = VpxCodecErr;
@@ -93,21 +93,16 @@ pub type VpxImgFmt = i32;
 pub type vpx_img_fmt_t = VpxImgFmt;
 
 pub const VPX_IMG_FMT_NONE: vpx_img_fmt_t = 0;
-pub const VPX_IMG_FMT_YV12: vpx_img_fmt_t =
-    VPX_IMG_FMT_PLANAR | VPX_IMG_FMT_UV_FLIP | 1;
+pub const VPX_IMG_FMT_YV12: vpx_img_fmt_t = VPX_IMG_FMT_PLANAR | VPX_IMG_FMT_UV_FLIP | 1;
 pub const VPX_IMG_FMT_I420: vpx_img_fmt_t = VPX_IMG_FMT_PLANAR | 2;
 pub const VPX_IMG_FMT_I422: vpx_img_fmt_t = VPX_IMG_FMT_PLANAR | 5;
 pub const VPX_IMG_FMT_I444: vpx_img_fmt_t = VPX_IMG_FMT_PLANAR | 6;
 pub const VPX_IMG_FMT_I440: vpx_img_fmt_t = VPX_IMG_FMT_PLANAR | 7;
 pub const VPX_IMG_FMT_NV12: vpx_img_fmt_t = VPX_IMG_FMT_PLANAR | 9;
-pub const VPX_IMG_FMT_I42016: vpx_img_fmt_t =
-    VPX_IMG_FMT_I420 | VPX_IMG_FMT_HIGHBITDEPTH;
-pub const VPX_IMG_FMT_I42216: vpx_img_fmt_t =
-    VPX_IMG_FMT_I422 | VPX_IMG_FMT_HIGHBITDEPTH;
-pub const VPX_IMG_FMT_I44416: vpx_img_fmt_t =
-    VPX_IMG_FMT_I444 | VPX_IMG_FMT_HIGHBITDEPTH;
-pub const VPX_IMG_FMT_I44016: vpx_img_fmt_t =
-    VPX_IMG_FMT_I440 | VPX_IMG_FMT_HIGHBITDEPTH;
+pub const VPX_IMG_FMT_I42016: vpx_img_fmt_t = VPX_IMG_FMT_I420 | VPX_IMG_FMT_HIGHBITDEPTH;
+pub const VPX_IMG_FMT_I42216: vpx_img_fmt_t = VPX_IMG_FMT_I422 | VPX_IMG_FMT_HIGHBITDEPTH;
+pub const VPX_IMG_FMT_I44416: vpx_img_fmt_t = VPX_IMG_FMT_I444 | VPX_IMG_FMT_HIGHBITDEPTH;
+pub const VPX_IMG_FMT_I44016: vpx_img_fmt_t = VPX_IMG_FMT_I440 | VPX_IMG_FMT_HIGHBITDEPTH;
 
 pub type VpxColorSpace = u32;
 pub type vpx_color_space_t = VpxColorSpace;
@@ -210,9 +205,8 @@ pub type VpxGetFrameBufferCbFnT = Option<
 >;
 pub type vpx_get_frame_buffer_cb_fn_t = VpxGetFrameBufferCbFnT;
 
-pub type VpxReleaseFrameBufferCbFnT = Option<
-    unsafe extern "C" fn(priv_: *mut c_void, fb: *mut VpxCodecFrameBuffer) -> c_int,
->;
+pub type VpxReleaseFrameBufferCbFnT =
+    Option<unsafe extern "C" fn(priv_: *mut c_void, fb: *mut VpxCodecFrameBuffer) -> c_int>;
 pub type vpx_release_frame_buffer_cb_fn_t = VpxReleaseFrameBufferCbFnT;
 
 // ===========================================================================
@@ -438,17 +432,16 @@ pub use crate::vpx_codec::{
 };
 
 pub use crate::vpx_decoder::{
-    vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_get_frame,
-    vpx_codec_get_stream_info, vpx_codec_peek_stream_info,
-    vpx_codec_register_put_frame_cb, vpx_codec_register_put_slice_cb,
+    vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_get_frame, vpx_codec_get_stream_info,
+    vpx_codec_peek_stream_info, vpx_codec_register_put_frame_cb, vpx_codec_register_put_slice_cb,
     vpx_codec_set_frame_buffer_functions,
 };
 
 pub use crate::vpx_encoder::{
     vpx_codec_enc_config_default, vpx_codec_enc_config_set, vpx_codec_enc_init_multi_ver,
-    vpx_codec_enc_init_ver, vpx_codec_encode, vpx_codec_get_cx_data,
-    vpx_codec_get_global_headers, vpx_codec_get_preview_frame,
-    vpx_codec_pkt_list_add, vpx_codec_pkt_list_get, vpx_codec_set_cx_data_buf,
+    vpx_codec_enc_init_ver, vpx_codec_encode, vpx_codec_get_cx_data, vpx_codec_get_global_headers,
+    vpx_codec_get_preview_frame, vpx_codec_pkt_list_add, vpx_codec_pkt_list_get,
+    vpx_codec_set_cx_data_buf,
 };
 
 pub use crate::vpx_image::{

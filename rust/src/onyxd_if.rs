@@ -24,8 +24,8 @@ use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{
-    FragmentData, FrameBuffers, MbModeInfo, ModeInfo, Vp8Common,
-    Vp8dComp, Vp8dConfig, Vp8PpFlags, VpxResult, Yv12BufferConfig, NUM_YV12_BUFFERS,
+    FragmentData, FrameBuffers, MbModeInfo, ModeInfo, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
+    Vp8dComp, Vp8dConfig, VpxResult, Yv12BufferConfig,
 };
 
 // ===========================================================================
@@ -38,8 +38,8 @@ use crate::types::{
 use crate::vpx_api::{VPX_CODEC_ERROR, VPX_CODEC_OK};
 
 use crate::types::{
-    ALTREF_FRAME, GOLDEN_FRAME, INTRA_FRAME, LAST_FRAME, VP8_ALTR_FRAME,
-    VP8_GOLD_FRAME, VP8_LAST_FRAME,
+    ALTREF_FRAME, GOLDEN_FRAME, INTRA_FRAME, LAST_FRAME, VP8_ALTR_FRAME, VP8_GOLD_FRAME,
+    VP8_LAST_FRAME,
 };
 
 /// `enum vpx_ref_frame_type` (`vpx/vp8.h`). Bitmask values used by the
@@ -91,8 +91,7 @@ unsafe fn remove_decompressor(pbi: *mut Vp8dComp<'static>) {
 /// `vp8/decoder/onyxd_if.c:66`. On `Err` the half-initialized instance
 /// is torn down via [`remove_decompressor`].
 unsafe fn create_decompressor(oxcf: *mut Vp8dConfig) -> *mut Vp8dComp<'static> {
-    let pbi = vpx_memalign(32, core::mem::size_of::<Vp8dComp<'static>>())
-        as *mut Vp8dComp<'static>;
+    let pbi = vpx_memalign(32, core::mem::size_of::<Vp8dComp<'static>>()) as *mut Vp8dComp<'static>;
 
     if pbi.is_null() {
         return ptr::null_mut();
@@ -241,11 +240,11 @@ unsafe fn swap_frame_buffers(cm: *mut Vp8Common) -> i32 {
             (*cm).new_fb_idx,
         );
 
-        (*cm).frame_to_show = &mut (*cm).yv12_fb[(*cm).lst_fb_idx as usize]
-            as *mut Yv12BufferConfig;
+        (*cm).frame_to_show =
+            &mut (*cm).yv12_fb[(*cm).lst_fb_idx as usize] as *mut Yv12BufferConfig;
     } else {
-        (*cm).frame_to_show = &mut (*cm).yv12_fb[(*cm).new_fb_idx as usize]
-            as *mut Yv12BufferConfig;
+        (*cm).frame_to_show =
+            &mut (*cm).yv12_fb[(*cm).new_fb_idx as usize] as *mut Yv12BufferConfig;
     }
 
     (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] -= 1;
@@ -257,10 +256,7 @@ unsafe fn swap_frame_buffers(cm: *mut Vp8Common) -> i32 {
 /// `vp8/decoder/onyxd_if.c:270`.
 unsafe fn check_fragments_for_errors(pbi: *mut Vp8dComp<'static>) -> i32 {
     let fragments: *mut FragmentData = &mut (*pbi).fragments;
-    if (*pbi).ec_active == 0
-        && (*fragments).count <= 1
-        && (*fragments).sizes[0] == 0
-    {
+    if (*pbi).ec_active == 0 && (*fragments).count <= 1 && (*fragments).sizes[0] == 0 {
         let cm: *mut Vp8Common = &mut (*pbi).common;
 
         // If error concealment is disabled we won't signal missing frames
@@ -484,10 +480,7 @@ pub unsafe fn vp8dx_get_raw_frame(
 /// macroblock referenced `ref_frame`. The trailing `mi = mi.add(1)` past
 /// each row skips the sentinel column at `mode_info_stride - 1`.
 
-pub unsafe fn vp8dx_references_buffer(
-    oci: *mut Vp8Common,
-    ref_frame: i32,
-) -> i32 {
+pub unsafe fn vp8dx_references_buffer(oci: *mut Vp8Common, ref_frame: i32) -> i32 {
     let mut mi: *const ModeInfo = (*oci).mi as *const ModeInfo;
 
     for _ in 0..(*oci).mb_rows {

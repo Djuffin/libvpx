@@ -41,7 +41,9 @@ pub unsafe fn once(func: unsafe fn()) {
     let key = func as usize;
     let once_ref: &'static Once = {
         let mut guard = map.lock().unwrap();
-        guard.entry(key).or_insert_with(|| Box::leak(Box::new(Once::new())))
+        guard
+            .entry(key)
+            .or_insert_with(|| Box::leak(Box::new(Once::new())))
     };
 
     once_ref.call_once(|| func());

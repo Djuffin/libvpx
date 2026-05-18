@@ -11,13 +11,16 @@
 use core::ffi::c_void;
 use core::ptr;
 
-use crate::types::{DecryptCb, DecryptCbMut, FragmentData, FrameBuffers, Vp8dConfig, Vp8dComp, Vp8PpFlags, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, VP8_BORDER_IN_PIXELS};
-use crate::vpx_api::*;
-use crate::vpx_codec::vpx_internal_error;
 use crate::onyxd_if::{
     vp8_create_decoder_instances, vp8_remove_decoder_instances, vp8dx_get_raw_frame,
     vp8dx_get_reference, vp8dx_set_reference,
 };
+use crate::types::{
+    DecryptCb, DecryptCbMut, FragmentData, FrameBuffers, MAX_PARTITIONS, VP8_BORDER_IN_PIXELS,
+    Vp8PpFlags, Vp8dComp, Vp8dConfig, VpxInternalErrorInfo, Yv12BufferConfig,
+};
+use crate::vpx_api::*;
+use crate::vpx_codec::vpx_internal_error;
 
 // ===========================================================================
 // Local types — adapter-private, not part of the public libvpx API.
@@ -40,12 +43,7 @@ pub type Vp8StreamInfo = VpxCodecStreamInfo;
 
 /// `vpx_decrypt_cb` (`vpx/vp8dx.h`).
 pub type VpxDecryptCb = Option<
-    unsafe extern "C" fn(
-        decrypt_state: *mut c_void,
-        input: *const u8,
-        output: *mut u8,
-        count: i32,
-    ),
+    unsafe extern "C" fn(decrypt_state: *mut c_void, input: *const u8, output: *mut u8, count: i32),
 >;
 
 /// `vpx_decrypt_init` (`vpx/vp8dx.h:174`).
@@ -115,7 +113,6 @@ pub struct Vp8AlgPriv<'a> {
 // translated separately).
 // ===========================================================================
 
-
 // From `vp8/decoder/onyxd_if.rs`. The `*_inner` adapter calls below
 // import the new-style `VpxResult`-returning helpers directly.
 use crate::onyxd_if::{
@@ -128,17 +125,13 @@ use crate::rtcd::vp8_rtcd;
 use crate::vpx_dsp_rtcd::vpx_dsp_rtcd;
 use crate::vpx_scale_rtcd::vpx_scale_rtcd;
 
-
 use crate::types::{
-    ALTREF_FRAME, GOLDEN_FRAME, LAST_FRAME, VP8_ALTR_FRAME, VP8_GOLD_FRAME,
-    VP8_LAST_FRAME,
+    ALTREF_FRAME, GOLDEN_FRAME, LAST_FRAME, VP8_ALTR_FRAME, VP8_GOLD_FRAME, VP8_LAST_FRAME,
 };
 
 // ===========================================================================
 // Helpers
 // ===========================================================================
-
-
 
 // ===========================================================================
 // `vp8_dx_iface.c` static helpers
@@ -211,10 +204,7 @@ pub unsafe fn vp8_peek_si(
 }
 
 /// `vp8_get_si` — `vp8/vp8_dx_iface.c:183`. Vtable `dec.get_si` slot.
-pub unsafe fn vp8_get_si(
-    ctx: &Vp8AlgPriv<'static>,
-    si: *mut VpxCodecStreamInfo,
-) -> VpxCodecErr {
+pub unsafe fn vp8_get_si(ctx: &Vp8AlgPriv<'static>, si: *mut VpxCodecStreamInfo) -> VpxCodecErr {
     let sz: u32 = if (*si).sz as usize >= core::mem::size_of::<Vp8StreamInfo>() {
         core::mem::size_of::<Vp8StreamInfo>() as u32
     } else {
@@ -415,16 +405,18 @@ pub unsafe fn vp8_decode(
 
         // If postprocessing was enabled by the application and a
         // configuration has not been provided, default it.
-        if (*ctx).postproc_cfg_set == 0
-            && ((*ctx).base.init_flags & VPX_CODEC_USE_POSTPROC) != 0
-        {
+        if (*ctx).postproc_cfg_set == 0 && ((*ctx).base.init_flags & VPX_CODEC_USE_POSTPROC) != 0 {
             (*ctx).postproc_cfg.post_proc_flag = VP8_DEBLOCK | VP8_DEMACROBLOCK | VP8_MFQE;
             (*ctx).postproc_cfg.deblocking_level = 4;
             (*ctx).postproc_cfg.noise_level = 0;
         }
 
         let rc = vp8_create_decoder_instances(&mut (*ctx).yv12_frame_buffers, &mut oxcf);
-        res = if rc == VPX_CODEC_OK as i32 { VPX_CODEC_OK } else { VPX_CODEC_ERROR };
+        res = if rc == VPX_CODEC_OK as i32 {
+            VPX_CODEC_OK
+        } else {
+            VPX_CODEC_ERROR
+        };
         if res == VPX_CODEC_OK {
             (*ctx).decoder_init = 1;
         } else {
@@ -632,8 +624,7 @@ impl Vp8Decoder {
         // primitive ints, raw pointers (null), arrays of the same, and
         // `Option<Box<dyn FnMut + 'static>>` which uses null-pointer
         // optimization on the data pointer (zero ↦ None).
-        let mut priv_: Box<Vp8AlgPriv<'static>> =
-            Box::new(unsafe { core::mem::zeroed() });
+        let mut priv_: Box<Vp8AlgPriv<'static>> = Box::new(unsafe { core::mem::zeroed() });
 
         vp8_rtcd();
         vpx_dsp_rtcd();
@@ -641,10 +632,12 @@ impl Vp8Decoder {
 
         priv_.base.init_flags = init_flags;
         priv_.si.sz = core::mem::size_of::<Vp8StreamInfo>() as u32;
-        priv_.fragments.enabled =
-            ((init_flags & VPX_CODEC_USE_INPUT_FRAGMENTS) != 0) as i32;
+        priv_.fragments.enabled = ((init_flags & VPX_CODEC_USE_INPUT_FRAGMENTS) != 0) as i32;
 
-        Ok(Vp8Decoder { priv_, iter: ptr::null() })
+        Ok(Vp8Decoder {
+            priv_,
+            iter: ptr::null(),
+        })
     }
 
     /// Raw pointer into the underlying `Vp8AlgPriv`. Used by
@@ -683,18 +676,18 @@ impl Decoder for Vp8Decoder {
             // newly-decoded image instead of replaying the previous one.
             self.iter = core::ptr::null();
             let err = vp8_decode(&raw mut *self.priv_, ptr, len);
-            if err == VPX_CODEC_OK { Ok(()) } else { Err(err) }
+            if err == VPX_CODEC_OK {
+                Ok(())
+            } else {
+                Err(err)
+            }
         }
     }
 
     fn get_frame(&mut self) -> Option<&Image> {
         unsafe {
             let img = vp8_get_frame(&raw mut *self.priv_, &mut self.iter);
-            if img.is_null() {
-                None
-            } else {
-                Some(&*img)
-            }
+            if img.is_null() { None } else { Some(&*img) }
         }
     }
 
@@ -708,11 +701,7 @@ impl Decoder for Vp8Decoder {
                     if ctx.yv12_frame_buffers.pbi[0].is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
-                    vp8dx_set_reference(
-                        ctx.yv12_frame_buffers.pbi[0],
-                        frame.frame_type,
-                        &mut sd,
-                    )
+                    vp8dx_set_reference(ctx.yv12_frame_buffers.pbi[0], frame.frame_type, &mut sd)
                 }
                 ControlCmd::CopyReference(frame) => {
                     let mut sd: Yv12BufferConfig = core::mem::zeroed();
@@ -720,11 +709,7 @@ impl Decoder for Vp8Decoder {
                     if ctx.yv12_frame_buffers.pbi[0].is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
-                    vp8dx_get_reference(
-                        ctx.yv12_frame_buffers.pbi[0],
-                        frame.frame_type,
-                        &mut sd,
-                    )
+                    vp8dx_get_reference(ctx.yv12_frame_buffers.pbi[0], frame.frame_type, &mut sd)
                 }
                 ControlCmd::SetPostproc(_cfg) => {
                     // CONFIG_POSTPROC=0 in the minimal build.
@@ -785,15 +770,14 @@ impl Decoder for Vp8Decoder {
                     ctx.decrypt = init.and_then(|i| {
                         let cb_fn = i.decrypt_cb?;
                         let state = i.decrypt_state;
-                        let boxed: DecryptCb =
-                            Box::new(move |input: &[u8], output: &mut [u8]| {
-                                cb_fn(
-                                    state,
-                                    input.as_ptr(),
-                                    output.as_mut_ptr(),
-                                    input.len() as i32,
-                                );
-                            });
+                        let boxed: DecryptCb = Box::new(move |input: &[u8], output: &mut [u8]| {
+                            cb_fn(
+                                state,
+                                input.as_ptr(),
+                                output.as_mut_ptr(),
+                                input.len() as i32,
+                            );
+                        });
                         Some(boxed)
                     });
                     Ok(())
@@ -807,7 +791,11 @@ impl Decoder for Vp8Decoder {
             let mut si: VpxCodecStreamInfo = core::mem::zeroed();
             si.sz = core::mem::size_of::<VpxCodecStreamInfo>() as u32;
             let res = vp8_peek_si(data.as_ptr(), data.len() as u32, &mut si);
-            if res == VPX_CODEC_OK { Ok(si) } else { Err(res) }
+            if res == VPX_CODEC_OK {
+                Ok(si)
+            } else {
+                Err(res)
+            }
         }
     }
 
@@ -816,7 +804,11 @@ impl Decoder for Vp8Decoder {
             let mut si: VpxCodecStreamInfo = core::mem::zeroed();
             si.sz = core::mem::size_of::<VpxCodecStreamInfo>() as u32;
             let res = vp8_get_si(&self.priv_, &mut si);
-            if res == VPX_CODEC_OK { Ok(si) } else { Err(res) }
+            if res == VPX_CODEC_OK {
+                Ok(si)
+            } else {
+                Err(res)
+            }
         }
     }
 }

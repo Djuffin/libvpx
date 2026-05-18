@@ -6,8 +6,8 @@
 //! `decodemv.c` / `decodeframe.c` and must exist as a Rust symbol.
 
 use crate::dboolhuff::{vp8_decode_value, vp8dx_decode_bool};
+use crate::tables::{PROB_HALF, Prob, TreeIndex};
 use crate::types::BoolDecoder;
-use crate::tables::{Prob, TreeIndex, PROB_HALF};
 
 /// `typedef BOOL_DECODER vp8_reader;` — the bitstream-side bool decoder.
 pub type vp8_reader<'a> = BoolDecoder<'a>;
@@ -37,11 +37,7 @@ pub unsafe fn vp8_read_bit(r: *mut vp8_reader<'_>) -> i32 {
 /// libvpx tree: positive indices are jumps within the tree array,
 /// non-positive indices are terminal leaves whose value is `-i`.
 #[inline]
-pub unsafe fn vp8_treed_read(
-    r: *mut vp8_reader<'_>,
-    t: *const TreeIndex,
-    p: *const Prob,
-) -> i32 {
+pub unsafe fn vp8_treed_read(r: *mut vp8_reader<'_>, t: *const TreeIndex, p: *const Prob) -> i32 {
     let mut i: TreeIndex = 0;
     loop {
         let bit = vp8_read(r, *p.offset((i >> 1) as isize) as i32);

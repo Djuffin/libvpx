@@ -19,9 +19,8 @@
 use core::ptr;
 
 use crate::types::{
-    FrameType, LoopFilterInfo, LoopFilterInfoN, Macroblockd,
-    MbPredictionMode, ModeInfo, Vp8Common, INTRA_FRAME, MAX_LOOP_FILTER,
-    MAX_MB_SEGMENTS, MAX_REF_FRAMES,
+    FrameType, INTRA_FRAME, LoopFilterInfo, LoopFilterInfoN, MAX_LOOP_FILTER, MAX_MB_SEGMENTS,
+    MAX_REF_FRAMES, Macroblockd, MbPredictionMode, ModeInfo, Vp8Common,
 };
 
 // ---------------------------------------------------------------------------
@@ -122,7 +121,6 @@ unsafe fn vp8_loop_filter_simple_bh(y_ptr: *mut u8, y_stride: i32, blimit: *cons
     vp8_loop_filter_bhs_c(y_ptr, y_stride, blimit)
 }
 
-
 // ---------------------------------------------------------------------------
 // `lf_init_lut` — static helper (vp8/common/vp8_loopfilter.c:17).
 // ---------------------------------------------------------------------------
@@ -166,10 +164,7 @@ unsafe fn lf_init_lut(lfi: *mut LoopFilterInfoN) {
 /// For each possible value of `filter_level` (0..=63), fills out the
 /// three per-strength byte vectors (`lim`, `blim`, `mblim`) in `lfi`
 /// using the current sharpness level. See RFC 6386 §15.4.
-pub unsafe fn vp8_loop_filter_update_sharpness(
-    lfi: *mut LoopFilterInfoN,
-    sharpness_lvl: i32,
-) {
+pub unsafe fn vp8_loop_filter_update_sharpness(lfi: *mut LoopFilterInfoN, sharpness_lvl: i32) {
     /* For each possible value for the loop filter fill out limits */
     for i in 0..=MAX_LOOP_FILTER as usize {
         let filt_lvl: i32 = i as i32;
@@ -333,28 +328,20 @@ pub unsafe fn vp8_loop_filter_row_normal(
             lfi.hev_thr = (*lfi_n).hev_thr[hev_index].as_ptr();
 
             if mb_col > 0 {
-                vp8_loop_filter_mbv(
-                    y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi,
-                );
+                vp8_loop_filter_mbv(y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi);
             }
 
             if !skip_lf {
-                vp8_loop_filter_bv(
-                    y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi,
-                );
+                vp8_loop_filter_bv(y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi);
             }
 
             /* don't apply across umv border */
             if mb_row > 0 {
-                vp8_loop_filter_mbh(
-                    y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi,
-                );
+                vp8_loop_filter_mbh(y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi);
             }
 
             if !skip_lf {
-                vp8_loop_filter_bh(
-                    y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi,
-                );
+                vp8_loop_filter_bh(y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi);
             }
         }
 
@@ -429,4 +416,3 @@ pub unsafe fn vp8_loop_filter_row_simple(
         mode_info_context = mode_info_context.offset(1); /* step to next MB */
     }
 }
-

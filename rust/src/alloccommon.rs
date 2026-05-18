@@ -15,8 +15,8 @@ use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{
-    ClampType, EntropyContextPlanes, LoopFilterType, ModeInfo, TokenPartition,
-    Vp8Common, MAX_REF_FRAMES, NUM_YV12_BUFFERS, VP8_BORDER_IN_PIXELS,
+    ClampType, EntropyContextPlanes, LoopFilterType, MAX_REF_FRAMES, ModeInfo, NUM_YV12_BUFFERS,
+    TokenPartition, VP8_BORDER_IN_PIXELS, Vp8Common,
 };
 
 // ---------------------------------------------------------------------------
@@ -62,11 +62,7 @@ pub unsafe fn vp8_de_alloc_frame_buffers(oci: *mut Vp8Common) {
 /// (matching the C convention).
 ///
 /// Source: `vp8/common/alloccommon.c:59`.
-pub unsafe fn vp8_alloc_frame_buffers(
-    oci: *mut Vp8Common,
-    mut width: i32,
-    mut height: i32,
-) -> i32 {
+pub unsafe fn vp8_alloc_frame_buffers(oci: *mut Vp8Common, mut width: i32, mut height: i32) -> i32 {
     vp8_de_alloc_frame_buffers(oci);
 
     /* our internal buffers are always multiples of 16 */
@@ -79,12 +75,8 @@ pub unsafe fn vp8_alloc_frame_buffers(
     }
 
     for i in 0..NUM_YV12_BUFFERS {
-        if vp8_yv12_alloc_frame_buffer(
-            &mut (*oci).yv12_fb[i],
-            width,
-            height,
-            VP8_BORDER_IN_PIXELS,
-        ) < 0
+        if vp8_yv12_alloc_frame_buffer(&mut (*oci).yv12_fb[i], width, height, VP8_BORDER_IN_PIXELS)
+            < 0
         {
             // goto allocation_fail
             vp8_de_alloc_frame_buffers(oci);
@@ -210,11 +202,7 @@ pub unsafe fn vp8_create_common(oci: *mut Vp8Common) {
     (*oci).clamp_type = ClampType::Required;
 
     /* Initialize reference frame sign bias structure to defaults */
-    ptr::write_bytes(
-        (*oci).ref_frame_sign_bias.as_mut_ptr(),
-        0,
-        MAX_REF_FRAMES,
-    );
+    ptr::write_bytes((*oci).ref_frame_sign_bias.as_mut_ptr(), 0, MAX_REF_FRAMES);
 
     /* Default disable buffer to buffer copying */
     (*oci).copy_buffer_to_gf = 0;

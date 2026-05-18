@@ -24,7 +24,7 @@
 
 use core::ffi::c_void;
 use core::ptr;
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 
 // ===========================================================================
 // vpx-mem-specific types.
@@ -204,8 +204,7 @@ pub unsafe fn vpx_free(memblk: *mut c_void) {
     if !memblk.is_null() {
         let (addr, total) = get_actual_malloc_address(memblk);
         // Reconstruct the same Layout used by `vpx_memalign`.
-        let layout =
-            Layout::from_size_align_unchecked(total, core::mem::size_of::<size_t>());
+        let layout = Layout::from_size_align_unchecked(total, core::mem::size_of::<size_t>());
         dealloc(addr as *mut u8, layout);
     }
 }

@@ -6,12 +6,11 @@ use core::mem::MaybeUninit;
 
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
 use vp8_decoder_rs::vpx_api::{
-    vpx_codec_ctx_t, vpx_codec_dec_cfg_t, vpx_codec_dec_init_ver, vpx_codec_decode,
-    vpx_codec_destroy, vpx_codec_error, vpx_codec_error_detail, vpx_codec_get_caps,
-    VpxCodecErr, VpxCodecFlags, VPX_CODEC_CAP_HIGHBITDEPTH,
-    VPX_CODEC_INCAPABLE, VPX_CODEC_INVALID_PARAM, VPX_CODEC_OK, VPX_CODEC_UNSUP_BITSTREAM,
-    VPX_CODEC_USE_ERROR_CONCEALMENT, VPX_CODEC_USE_INPUT_FRAGMENTS, VPX_DECODER_ABI_VERSION,
-    VpxCodecIface,
+    VPX_CODEC_CAP_HIGHBITDEPTH, VPX_CODEC_INCAPABLE, VPX_CODEC_INVALID_PARAM, VPX_CODEC_OK,
+    VPX_CODEC_UNSUP_BITSTREAM, VPX_CODEC_USE_ERROR_CONCEALMENT, VPX_CODEC_USE_INPUT_FRAGMENTS,
+    VPX_DECODER_ABI_VERSION, VpxCodecErr, VpxCodecFlags, VpxCodecIface, vpx_codec_ctx_t,
+    vpx_codec_dec_cfg_t, vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy,
+    vpx_codec_error, vpx_codec_error_detail, vpx_codec_get_caps,
 };
 
 unsafe fn dec_init(
@@ -88,10 +87,7 @@ fn invalid_params_via_iface() {
             vpx_codec_decode(Some(dec.assume_init_mut()), &[], core::ptr::null_mut(), 0),
             VPX_CODEC_OK
         );
-        assert_eq!(
-            vpx_codec_destroy(Some(dec.assume_init_mut())),
-            VPX_CODEC_OK
-        );
+        assert_eq!(vpx_codec_destroy(Some(dec.assume_init_mut())), VPX_CODEC_OK);
     }
 }
 
@@ -120,7 +116,11 @@ fn vp8_flush_with_no_fragments() {
     unsafe {
         let iface = vpx_codec_vp8_dx();
         let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
-        let cfg = vpx_codec_dec_cfg_t { threads: 1, w: 0, h: 0 };
+        let cfg = vpx_codec_dec_cfg_t {
+            threads: 1,
+            w: 0,
+            h: 0,
+        };
         let flags: VpxCodecFlags = VPX_CODEC_USE_INPUT_FRAGMENTS;
 
         assert_eq!(

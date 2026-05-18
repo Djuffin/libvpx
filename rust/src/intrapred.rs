@@ -69,8 +69,10 @@ unsafe fn d117_predictor(
 ) {
     // first row
     for c in 0..bs {
-        *dst.offset(c as isize) =
-            avg2(*above.offset(c as isize - 1) as i32, *above.offset(c as isize) as i32);
+        *dst.offset(c as isize) = avg2(
+            *above.offset(c as isize - 1) as i32,
+            *above.offset(c as isize) as i32,
+        );
     }
     dst = dst.offset(stride);
 
@@ -112,13 +114,7 @@ unsafe fn d117_predictor(
     }
 }
 
-unsafe fn d135_predictor(
-    dst: *mut u8,
-    stride: isize,
-    bs: i32,
-    above: *const u8,
-    left: *const u8,
-) {
+unsafe fn d135_predictor(dst: *mut u8, stride: isize, bs: i32, above: *const u8, left: *const u8) {
     // outer border from bottom-left to top-right; max size 32+32-1 = 63,
     // padded to 69 to mirror the C `#if __GNUC__ == 4 ...` branch.
     let mut border = [0u8; 69];
@@ -173,8 +169,10 @@ unsafe fn d153_predictor(
 ) {
     *dst.offset(0) = avg2(*above.offset(-1) as i32, *left.offset(0) as i32);
     for r in 1..bs {
-        *dst.offset(r as isize * stride) =
-            avg2(*left.offset((r - 1) as isize) as i32, *left.offset(r as isize) as i32);
+        *dst.offset(r as isize * stride) = avg2(
+            *left.offset((r - 1) as isize) as i32,
+            *left.offset(r as isize) as i32,
+        );
     }
     dst = dst.offset(1);
 
@@ -334,7 +332,6 @@ unsafe fn dc_predictor(
 // Hand-unrolled 4x4 entry points.
 // ===========================================================================
 
-
 pub unsafe extern "C" fn vpx_he_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -352,7 +349,6 @@ pub unsafe extern "C" fn vpx_he_predictor_4x4_c(
     ptr::write_bytes(dst.offset(stride * 2), avg3(J, K, L), 4);
     ptr::write_bytes(dst.offset(stride * 3), avg3(K, L, L), 4);
 }
-
 
 pub unsafe extern "C" fn vpx_ve_predictor_4x4_c(
     dst: *mut u8,
@@ -375,7 +371,6 @@ pub unsafe extern "C" fn vpx_ve_predictor_4x4_c(
     ptr::copy_nonoverlapping(dst, dst.offset(stride * 2), 4);
     ptr::copy_nonoverlapping(dst, dst.offset(stride * 3), 4);
 }
-
 
 pub unsafe extern "C" fn vpx_d207_predictor_4x4_c(
     dst: *mut u8,
@@ -412,7 +407,6 @@ pub unsafe extern "C" fn vpx_d207_predictor_4x4_c(
     dst_set(dst, stride, 2, 3, vL);
     dst_set(dst, stride, 3, 3, vL);
 }
-
 
 pub unsafe extern "C" fn vpx_d63_predictor_4x4_c(
     dst: *mut u8,
@@ -452,7 +446,6 @@ pub unsafe extern "C" fn vpx_d63_predictor_4x4_c(
     dst_set(dst, stride, 2, 3, v);
     dst_set(dst, stride, 3, 3, avg3(E, F, G)); // differs from vp8
 }
-
 
 pub unsafe extern "C" fn vpx_d63e_predictor_4x4_c(
     dst: *mut u8,
@@ -494,7 +487,6 @@ pub unsafe extern "C" fn vpx_d63e_predictor_4x4_c(
     dst_set(dst, stride, 3, 3, avg3(F, G, H));
 }
 
-
 pub unsafe extern "C" fn vpx_d45_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -533,7 +525,6 @@ pub unsafe extern "C" fn vpx_d45_predictor_4x4_c(
     dst_set(dst, stride, 3, 3, H as u8); // differs from vp8
 }
 
-
 pub unsafe extern "C" fn vpx_d45e_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -571,7 +562,6 @@ pub unsafe extern "C" fn vpx_d45e_predictor_4x4_c(
     dst_set(dst, stride, 2, 3, v);
     dst_set(dst, stride, 3, 3, avg3(G, H, H));
 }
-
 
 pub unsafe extern "C" fn vpx_d117_predictor_4x4_c(
     dst: *mut u8,
@@ -613,7 +603,6 @@ pub unsafe extern "C" fn vpx_d117_predictor_4x4_c(
     dst_set(dst, stride, 3, 1, avg3(B, C, D));
 }
 
-
 pub unsafe extern "C" fn vpx_d135_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -652,7 +641,6 @@ pub unsafe extern "C" fn vpx_d135_predictor_4x4_c(
     dst_set(dst, stride, 2, 0, v);
     dst_set(dst, stride, 3, 0, avg3(D, C, B));
 }
-
 
 pub unsafe extern "C" fn vpx_d153_predictor_4x4_c(
     dst: *mut u8,
@@ -706,7 +694,6 @@ pub unsafe extern "C" fn vpx_d153_predictor_4x4_c(
 
 macro_rules! intra_pred_sized_rs {
     ($name:ident, $tpl:ident, $size:expr) => {
-        
         pub unsafe extern "C" fn $name(
             dst: *mut u8,
             stride: isize,

@@ -17,14 +17,14 @@ use core::ffi::{c_int, c_uint, c_void};
 use core::ptr;
 
 use crate::tables::{
-    Prob, BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MAXQ, PREV_COEF_CONTEXTS,
-    VP8_COEF_UPDATE_PROBS, VP8_DEFAULT_MV_CONTEXT, VP8_MB_FEATURE_DATA_BITS,
+    BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MAXQ, PREV_COEF_CONTEXTS, Prob, VP8_COEF_UPDATE_PROBS,
+    VP8_DEFAULT_MV_CONTEXT, VP8_MB_FEATURE_DATA_BITS,
 };
 use crate::types::{
-    Blockd, ClampType, EntropyContextPlanes, FrameType, LoopFilterType, Macroblockd,
-    MbLevelFeature, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame, TokenPartition,
-    Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig, MAX_MB_SEGMENTS, MAX_MODE_LF_DELTAS,
-    MAX_REF_FRAMES, MAX_REF_LF_DELTAS, MB_FEATURE_TREE_PROBS, MB_LVL_MAX,
+    Blockd, ClampType, EntropyContextPlanes, FrameType, LoopFilterType, MAX_MB_SEGMENTS,
+    MAX_MODE_LF_DELTAS, MAX_REF_FRAMES, MAX_REF_LF_DELTAS, MB_FEATURE_TREE_PROBS, MB_LVL_MAX,
+    Macroblockd, MbLevelFeature, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame,
+    TokenPartition, Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ use crate::entropy::vp8_default_coef_probs;
 use crate::entropymode::vp8_init_mbmode_probs;
 use crate::extend::vp8_extend_mb_row;
 use crate::quant_common::{
-    vp8_ac2quant, vp8_ac_uv_quant, vp8_ac_yquant, vp8_dc2quant, vp8_dc_quant, vp8_dc_uv_quant,
+    vp8_ac_uv_quant, vp8_ac_yquant, vp8_ac2quant, vp8_dc_quant, vp8_dc_uv_quant, vp8_dc2quant,
 };
 use crate::reconinter::vp8_build_inter_predictors_mb;
 use crate::reconintra::{vp8_build_intra_predictors_mbuv_s, vp8_build_intra_predictors_mby_s};
@@ -132,8 +132,7 @@ pub unsafe fn vp8_mb_init_dequantizer(pbi: *mut Vp8dComp<'static>, xd: *mut Macr
     if (*xd).segmentation_enabled != 0 {
         /* Abs Value */
         if (*xd).mb_segment_abs_delta == SEGMENT_ABSDATA {
-            QIndex =
-                (*xd).segment_feature_data[MB_LVL_ALT_Q][(*mbmi).segment_id as usize] as c_int;
+            QIndex = (*xd).segment_feature_data[MB_LVL_ALT_Q][(*mbmi).segment_id as usize] as c_int;
         } else {
             /* Delta Value */
             QIndex = (*pc).base_qindex
@@ -141,7 +140,11 @@ pub unsafe fn vp8_mb_init_dequantizer(pbi: *mut Vp8dComp<'static>, xd: *mut Macr
         }
 
         QIndex = if QIndex >= 0 {
-            if QIndex <= MAXQ as c_int { QIndex } else { MAXQ as c_int }
+            if QIndex <= MAXQ as c_int {
+                QIndex
+            } else {
+                MAXQ as c_int
+            }
         } else {
             0
         };
@@ -229,14 +232,15 @@ unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _
                 // Extract the 4x4 intra mode from the BModeInfo enum at this
                 // sub-block slot. In C this is `bmi[i].as_mode` — a plain
                 // `B_PREDICTION_MODE`.
-                let b_mode_val: crate::types::BPredictionMode = match (*(*xd).mode_info_context).bmi[i as usize] {
-                    crate::types::BModeInfo::Intra(m) => m,
-                    // SPLITMV path stores an Mv here; in B_PRED context this
-                    // branch should be unreachable, but mirror C's behaviour
-                    // (which would just read garbage from the union) by
-                    // treating it as DC_PRED.
-                    crate::types::BModeInfo::Mv(_) => crate::types::BPredictionMode::DcPred,
-                };
+                let b_mode_val: crate::types::BPredictionMode =
+                    match (*(*xd).mode_info_context).bmi[i as usize] {
+                        crate::types::BModeInfo::Intra(m) => m,
+                        // SPLITMV path stores an Mv here; in B_PRED context this
+                        // branch should be unreachable, but mirror C's behaviour
+                        // (which would just read garbage from the union) by
+                        // treating it as DC_PRED.
+                        crate::types::BModeInfo::Mv(_) => crate::types::BPredictionMode::DcPred,
+                    };
                 let above: *mut u8 = dst.offset(-(dst_stride as isize));
                 let yleft: *mut u8 = dst.offset(-1);
                 let left_stride: c_int = dst_stride;
@@ -265,7 +269,11 @@ unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _
                             dst,
                             dst_stride,
                         );
-                        ptr::write_bytes((*b).qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
+                        ptr::write_bytes(
+                            (*b).qcoeff as *mut u8,
+                            0,
+                            2 * core::mem::size_of::<i16>(),
+                        );
                     }
                 }
             }
@@ -287,21 +295,13 @@ unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _
                     vp8_dequantize_b(b, (*xd).dequant_y2.as_mut_ptr());
 
                     vp8_short_inv_walsh4x4((*b).dqcoeff, (*xd).qcoeff.as_mut_ptr());
-                    ptr::write_bytes(
-                        (*b).qcoeff as *mut u8,
-                        0,
-                        16 * core::mem::size_of::<i16>(),
-                    );
+                    ptr::write_bytes((*b).qcoeff as *mut u8, 0, 16 * core::mem::size_of::<i16>());
                 } else {
                     let q0 = *(*b).qcoeff;
                     let dq0 = (*xd).dequant_y2[0];
                     *(*b).dqcoeff = (q0 as i32 * dq0 as i32) as i16;
                     vp8_short_inv_walsh4x4_1((*b).dqcoeff, (*xd).qcoeff.as_mut_ptr());
-                    ptr::write_bytes(
-                        (*b).qcoeff as *mut u8,
-                        0,
-                        2 * core::mem::size_of::<i16>(),
-                    );
+                    ptr::write_bytes((*b).qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
                 }
 
                 /* override the dc dequant constant in order to preserve the
@@ -626,7 +626,8 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
     mb_row = 0;
     while mb_row < (*pc).mb_rows {
         if num_part > 1 {
-            (*xd).current_bc = &mut (*pbi).mbc[ibc as usize] as *mut Vp8Reader<'static> as *mut c_void;
+            (*xd).current_bc =
+                &mut (*pbi).mbc[ibc as usize] as *mut Vp8Reader<'static> as *mut c_void;
             ibc += 1;
             if ibc == num_part {
                 ibc = 0;
@@ -695,8 +696,7 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             }
 
             /* propagate errors from reference frames */
-            (*xd).corrupted |= ref_fb_corrupted
-                [(*(*xd).mode_info_context).mbmi.ref_frame as usize];
+            (*xd).corrupted |= ref_fb_corrupted[(*(*xd).mode_info_context).mbmi.ref_frame as usize];
 
             decode_macroblock(pbi, xd, mb_idx as c_uint);
 
@@ -888,8 +888,8 @@ unsafe fn setup_token_decoder(
     let mut partition_idx: c_uint;
     let mut fragment_idx: c_uint;
     let num_token_partitions: c_uint;
-    let first_fragment_end: *const u8 = (*pbi).fragments.ptrs[0]
-        .offset((*pbi).fragments.sizes[0] as isize);
+    let first_fragment_end: *const u8 =
+        (*pbi).fragments.ptrs[0].offset((*pbi).fragments.sizes[0] as isize);
 
     let mbc8: *mut Vp8Reader<'static> = &mut (*pbi).mbc[8] as *mut Vp8Reader<'static>;
     let multi_token_partition_val: c_int = vp8_read_literal(mbc8, 2);
@@ -918,18 +918,15 @@ unsafe fn setup_token_decoder(
                 - ((*pbi).fragments.ptrs[0] as isize)
                 + (3 * (num_token_partitions as isize - 1));
             if (fragment_size as isize) < ext_first_part_size {
-                return vpx_internal_error(
-                    &mut (*pbi).common.error,
-                    VPX_CODEC_CORRUPT_FRAME,
-                );
+                return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
             }
             fragment_size = (fragment_size as isize - ext_first_part_size) as c_uint;
             if fragment_size > 0 {
                 (*pbi).fragments.sizes[0] = ext_first_part_size as c_uint;
                 /* The fragment contains an additional partition. */
                 fragment_idx += 1;
-                (*pbi).fragments.ptrs[fragment_idx as usize] = (*pbi).fragments.ptrs[0]
-                    .offset((*pbi).fragments.sizes[0] as isize);
+                (*pbi).fragments.ptrs[fragment_idx as usize] =
+                    (*pbi).fragments.ptrs[0].offset((*pbi).fragments.sizes[0] as isize);
             }
         }
         /* Split the chunk into partitions read from the bitstream */
@@ -945,10 +942,7 @@ unsafe fn setup_token_decoder(
             )?;
             (*pbi).fragments.sizes[fragment_idx as usize] = partition_size;
             if fragment_size < partition_size {
-                return vpx_internal_error(
-                    &mut (*pbi).common.error,
-                    VPX_CODEC_CORRUPT_FRAME,
-                );
+                return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
             }
             fragment_size -= partition_size;
             debug_assert!(fragment_idx <= num_token_partitions);
@@ -974,10 +968,7 @@ unsafe fn setup_token_decoder(
             (*pbi).decrypt.as_deref_mut(),
         ) != 0
         {
-            return vpx_internal_error(
-                &mut (*pbi).common.error,
-                VPX_CODEC_MEM_ERROR,
-            );
+            return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_MEM_ERROR);
         }
 
         bool_decoder = bool_decoder.add(1);
@@ -1037,10 +1028,9 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
     } else {
         /* To enable choice of different interpolation filters */
         use crate::filter::{
-            vp8_bilinear_predict16x16_c, vp8_bilinear_predict4x4_c,
-            vp8_bilinear_predict8x4_c, vp8_bilinear_predict8x8_c,
-            vp8_sixtap_predict16x16_c, vp8_sixtap_predict4x4_c, vp8_sixtap_predict8x4_c,
-            vp8_sixtap_predict8x8_c,
+            vp8_bilinear_predict4x4_c, vp8_bilinear_predict8x4_c, vp8_bilinear_predict8x8_c,
+            vp8_bilinear_predict16x16_c, vp8_sixtap_predict4x4_c, vp8_sixtap_predict8x4_c,
+            vp8_sixtap_predict8x8_c, vp8_sixtap_predict16x16_c,
         };
         if (*pc).use_bilinear_mc_filter == 0 {
             (*xd).subpixel_predict = vp8_sixtap_predict4x4_c;
@@ -1101,10 +1091,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
 
     if (data_end as isize) - (data as isize) < 3 {
         if (*pbi).ec_active == 0 {
-            return vpx_internal_error(
-                &mut (*pc).error,
-                VPX_CODEC_CORRUPT_FRAME,
-            );
+            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
         }
 
         /* Declare the missing frame as an inter frame. */
@@ -1135,10 +1122,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
             >> 5) as c_int;
 
         if (*pbi).ec_active == 0 && first_partition_length_in_bytes == 0 {
-            return vpx_internal_error(
-                &mut (*pc).error,
-                VPX_CODEC_CORRUPT_FRAME,
-            );
+            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
         }
 
         data = data.add(3);
@@ -1150,24 +1134,17 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
             if (data_end as isize) - (data as isize) >= 7 {
                 /* vet via sync code */
                 if *clear.add(0) != 0x9d || *clear.add(1) != 0x01 || *clear.add(2) != 0x2a {
-                    return vpx_internal_error(
-                        &mut (*pc).error,
-                        VPX_CODEC_UNSUP_BITSTREAM,
-                    );
+                    return vpx_internal_error(&mut (*pc).error, VPX_CODEC_UNSUP_BITSTREAM);
                 }
 
-                (*pc).width =
-                    ((*clear.add(3) as c_int) | ((*clear.add(4) as c_int) << 8)) & 0x3fff;
+                (*pc).width = ((*clear.add(3) as c_int) | ((*clear.add(4) as c_int) << 8)) & 0x3fff;
                 (*pc).horiz_scale = (*clear.add(4) >> 6) as c_int;
                 (*pc).height =
                     ((*clear.add(5) as c_int) | ((*clear.add(6) as c_int) << 8)) & 0x3fff;
                 (*pc).vert_scale = (*clear.add(6) >> 6) as c_int;
                 data = data.add(7);
             } else if (*pbi).ec_active == 0 {
-                return vpx_internal_error(
-                    &mut (*pc).error,
-                    VPX_CODEC_CORRUPT_FRAME,
-                );
+                return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
             } else {
                 /* Error concealment is active, clear the frame. */
                 data = data_end;
@@ -1190,10 +1167,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     if (*pbi).ec_active == 0
         && ((data_end as isize) - (data as isize)) < first_partition_length_in_bytes as isize
     {
-        return vpx_internal_error(
-            &mut (*pc).error,
-            VPX_CODEC_CORRUPT_FRAME,
-        );
+        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
     }
 
     init_frame(pbi);
@@ -1205,10 +1179,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
         (*pbi).decrypt.as_deref_mut(),
     ) != 0
     {
-        return vpx_internal_error(
-            &mut (*pc).error,
-            VPX_CODEC_MEM_ERROR,
-        );
+        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_MEM_ERROR);
     }
     if (*pc).frame_type == KEY_FRAME {
         let _ = vp8_read_bit(bc); // colorspace
@@ -1402,8 +1373,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
                 while k < PREV_COEF_CONTEXTS as c_int {
                     l = 0;
                     while l < ENTROPY_NODES as c_int {
-                        let p: *mut Prob = (*pc).fc.coef_probs[i as usize][j as usize]
-                            [k as usize]
+                        let p: *mut Prob = (*pc).fc.coef_probs[i as usize][j as usize][k as usize]
                             .as_mut_ptr()
                             .offset(l as isize);
 
@@ -1433,7 +1403,11 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     }
 
     /* clear out the coeff buffer */
-    ptr::write_bytes((*xd).qcoeff.as_mut_ptr() as *mut u8, 0, core::mem::size_of_val(&(*xd).qcoeff));
+    ptr::write_bytes(
+        (*xd).qcoeff.as_mut_ptr() as *mut u8,
+        0,
+        core::mem::size_of_val(&(*xd).qcoeff),
+    );
 
     vp8_decode_mode_mvs(pbi);
 
@@ -1459,10 +1433,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
         if (*pc).frame_type == KEY_FRAME && (*yv12_fb_new).corrupted == 0 {
             (*pbi).decoded_key_frame = 1;
         } else {
-            return vpx_internal_error(
-                &mut (*pbi).common.error,
-                VPX_CODEC_CORRUPT_FRAME,
-            );
+            return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
         }
     }
 

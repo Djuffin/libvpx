@@ -14,7 +14,8 @@
 
 use crate::tables::Prob;
 use crate::types::{
-    BdValue, BoolDecoder, EntropyContext, EntropyContextPlanes, FrameContext, Macroblockd, Vp8dComp, BD_VALUE_BITS,
+    BD_VALUE_BITS, BdValue, BoolDecoder, EntropyContext, EntropyContextPlanes, FrameContext,
+    Macroblockd, Vp8dComp,
 };
 
 // ===========================================================================
@@ -22,7 +23,6 @@ use crate::types::{
 // ===========================================================================
 
 use crate::dboolhuff::{vp8dx_bool_decoder_fill, vp8dx_decode_bool};
-
 
 // ===========================================================================
 // File-scope tables — direct ports of `detokenize.c:35-47`.

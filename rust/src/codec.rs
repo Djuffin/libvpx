@@ -135,13 +135,7 @@ pub trait Decoder {
 /// `Vp9Encoder` ports.
 pub trait Encoder {
     /// Submit an uncompressed image for encoding.
-    fn encode(
-        &mut self,
-        img: &Image,
-        pts: i64,
-        duration: u64,
-        flags: u32,
-    ) -> Result<(), Error>;
+    fn encode(&mut self, img: &Image, pts: i64, duration: u64, flags: u32) -> Result<(), Error>;
 
     /// Retrieve the next compressed packet, if any.
     fn get_cx_data(&mut self) -> Option<&[u8]>;

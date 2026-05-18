@@ -20,11 +20,11 @@ use crate::types::{Macroblockd, MbPredictionMode};
 
 use crate::reconintra4x4::vp8_init_intra4x4_predictors_internal;
 use crate::vpx_dsp_rtcd::{
-    vpx_dc_128_predictor_16x16, vpx_dc_128_predictor_8x8, vpx_dc_left_predictor_16x16,
-    vpx_dc_left_predictor_8x8, vpx_dc_predictor_16x16, vpx_dc_predictor_8x8,
-    vpx_dc_top_predictor_16x16, vpx_dc_top_predictor_8x8, vpx_h_predictor_16x16,
-    vpx_h_predictor_8x8, vpx_tm_predictor_16x16, vpx_tm_predictor_8x8, vpx_v_predictor_16x16,
-    vpx_v_predictor_8x8,
+    vpx_dc_128_predictor_8x8, vpx_dc_128_predictor_16x16, vpx_dc_left_predictor_8x8,
+    vpx_dc_left_predictor_16x16, vpx_dc_predictor_8x8, vpx_dc_predictor_16x16,
+    vpx_dc_top_predictor_8x8, vpx_dc_top_predictor_16x16, vpx_h_predictor_8x8,
+    vpx_h_predictor_16x16, vpx_tm_predictor_8x8, vpx_tm_predictor_16x16, vpx_v_predictor_8x8,
+    vpx_v_predictor_16x16,
 };
 use crate::vpx_ports::once;
 
@@ -47,13 +47,11 @@ type IntraPredFn =
 /// `static intra_pred_fn pred[4][NUM_SIZES]`.
 /// Slot `[DC_PRED][*]` is intentionally left as `None`; the build
 /// functions route `DC_PRED` through `DC_PRED_TBL` instead.
-static mut pred: [[Option<IntraPredFn>; NUM_SIZES]; 4] =
-    [[None; NUM_SIZES]; 4];
+static mut pred: [[Option<IntraPredFn>; NUM_SIZES]; 4] = [[None; NUM_SIZES]; 4];
 
 /// `static intra_pred_fn dc_pred[2][2][NUM_SIZES]`.
 /// Indexed `[left_available][up_available][size]`.
-static mut dc_pred: [[[Option<IntraPredFn>; NUM_SIZES]; 2]; 2] =
-    [[[None; NUM_SIZES]; 2]; 2];
+static mut dc_pred: [[[Option<IntraPredFn>; NUM_SIZES]; 2]; 2] = [[[None; NUM_SIZES]; 2]; 2];
 
 // ---------------------------------------------------------------------------
 // Initialisation

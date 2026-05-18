@@ -30,9 +30,9 @@ type IntraPredFn = unsafe extern "C" fn(
 // Per-mode 4x4 kernels live in `vpx_dsp::intrapred`; the RTCD aliases
 // (without the `_c` suffix) come from `vpx_dsp_rtcd`.
 use crate::vpx_dsp_rtcd::{
-    vpx_d117_predictor_4x4, vpx_d135_predictor_4x4, vpx_d153_predictor_4x4,
-    vpx_d207_predictor_4x4, vpx_d45e_predictor_4x4, vpx_d63e_predictor_4x4,
-    vpx_dc_predictor_4x4, vpx_he_predictor_4x4, vpx_tm_predictor_4x4, vpx_ve_predictor_4x4,
+    vpx_d45e_predictor_4x4, vpx_d63e_predictor_4x4, vpx_d117_predictor_4x4, vpx_d135_predictor_4x4,
+    vpx_d153_predictor_4x4, vpx_d207_predictor_4x4, vpx_dc_predictor_4x4, vpx_he_predictor_4x4,
+    vpx_tm_predictor_4x4, vpx_ve_predictor_4x4,
 };
 
 // ---------------------------------------------------------------------------
@@ -69,20 +69,14 @@ pub unsafe fn vp8_init_intra4x4_predictors_internal() {
 /// `above_right_src` downward into the three interior rows of the
 /// above-right slot. Called once per `B_PRED` MB, right before the
 /// per-sub-block dispatch loop.
-pub unsafe fn intra_prediction_down_copy(
-    xd: *mut Macroblockd,
-    above_right_src: *mut u8,
-) {
+pub unsafe fn intra_prediction_down_copy(xd: *mut Macroblockd, above_right_src: *mut u8) {
     let dst_stride: i32 = (*xd).dst.y_stride;
     let above_right_dst: *mut u8 = (*xd).dst.y_buffer.offset(-(dst_stride as isize)).offset(16);
 
     let src_ptr: *mut u32 = above_right_src as *mut u32;
-    let dst_ptr0: *mut u32 =
-        above_right_dst.offset((4 * dst_stride) as isize) as *mut u32;
-    let dst_ptr1: *mut u32 =
-        above_right_dst.offset((8 * dst_stride) as isize) as *mut u32;
-    let dst_ptr2: *mut u32 =
-        above_right_dst.offset((12 * dst_stride) as isize) as *mut u32;
+    let dst_ptr0: *mut u32 = above_right_dst.offset((4 * dst_stride) as isize) as *mut u32;
+    let dst_ptr1: *mut u32 = above_right_dst.offset((8 * dst_stride) as isize) as *mut u32;
+    let dst_ptr2: *mut u32 = above_right_dst.offset((12 * dst_stride) as isize) as *mut u32;
 
     *dst_ptr0 = *src_ptr;
     *dst_ptr1 = *src_ptr;
@@ -106,8 +100,8 @@ pub unsafe fn vp8_intra4x4_predict(
     top_left: u8,
 ) {
     /* Power PC implementation uses "vec_vsx_ld" to read 16 bytes from
-       Above (aka, Aboveb + 4). Play it safe by reserving enough stack
-       space here. Similary for "Left". */
+    Above (aka, Aboveb + 4). Play it safe by reserving enough stack
+    space here. Similary for "Left". */
     // Generic (non-VSX) build: 12 bytes is enough.
     let mut aboveb: [u8; 12] = [0; 12];
     let above_buf: *mut u8 = aboveb.as_mut_ptr().offset(4);

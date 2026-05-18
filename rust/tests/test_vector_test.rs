@@ -21,9 +21,8 @@ use md5::{Digest, Md5};
 
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
 use vp8_decoder_rs::vpx_api::{
-    vpx_codec_ctx_t, vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy,
-    vpx_codec_get_frame, vpx_image_t, VPX_CODEC_OK,
-    VPX_DECODER_ABI_VERSION, VPX_IMG_FMT_HIGHBITDEPTH,
+    VPX_CODEC_OK, VPX_DECODER_ABI_VERSION, VPX_IMG_FMT_HIGHBITDEPTH, vpx_codec_ctx_t,
+    vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy, vpx_codec_get_frame, vpx_image_t,
 };
 
 /// Build-time-discovered test data location (see `build.rs`). Empty
@@ -196,7 +195,9 @@ unsafe fn init_dec() -> vpx_codec_ctx_t {
 /// invisible keyframe (0 images out, only "didn't crash" verified).
 /// `max_packets = None` decodes the whole file.
 unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
-    let Some(dir) = test_data_dir(name) else { return };
+    let Some(dir) = test_data_dir(name) else {
+        return;
+    };
     let ivf_path = dir.join(name);
     let md5_path = dir.join(format!("{name}.md5"));
     let expected = read_md5_lines(&md5_path);
@@ -211,19 +212,25 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
             break;
         }
         let res = vpx_codec_decode(Some(&mut dec), &packet, ptr::null_mut(), 0);
-        assert_eq!(res, VPX_CODEC_OK,
-            "vpx_codec_decode failed on {name} packet {packets_decoded}");
+        assert_eq!(
+            res, VPX_CODEC_OK,
+            "vpx_codec_decode failed on {name} packet {packets_decoded}"
+        );
         packets_decoded += 1;
 
         let mut iter: *const core::ffi::c_void = ptr::null();
         loop {
             match vpx_codec_get_frame(Some(&mut dec), &mut iter) {
                 Some(img) => {
-                    assert!(frame_no < expected.len(),
-                        "{name}: more decoded frames than md5 lines");
+                    assert!(
+                        frame_no < expected.len(),
+                        "{name}: more decoded frames than md5 lines"
+                    );
                     let got = md5_of_image(img);
-                    assert_eq!(got, expected[frame_no],
-                        "{name}: md5 mismatch at frame {frame_no}");
+                    assert_eq!(
+                        got, expected[frame_no],
+                        "{name}: md5 mismatch at frame {frame_no}"
+                    );
                     frame_no += 1;
                 }
                 None => break,
@@ -232,8 +239,12 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
     }
 
     if max_packets.is_none() {
-        assert_eq!(frame_no, expected.len(),
-            "{name}: decoded {frame_no} frames, md5 file has {}", expected.len());
+        assert_eq!(
+            frame_no,
+            expected.len(),
+            "{name}: decoded {frame_no} frames, md5 file has {}",
+            expected.len()
+        );
     }
 
     assert_eq!(vpx_codec_destroy(Some(&mut dec)), VPX_CODEC_OK);

@@ -21,9 +21,8 @@ use std::path::PathBuf;
 
 use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
 use vp8_decoder_rs::vpx_api::{
-    vpx_codec_ctx_t, vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy,
-    VpxCodecErr, VPX_CODEC_CORRUPT_FRAME, VPX_CODEC_OK,
-    VPX_DECODER_ABI_VERSION,
+    VPX_CODEC_CORRUPT_FRAME, VPX_CODEC_OK, VPX_DECODER_ABI_VERSION, VpxCodecErr, vpx_codec_ctx_t,
+    vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy,
 };
 
 const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
@@ -73,16 +72,20 @@ fn read_res_file(path: &PathBuf) -> Vec<VpxCodecErr> {
         .lines()
         .filter_map(|l| l.ok())
         .filter(|l| !l.trim().is_empty())
-        .map(|l| match l.trim().parse::<i32>().expect("parse .res code") {
-            0 => VPX_CODEC_OK,
-            7 => VPX_CODEC_CORRUPT_FRAME,
-            other => panic!("unknown expected error code {other} in {path:?}"),
-        })
+        .map(
+            |l| match l.trim().parse::<i32>().expect("parse .res code") {
+                0 => VPX_CODEC_OK,
+                7 => VPX_CODEC_CORRUPT_FRAME,
+                other => panic!("unknown expected error code {other} in {path:?}"),
+            },
+        )
         .collect()
 }
 
 unsafe fn run_invalid_file(name: &str) {
-    let Some(dir) = test_data_dir(name) else { return };
+    let Some(dir) = test_data_dir(name) else {
+        return;
+    };
     let ivf_path = dir.join(name);
     let res_path = dir.join(format!("{name}.res"));
     let expected = read_res_file(&res_path);
@@ -129,12 +132,27 @@ unsafe fn run_invalid_file(name: &str) {
 }
 
 // `InvalidFileTest` — C: `kVP8InvalidFileTests`.
-#[test] fn invalid_bug_1443()                { unsafe { run_invalid_file("invalid-bug-1443.ivf") } }
-#[test] fn invalid_bug_148271109()           { unsafe { run_invalid_file("invalid-bug-148271109.ivf") } }
-#[test] fn invalid_token_partition()         { unsafe { run_invalid_file("invalid-token-partition.ivf") } }
-#[test] fn invalid_comprehensive_s17661()    { unsafe { run_invalid_file("invalid-vp80-00-comprehensive-s17661_r01-05_b6-.ivf") } }
+#[test]
+fn invalid_bug_1443() {
+    unsafe { run_invalid_file("invalid-bug-1443.ivf") }
+}
+#[test]
+fn invalid_bug_148271109() {
+    unsafe { run_invalid_file("invalid-bug-148271109.ivf") }
+}
+#[test]
+fn invalid_token_partition() {
+    unsafe { run_invalid_file("invalid-token-partition.ivf") }
+}
+#[test]
+fn invalid_comprehensive_s17661() {
+    unsafe { run_invalid_file("invalid-vp80-00-comprehensive-s17661_r01-05_b6-.ivf") }
+}
 
 // `InvalidFileInvalidPeekTest` — C: `kVP8InvalidPeekTests`. Same body;
 // distinction in the C suite is that peek-result handling is overridden
 // to no-op. Implicit in this port (no separate peek call).
-#[test] fn invalid_peek_2kf_0x6()            { unsafe { run_invalid_file("invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf") } }
+#[test]
+fn invalid_peek_2kf_0x6() {
+    unsafe { run_invalid_file("invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf") }
+}

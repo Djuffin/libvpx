@@ -22,11 +22,19 @@ struct Buf<T: Copy + PartialEq + std::fmt::Debug> {
 impl<T: Copy + PartialEq + std::fmt::Debug> Buf<T> {
     fn new(pad: usize, pad_val: T) -> Self {
         let stride = SIZE + 2 * pad;
-        Self { data: vec![pad_val; stride * stride], pad, stride }
+        Self {
+            data: vec![pad_val; stride * stride],
+            pad,
+            stride,
+        }
     }
 
     fn top_left(&mut self) -> *mut T {
-        unsafe { self.data.as_mut_ptr().add(self.pad * self.stride + self.pad) }
+        unsafe {
+            self.data
+                .as_mut_ptr()
+                .add(self.pad * self.stride + self.pad)
+        }
     }
 
     fn stride(&self) -> i32 {
@@ -52,10 +60,8 @@ impl<T: Copy + PartialEq + std::fmt::Debug> Buf<T> {
     fn check_padding(&self, pad_val: T) -> bool {
         for y in 0..self.stride {
             for x in 0..self.stride {
-                let in_data = y >= self.pad
-                    && y < self.pad + SIZE
-                    && x >= self.pad
-                    && x < self.pad + SIZE;
+                let in_data =
+                    y >= self.pad && y < self.pad + SIZE && x >= self.pad && x < self.pad + SIZE;
                 if !in_data && self.data[y * self.stride + x] != pad_val {
                     return false;
                 }
@@ -165,7 +171,10 @@ fn test_add_one() {
                 1 + (y * 4 + x) as u8,
                 got,
                 "output[{}][{}] = {}, expected {}",
-                y, x, got, 1 + (y * 4 + x) as u8
+                y,
+                x,
+                got,
+                1 + (y * 4 + x) as u8
             );
         }
     }

@@ -15,7 +15,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use crate::tables::VP8_NORM;
-use crate::types::{BdValue, BoolDecoder, DecryptCbMut, BD_VALUE_BITS, VP8_LOTS_OF_BITS};
+use crate::types::{BD_VALUE_BITS, BdValue, BoolDecoder, DecryptCbMut, VP8_LOTS_OF_BITS};
 
 // ---------------------------------------------------------------------------
 // Local constants mirroring the C `#define`s in `dboolhuff.h`.

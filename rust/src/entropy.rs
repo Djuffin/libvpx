@@ -55,24 +55,24 @@ pub use crate::tables::{
 // Re-exports of the tables defined in `entropy.c`.
 // ---------------------------------------------------------------------------
 
-/// `vp8_norm[256]` — bool-decoder renormalisation LUT.
-pub use crate::tables::VP8_NORM as vp8_norm;
 /// `vp8_coef_bands[16]` — zig-zag position → coefficient band.
 pub use crate::tables::VP8_COEF_BANDS as vp8_coef_bands;
-/// `vp8_prev_token_class[12]` — token value → previous-coefficient context.
-pub use crate::tables::VP8_PREV_TOKEN_CLASS as vp8_prev_token_class;
-/// `vp8_default_zig_zag1d[16]` — forward zig-zag (scan → raster).
-pub use crate::tables::VP8_DEFAULT_ZIG_ZAG1D as vp8_default_zig_zag1d;
+/// `vp8_coef_tree[22]` — coefficient-token decoding tree.
+pub use crate::tables::VP8_COEF_TREE as vp8_coef_tree;
 /// `vp8_default_inv_zig_zag[16]` — inverse zig-zag (raster → scan + 1).
 pub use crate::tables::VP8_DEFAULT_INV_ZIG_ZAG as vp8_default_inv_zig_zag;
 /// `vp8_default_zig_zag_mask[16]` — bit mask form of the inverse zig-zag.
 pub use crate::tables::VP8_DEFAULT_ZIG_ZAG_MASK as vp8_default_zig_zag_mask;
-/// `vp8_mb_feature_data_bits[MB_LVL_MAX]` — bit-widths of segment features.
-pub use crate::tables::VP8_MB_FEATURE_DATA_BITS as vp8_mb_feature_data_bits;
-/// `vp8_coef_tree[22]` — coefficient-token decoding tree.
-pub use crate::tables::VP8_COEF_TREE as vp8_coef_tree;
+/// `vp8_default_zig_zag1d[16]` — forward zig-zag (scan → raster).
+pub use crate::tables::VP8_DEFAULT_ZIG_ZAG1D as vp8_default_zig_zag1d;
 /// `vp8_extra_bits[12]` — per-token extra-bit dispatch table.
 pub use crate::tables::VP8_EXTRA_BITS as vp8_extra_bits;
+/// `vp8_mb_feature_data_bits[MB_LVL_MAX]` — bit-widths of segment features.
+pub use crate::tables::VP8_MB_FEATURE_DATA_BITS as vp8_mb_feature_data_bits;
+/// `vp8_norm[256]` — bool-decoder renormalisation LUT.
+pub use crate::tables::VP8_NORM as vp8_norm;
+/// `vp8_prev_token_class[12]` — token value → previous-coefficient context.
+pub use crate::tables::VP8_PREV_TOKEN_CLASS as vp8_prev_token_class;
 
 /// `default_coef_probs` — the static initial coefficient-probability cube.
 /// File-local in C (`#include "default_coef_probs.h"` defines it as a

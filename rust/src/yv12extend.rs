@@ -174,10 +174,7 @@ pub unsafe fn vp8_yv12_copy_frame_c(
 /// # Safety
 /// Both pointers must reference valid `Yv12BufferConfig`s with
 /// matching luma dimensions.
-pub unsafe fn vpx_yv12_copy_y_c(
-    src_ybc: *const Yv12BufferConfig,
-    dst_ybc: *mut Yv12BufferConfig,
-) {
+pub unsafe fn vpx_yv12_copy_y_c(src_ybc: *const Yv12BufferConfig, dst_ybc: *mut Yv12BufferConfig) {
     let mut src: *const u8 = (*src_ybc).y_buffer;
     let mut dst: *mut u8 = (*dst_ybc).y_buffer;
 

@@ -11,7 +11,7 @@ use md5::{Digest, Md5};
 
 use vp8_decoder_rs::codec::Decoder;
 use vp8_decoder_rs::vp8_dx_iface::Vp8Decoder;
-use vp8_decoder_rs::vpx_api::{vpx_image_t, VPX_IMG_FMT_HIGHBITDEPTH};
+use vp8_decoder_rs::vpx_api::{VPX_IMG_FMT_HIGHBITDEPTH, vpx_image_t};
 
 const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
 
@@ -77,7 +77,8 @@ fn read_ivf_first_packet(path: &PathBuf) -> Vec<u8> {
     assert_eq!(&hdr[0..4], b"DKIF");
     let mut frame_hdr = [0u8; 12];
     f.read_exact(&mut frame_hdr).expect("read frame header");
-    let size = u32::from_le_bytes([frame_hdr[0], frame_hdr[1], frame_hdr[2], frame_hdr[3]]) as usize;
+    let size =
+        u32::from_le_bytes([frame_hdr[0], frame_hdr[1], frame_hdr[2], frame_hdr[3]]) as usize;
     let mut buf = vec![0u8; size];
     f.read_exact(&mut buf).expect("read frame");
     buf
@@ -95,8 +96,7 @@ fn trait_decodes_first_keyframe() {
     let packet = read_ivf_first_packet(&dir.join(name));
     let expected = first_md5(&dir.join(format!("{name}.md5")));
 
-    let mut decoder: Box<dyn Decoder> =
-        Box::new(Vp8Decoder::new(0).expect("decoder init"));
+    let mut decoder: Box<dyn Decoder> = Box::new(Vp8Decoder::new(0).expect("decoder init"));
 
     decoder.decode(&packet, Duration::ZERO).expect("decode");
     let img = decoder.get_frame().expect("got frame");
@@ -114,8 +114,7 @@ fn user_priv_round_trip() {
     };
     let packet = read_ivf_first_packet(&dir.join("vp80-00-comprehensive-001.ivf"));
 
-    let mut decoder: Box<dyn Decoder> =
-        Box::new(Vp8Decoder::new(0).expect("decoder init"));
+    let mut decoder: Box<dyn Decoder> = Box::new(Vp8Decoder::new(0).expect("decoder init"));
 
     let tag: usize = 0xDEAD_BEEF;
     decoder.set_user_priv(tag as *mut core::ffi::c_void);

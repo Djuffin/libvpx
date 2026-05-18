@@ -13,15 +13,14 @@
 use core::ffi::{c_int, c_void};
 use core::ptr;
 
-use crate::vpx_api::*;
+use crate::codec::ControlCmd;
 use crate::types::{VpxInternalErrorInfo, VpxResult};
 use crate::vp8_dx_iface::{
-    VpxDecryptInit, VpxRefFrame, Vp8PostprocCfg,
-    VP8_SET_REFERENCE, VP8_COPY_REFERENCE, VP8_SET_POSTPROC,
-    VP8D_GET_LAST_REF_UPDATES, VP8D_GET_FRAME_CORRUPTED, VP8D_GET_LAST_REF_USED,
-    VPXD_GET_LAST_QUANTIZER, VPXD_SET_DECRYPTOR,
+    VP8_COPY_REFERENCE, VP8_SET_POSTPROC, VP8_SET_REFERENCE, VP8D_GET_FRAME_CORRUPTED,
+    VP8D_GET_LAST_REF_UPDATES, VP8D_GET_LAST_REF_USED, VPXD_GET_LAST_QUANTIZER, VPXD_SET_DECRYPTOR,
+    Vp8PostprocCfg, VpxDecryptInit, VpxRefFrame,
 };
-use crate::codec::ControlCmd;
+use crate::vpx_api::*;
 
 /// `VERSION_PACKED` from `vpx_version.h`. Packed as
 /// `major<<16 | minor<<8 | patch`.
@@ -57,9 +56,7 @@ pub fn vpx_codec_err_to_string(err: VpxCodecErr) -> &'static str {
         VPX_CODEC_ABI_MISMATCH => "ABI version mismatch",
         VPX_CODEC_INCAPABLE => "Codec does not implement requested capability",
         VPX_CODEC_UNSUP_BITSTREAM => "Bitstream not supported by this decoder",
-        VPX_CODEC_UNSUP_FEATURE => {
-            "Bitstream required feature not supported by this decoder"
-        }
+        VPX_CODEC_UNSUP_FEATURE => "Bitstream required feature not supported by this decoder",
         VPX_CODEC_CORRUPT_FRAME => "Corrupt frame detected",
         VPX_CODEC_INVALID_PARAM => "Invalid parameter",
         VPX_CODEC_LIST_END => "End of iterated list",
@@ -84,7 +81,9 @@ pub fn vpx_codec_error_detail(ctx: Option<&VpxCodecCtx>) -> &'static str {
 /// pool and the inner `Vp8dComp` instances; the `Box` drop reclaims
 /// the `Vp8AlgPriv` shell).
 pub fn vpx_codec_destroy(ctx: Option<&mut VpxCodecCtx>) -> VpxCodecErr {
-    let Some(c) = ctx else { return VPX_CODEC_INVALID_PARAM };
+    let Some(c) = ctx else {
+        return VPX_CODEC_INVALID_PARAM;
+    };
 
     if c.iface.is_none() || c.priv_.is_null() {
         c.err = VPX_CODEC_ERROR;
@@ -111,7 +110,9 @@ pub unsafe fn vpx_codec_control_(
     ctrl_id: c_int,
     ap: *mut c_void,
 ) -> VpxCodecErr {
-    let Some(c) = ctx else { return VPX_CODEC_INVALID_PARAM };
+    let Some(c) = ctx else {
+        return VPX_CODEC_INVALID_PARAM;
+    };
 
     let res = if ctrl_id == 0 {
         VPX_CODEC_INVALID_PARAM

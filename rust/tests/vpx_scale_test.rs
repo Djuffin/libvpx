@@ -15,7 +15,7 @@
 
 use std::mem;
 
-use vp8_decoder_rs::types::{Yv12BufferConfig, VP8_BORDER_IN_PIXELS};
+use vp8_decoder_rs::types::{VP8_BORDER_IN_PIXELS, Yv12BufferConfig};
 use vp8_decoder_rs::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buffer};
 use vp8_decoder_rs::yv12extend::{vp8_yv12_copy_frame_c, vp8_yv12_extend_frame_borders_c};
 
@@ -55,13 +55,22 @@ unsafe fn reset_images(
     reset_image(dst_img, width, height);
 
     fill_plane(
-        (*img).y_buffer, (*img).y_crop_width, (*img).y_crop_height, (*img).y_stride,
+        (*img).y_buffer,
+        (*img).y_crop_width,
+        (*img).y_crop_height,
+        (*img).y_stride,
     );
     fill_plane(
-        (*img).u_buffer, (*img).uv_crop_width, (*img).uv_crop_height, (*img).uv_stride,
+        (*img).u_buffer,
+        (*img).uv_crop_width,
+        (*img).uv_crop_height,
+        (*img).uv_stride,
     );
     fill_plane(
-        (*img).v_buffer, (*img).uv_crop_width, (*img).uv_crop_height, (*img).uv_stride,
+        (*img).v_buffer,
+        (*img).uv_crop_width,
+        (*img).uv_crop_height,
+        (*img).uv_stride,
     );
 }
 
@@ -149,10 +158,7 @@ unsafe fn reference_extend_border(ref_img: *mut Yv12BufferConfig) {
     );
 }
 
-unsafe fn reference_copy_frame(
-    img: *const Yv12BufferConfig,
-    ref_img: *mut Yv12BufferConfig,
-) {
+unsafe fn reference_copy_frame(img: *const Yv12BufferConfig, ref_img: *mut Yv12BufferConfig) {
     assert_eq!((*ref_img).frame_size, (*img).frame_size);
     for y in 0..(*img).y_crop_height {
         for x in 0..(*img).y_crop_width {
@@ -222,4 +228,3 @@ fn copy_frame() {
         }
     }
 }
-

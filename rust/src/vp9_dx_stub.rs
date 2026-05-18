@@ -44,7 +44,12 @@ impl Decoder for Vp9Decoder {
 
     fn stream_info(&self) -> Result<StreamInfo, Error> {
         // Return a zero StreamInfo just to exercise the path.
-        Ok(VpxCodecStreamInfo { sz: 0, w: 0, h: 0, is_kf: 0 })
+        Ok(VpxCodecStreamInfo {
+            sz: 0,
+            w: 0,
+            h: 0,
+            is_kf: 0,
+        })
     }
 }
 
