@@ -70,9 +70,8 @@ pub unsafe fn vpx_codec_dec_init_ver(
     // `#[repr(C)]` (it holds a `Box<dyn Decoder>` field), so we can't
     // memset it blindly. Assign each field instead.
     ctx.iface = Some(iface);
-    ctx.name = iface.name;
+    ctx.name = Some(iface.name);
     ctx.priv_ = ptr::null_mut();
-    ctx.err_detail = ptr::null();
     ctx.init_flags = flags;
     ctx.config.dec = cfg.map(|c| c as *const VpxCodecDecCfg).unwrap_or(ptr::null());
     ctx.trait_obj = None;

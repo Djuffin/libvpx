@@ -47,9 +47,9 @@ fn invalid_params_null_ptrs() {
         );
         assert_eq!(vpx_codec_destroy(None), VPX_CODEC_INVALID_PARAM);
 
-        // Error queries handle None.
-        assert!(!vpx_codec_error(None).is_null());
-        assert!(vpx_codec_error_detail(None).is_null());
+        // Error queries handle None: both return a fallback description.
+        assert!(!vpx_codec_error(None).is_empty());
+        assert!(!vpx_codec_error_detail(None).is_empty());
     }
 }
 

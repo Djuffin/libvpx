@@ -8,7 +8,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 
-use core::ffi::{c_char, c_void};
+use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{DecryptCb, DecryptCbMut, FragmentData, FrameBuffers, Vp8dConfig, Vp8dComp, Vp8PpFlags, Yv12BufferConfig, VpxInternalErrorInfo, MAX_PARTITIONS, VP8_BORDER_IN_PIXELS};
@@ -231,22 +231,14 @@ pub unsafe fn vp8_get_si(
     VPX_CODEC_OK
 }
 
-/// `update_error_state` — `vp8/vp8_dx_iface.c:199`.
-///
-/// The C source also propagated a formatted `err_detail` string out of
-/// `VpxInternalErrorInfo`; that field is gone in the Rust port, so we
-/// simply clear `err_detail` and return the error code.
+/// `update_error_state` — `vp8/vp8_dx_iface.c:199`. The variadic
+/// detail-message channel was dropped during the port, so this just
+/// returns the error code.
 unsafe fn update_error_state(
-    ctx: *mut Vp8AlgPriv<'static>,
+    _ctx: *mut Vp8AlgPriv<'static>,
     error: *const VpxInternalErrorInfo,
 ) -> VpxCodecErr {
-    let code: VpxCodecErr = (*error).error_code;
-
-    if code != VPX_CODEC_OK {
-        (*ctx).base.err_detail = ptr::null();
-    }
-
-    code
+    (*error).error_code
 }
 
 /// `yuvconfig2image` — `vp8/vp8_dx_iface.c:210`.
@@ -603,7 +595,7 @@ unsafe fn image2yuvconfig(img: *const VpxImage, yv12: *mut Yv12BufferConfig) -> 
 // ===========================================================================
 
 pub static mut VPX_CODEC_VP8_DX_ALGO: VpxCodecIface = VpxCodecIface {
-    name: b"WebM Project VP8 Decoder\0".as_ptr() as *const c_char,
+    name: "WebM Project VP8 Decoder",
     abi_version: VPX_CODEC_INTERNAL_ABI_VERSION,
     caps: VPX_CODEC_CAP_DECODER
         | VP8_CAP_POSTPROC

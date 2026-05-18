@@ -28,68 +28,55 @@ use crate::codec::ControlCmd;
 pub const VERSION_PACKED: c_int = (1 << 16) | (15 << 8) | 0;
 
 /// `VERSION_STRING_NOSP` from `vpx_version.h`.
-pub const VERSION_STRING_NOSP: &[u8] = b"v1.15.0\0";
+pub const VERSION_STRING_NOSP: &str = "v1.15.0";
 
 /// `VERSION_EXTRA` from `vpx_version.h`.
-pub const VERSION_EXTRA: &[u8] = b"\0";
+pub const VERSION_EXTRA: &str = "";
 
 pub fn vpx_codec_version() -> c_int {
     VERSION_PACKED
 }
 
-pub fn vpx_codec_version_str() -> *const core::ffi::c_char {
-    VERSION_STRING_NOSP.as_ptr() as *const core::ffi::c_char
+pub fn vpx_codec_version_str() -> &'static str {
+    VERSION_STRING_NOSP
 }
 
-pub fn vpx_codec_version_extra_str() -> *const core::ffi::c_char {
-    VERSION_EXTRA.as_ptr() as *const core::ffi::c_char
+pub fn vpx_codec_version_extra_str() -> &'static str {
+    VERSION_EXTRA
 }
 
-pub fn vpx_codec_iface_name(
-    iface: Option<&VpxCodecIface>,
-) -> *const core::ffi::c_char {
-    iface.map_or(
-        b"<invalid interface>\0".as_ptr() as *const core::ffi::c_char,
-        |i| i.name,
-    )
+pub fn vpx_codec_iface_name(iface: Option<&VpxCodecIface>) -> &'static str {
+    iface.map_or("<invalid interface>", |i| i.name)
 }
 
-pub fn vpx_codec_err_to_string(err: VpxCodecErr) -> *const core::ffi::c_char {
-    let s: &[u8] = match err {
-        VPX_CODEC_OK => b"Success\0",
-        VPX_CODEC_ERROR => b"Unspecified internal error\0",
-        VPX_CODEC_MEM_ERROR => b"Memory allocation error\0",
-        VPX_CODEC_ABI_MISMATCH => b"ABI version mismatch\0",
-        VPX_CODEC_INCAPABLE => b"Codec does not implement requested capability\0",
-        VPX_CODEC_UNSUP_BITSTREAM => b"Bitstream not supported by this decoder\0",
+pub fn vpx_codec_err_to_string(err: VpxCodecErr) -> &'static str {
+    match err {
+        VPX_CODEC_OK => "Success",
+        VPX_CODEC_ERROR => "Unspecified internal error",
+        VPX_CODEC_MEM_ERROR => "Memory allocation error",
+        VPX_CODEC_ABI_MISMATCH => "ABI version mismatch",
+        VPX_CODEC_INCAPABLE => "Codec does not implement requested capability",
+        VPX_CODEC_UNSUP_BITSTREAM => "Bitstream not supported by this decoder",
         VPX_CODEC_UNSUP_FEATURE => {
-            b"Bitstream required feature not supported by this decoder\0"
+            "Bitstream required feature not supported by this decoder"
         }
-        VPX_CODEC_CORRUPT_FRAME => b"Corrupt frame detected\0",
-        VPX_CODEC_INVALID_PARAM => b"Invalid parameter\0",
-        VPX_CODEC_LIST_END => b"End of iterated list\0",
-    };
-    s.as_ptr() as *const core::ffi::c_char
+        VPX_CODEC_CORRUPT_FRAME => "Corrupt frame detected",
+        VPX_CODEC_INVALID_PARAM => "Invalid parameter",
+        VPX_CODEC_LIST_END => "End of iterated list",
+    }
 }
 
-pub fn vpx_codec_error(
-    ctx: Option<&VpxCodecCtx>,
-) -> *const core::ffi::c_char {
+pub fn vpx_codec_error(ctx: Option<&VpxCodecCtx>) -> &'static str {
     vpx_codec_err_to_string(ctx.map_or(VPX_CODEC_INVALID_PARAM, |c| c.err))
 }
 
-pub unsafe fn vpx_codec_error_detail(
-    ctx: Option<&VpxCodecCtx>,
-) -> *const core::ffi::c_char {
-    let Some(c) = ctx else { return ptr::null() };
-    if c.err == VPX_CODEC_OK {
-        return ptr::null();
-    }
-    if !c.priv_.is_null() {
-        (*c.priv_).err_detail
-    } else {
-        c.err_detail
-    }
+/// Returns a description of the most recent error on `ctx`. The
+/// variadic detail-formatter from libvpx was dropped during the Rust
+/// port (see `translation_summary.md` §4.1) so the "detail" is just
+/// the error-code description — identical to [`vpx_codec_error`].
+/// Kept as a separate entry point for API symmetry.
+pub fn vpx_codec_error_detail(ctx: Option<&VpxCodecCtx>) -> &'static str {
+    vpx_codec_error(ctx)
 }
 
 /// `vpx_codec_destroy`. Drops the boxed [`Decoder`] trait object,
@@ -106,7 +93,7 @@ pub fn vpx_codec_destroy(ctx: Option<&mut VpxCodecCtx>) -> VpxCodecErr {
 
     let _ = c.trait_obj.take(); // Drops the Box.
     c.iface = None;
-    c.name = ptr::null();
+    c.name = None;
     c.priv_ = ptr::null_mut();
     c.err = VPX_CODEC_OK;
     VPX_CODEC_OK

@@ -14,7 +14,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
-use core::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
+use core::ffi::{c_int, c_long, c_uint, c_ulong, c_void};
 
 // ===========================================================================
 // `vpx_codec_err_t` (`vpx/vpx_codec.h:93`).
@@ -350,9 +350,8 @@ pub type vpx_codec_priv_enc_mr_cfg_t = VpxCodecPrivEncMrCfg;
 /// `vpx_codec_iface_t` (`vpx/internal/vpx_codec_internal.h`). The
 /// dispatcher only inspects `name`, `abi_version`, and `caps`; the
 /// full vtable lives behind the `Decoder` trait object now.
-#[repr(C)]
 pub struct VpxCodecIface {
-    pub name: *const c_char,
+    pub name: &'static str,
     pub abi_version: c_int,
     pub caps: VpxCodecCaps,
 }
@@ -391,7 +390,6 @@ pub struct VpxCodecPrivEnc {
 /// `struct vpx_codec_priv` (`vpx_codec_internal.h:345`).
 #[repr(C)]
 pub struct VpxCodecPriv {
-    pub err_detail: *const c_char,
     pub init_flags: VpxCodecFlags,
     pub dec: VpxCodecPrivDec,
     pub enc: VpxCodecPrivEnc,
@@ -411,18 +409,17 @@ pub union VpxCodecCtxConfig {
 
 /// `vpx_codec_ctx_t` (`vpx/vpx_codec.h:200`).
 pub struct VpxCodecCtx {
-    pub name: *const c_char,
+    pub name: Option<&'static str>,
     /// Iface descriptor; `None` until `vpx_codec_dec_init_ver` binds
     /// one. The `static mut VPX_CODEC_VP8_DX_ALGO` outlives any
     /// `VpxCodecCtx`, so the `'static` lifetime is sound.
     pub iface: Option<&'static VpxCodecIface>,
     pub err: VpxCodecErr,
-    pub err_detail: *const c_char,
     pub init_flags: VpxCodecFlags,
     pub config: VpxCodecCtxConfig,
-    /// Sentinel pointer into the boxed decoder's `Vp8AlgPriv`. Used
-    /// by `vpx_codec_error_detail` to read the err_detail field;
-    /// otherwise dispatch goes through `trait_obj` directly.
+    /// Non-null sentinel pointer into the boxed decoder's
+    /// `Vp8AlgPriv`. Used only as an "is initialized?" flag for the
+    /// public-API guards; dispatch goes through `trait_obj`.
     pub priv_: *mut VpxCodecPriv,
     /// Boxed [`crate::codec::Decoder`] trait object. `None` before
     /// `vpx_codec_dec_init_ver` succeeds.
