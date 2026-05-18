@@ -234,8 +234,8 @@ unsafe fn img_alloc_helper(
 }
 
 /// `vpx_image_t *vpx_img_alloc(...)` — allocate-and-own constructor.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_img_alloc(
+
+pub unsafe fn vpx_img_alloc(
     img: *mut vpx_image_t,
     fmt: vpx_img_fmt_t,
     d_w: u32,
@@ -246,8 +246,8 @@ pub unsafe extern "C" fn vpx_img_alloc(
 }
 
 /// `vpx_image_t *vpx_img_wrap(...)` — wrap caller-supplied pixels.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_img_wrap(
+
+pub unsafe fn vpx_img_wrap(
     img: *mut vpx_image_t,
     fmt: vpx_img_fmt_t,
     d_w: u32,
@@ -261,8 +261,8 @@ pub unsafe extern "C" fn vpx_img_wrap(
 }
 
 /// `int vpx_img_set_rect(...)` — install the visible viewport.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_img_set_rect(
+
+pub unsafe fn vpx_img_set_rect(
     img: *mut vpx_image_t,
     x: u32,
     y: u32,
@@ -344,8 +344,8 @@ pub unsafe extern "C" fn vpx_img_set_rect(
 }
 
 /// `void vpx_img_flip(vpx_image_t *img)` — present the image upside-down.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_img_flip(img: *mut vpx_image_t) {
+
+pub unsafe fn vpx_img_flip(img: *mut vpx_image_t) {
     /* Note: In the calculation pointer adjustment calculation, we want the
      * rhs to be promoted to a signed type. Section 6.3.1.8 of the ISO C99
      * standard indicates that if the adjustment parameter is unsigned, the
@@ -375,8 +375,8 @@ pub unsafe extern "C" fn vpx_img_flip(img: *mut vpx_image_t) {
 }
 
 /// `void vpx_img_free(vpx_image_t *img)` — coordinated tear-down.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_img_free(img: *mut vpx_image_t) {
+
+pub unsafe fn vpx_img_free(img: *mut vpx_image_t) {
     if !img.is_null() {
         if !(*img).img_data.is_null() && (*img).img_data_owner != 0 {
             vpx_free((*img).img_data as *mut c_void);

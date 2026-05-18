@@ -45,7 +45,7 @@ use crate::vpx_mem::{vpx_free, vpx_memalign};
 /// `ybf` must be null or point to a valid, writable `Yv12BufferConfig`.
 /// If `buffer_alloc_sz > 0`, `buffer_alloc` must point to memory
 /// previously returned by `vpx_memalign`.
-#[no_mangle]
+
 pub unsafe fn vp8_yv12_de_alloc_frame_buffer(ybf: *mut Yv12BufferConfig) -> i32 {
     if !ybf.is_null() {
         // If libvpx is using frame buffer callbacks then buffer_alloc_sz
@@ -77,7 +77,7 @@ pub unsafe fn vp8_yv12_de_alloc_frame_buffer(ybf: *mut Yv12BufferConfig) -> i32 
 /// `ybf` must be null or point to a valid, writable `Yv12BufferConfig`
 /// whose `buffer_alloc` (if non-null) is either NULL or a
 /// `vpx_memalign`-produced allocation of at least `buffer_alloc_sz` bytes.
-#[no_mangle]
+
 pub unsafe fn vp8_yv12_realloc_frame_buffer(
     ybf: *mut Yv12BufferConfig,
     width: i32,
@@ -173,7 +173,7 @@ pub unsafe fn vp8_yv12_realloc_frame_buffer(
 /// # Safety
 /// Same requirements as [`vp8_yv12_de_alloc_frame_buffer`] and
 /// [`vp8_yv12_realloc_frame_buffer`].
-#[no_mangle]
+
 pub unsafe fn vp8_yv12_alloc_frame_buffer(
     ybf: *mut Yv12BufferConfig,
     width: i32,

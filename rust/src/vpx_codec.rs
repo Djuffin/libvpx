@@ -1,12 +1,10 @@
-//! `vpx/src/vpx_codec.c` — codec-agnostic public API dispatcher.
+//! Codec-agnostic public API dispatcher (`vpx_codec_*` entry points).
 //!
-//! Literal Rust translation of `vpx/src/vpx_codec.c`. Function names,
-//! control flow, and pointer arithmetic mirror the C source verbatim.
-//! All bodies are `unsafe` because they manipulate raw pointers shaped
-//! like the C public API.
+//! Bodies remain `unsafe` because they manipulate raw pointers shaped
+//! like the original C public API. Dispatch goes through the
+//! `Decoder` trait stashed on `VpxCodecCtx::trait_obj`.
 //!
-//! Public types and constants live in `crate::vpx_api`; this file
-//! only carries function bodies.
+//! Public types and constants live in `crate::vpx_api`.
 
 #![allow(dead_code)]
 #![allow(non_snake_case)]
@@ -18,6 +16,13 @@ use core::ptr;
 
 use crate::vpx_api::*;
 use crate::types::{VpxInternalErrorInfo, VpxResult};
+use crate::vp8_dx_iface::{
+    Vp8Decoder, VpxDecryptInit, VpxRefFrame, Vp8PostprocCfg,
+    VP8_SET_REFERENCE, VP8_COPY_REFERENCE, VP8_SET_POSTPROC,
+    VP8D_GET_LAST_REF_UPDATES, VP8D_GET_FRAME_CORRUPTED, VP8D_GET_LAST_REF_USED,
+    VPXD_GET_LAST_QUANTIZER, VPXD_SET_DECRYPTOR,
+};
+use crate::codec::{ControlCmd, Decoder};
 
 // ===========================================================================
 // `vpx_version.h` macros (generated at configure time). Stubs for the
@@ -56,20 +61,20 @@ unsafe fn SAVE_STATUS(ctx: *mut VpxCodecCtx, var: VpxCodecErr) -> VpxCodecErr {
 // ===========================================================================
 
 /// `vpx_codec_version` (vpx_codec.c:24).
-#[unsafe(no_mangle)]
-pub extern "C" fn vpx_codec_version() -> c_int {
+
+pub fn vpx_codec_version() -> c_int {
     VERSION_PACKED
 }
 
 /// `vpx_codec_version_str` (vpx_codec.c:26).
-#[unsafe(no_mangle)]
-pub extern "C" fn vpx_codec_version_str() -> *const core::ffi::c_char {
+
+pub fn vpx_codec_version_str() -> *const core::ffi::c_char {
     VERSION_STRING_NOSP.as_ptr() as *const core::ffi::c_char
 }
 
 /// `vpx_codec_version_extra_str` (vpx_codec.c:28).
-#[unsafe(no_mangle)]
-pub extern "C" fn vpx_codec_version_extra_str() -> *const core::ffi::c_char {
+
+pub fn vpx_codec_version_extra_str() -> *const core::ffi::c_char {
     VERSION_EXTRA.as_ptr() as *const core::ffi::c_char
 }
 
@@ -78,8 +83,8 @@ pub extern "C" fn vpx_codec_version_extra_str() -> *const core::ffi::c_char {
 // ===========================================================================
 
 /// `vpx_codec_iface_name` (vpx_codec.c:30).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_iface_name(
+
+pub unsafe fn vpx_codec_iface_name(
     iface: *mut VpxCodecIface,
 ) -> *const core::ffi::c_char {
     if !iface.is_null() {
@@ -90,8 +95,8 @@ pub unsafe extern "C" fn vpx_codec_iface_name(
 }
 
 /// `vpx_codec_err_to_string` (vpx_codec.c:34).
-#[unsafe(no_mangle)]
-pub extern "C" fn vpx_codec_err_to_string(err: VpxCodecErr) -> *const core::ffi::c_char {
+
+pub fn vpx_codec_err_to_string(err: VpxCodecErr) -> *const core::ffi::c_char {
     let s: &[u8] = match err {
         VPX_CODEC_OK => b"Success\0",
         VPX_CODEC_ERROR => b"Unspecified internal error\0",
@@ -110,8 +115,8 @@ pub extern "C" fn vpx_codec_err_to_string(err: VpxCodecErr) -> *const core::ffi:
 }
 
 /// `vpx_codec_error` (vpx_codec.c:54).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_error(
+
+pub unsafe fn vpx_codec_error(
     ctx: *const VpxCodecCtx,
 ) -> *const core::ffi::c_char {
     if !ctx.is_null() {
@@ -122,8 +127,8 @@ pub unsafe extern "C" fn vpx_codec_error(
 }
 
 /// `vpx_codec_error_detail` (vpx_codec.c:59).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_error_detail(
+
+pub unsafe fn vpx_codec_error_detail(
     ctx: *const VpxCodecCtx,
 ) -> *const core::ffi::c_char {
     if !ctx.is_null() && (*ctx).err != VPX_CODEC_OK {
@@ -141,9 +146,11 @@ pub unsafe extern "C" fn vpx_codec_error_detail(
 // Destructor (vpx_codec.c:66–83).
 // ===========================================================================
 
-/// `vpx_codec_destroy` (vpx_codec.c:66).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_destroy(ctx: *mut VpxCodecCtx) -> VpxCodecErr {
+/// `vpx_codec_destroy` (vpx_codec.c:66). Ownership of `Vp8AlgPriv`
+/// lives in the `Vp8Decoder` boxed at `(*ctx).trait_obj`. Dropping
+/// the box runs `vp8_destroy` → `vpx_free`.
+
+pub unsafe fn vpx_codec_destroy(ctx: *mut VpxCodecCtx) -> VpxCodecErr {
     let res: VpxCodecErr;
 
     if ctx.is_null() {
@@ -151,8 +158,12 @@ pub unsafe extern "C" fn vpx_codec_destroy(ctx: *mut VpxCodecCtx) -> VpxCodecErr
     } else if (*ctx).iface.is_null() || (*ctx).priv_.is_null() {
         res = VPX_CODEC_ERROR;
     } else {
-        if let Some(destroy) = (*(*ctx).iface).destroy {
-            destroy((*ctx).priv_ as *mut VpxCodecAlgPriv);
+        if !(*ctx).trait_obj.is_null() {
+            // Reclaim the Box and drop it. Drop on Vp8Decoder calls
+            // vp8_destroy which frees the underlying Vp8AlgPriv.
+            let dec = Box::from_raw((*ctx).trait_obj as *mut Vp8Decoder);
+            drop(dec);
+            (*ctx).trait_obj = ptr::null_mut();
         }
 
         (*ctx).iface = ptr::null_mut();
@@ -169,8 +180,8 @@ pub unsafe extern "C" fn vpx_codec_destroy(ctx: *mut VpxCodecCtx) -> VpxCodecErr
 // ===========================================================================
 
 /// `vpx_codec_get_caps` (vpx_codec.c:85).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_get_caps(iface: *mut VpxCodecIface) -> VpxCodecCaps {
+
+pub unsafe fn vpx_codec_get_caps(iface: *mut VpxCodecIface) -> VpxCodecCaps {
     if !iface.is_null() {
         (*iface).caps
     } else {
@@ -182,17 +193,10 @@ pub unsafe extern "C" fn vpx_codec_get_caps(iface: *mut VpxCodecIface) -> VpxCod
 // Control trampoline (vpx_codec.c:89–114).
 // ===========================================================================
 
-/// `vpx_codec_control_` (vpx_codec.c:89).
-///
-/// The C source uses C varargs (`...` / `va_list`) to forward an
-/// arbitrarily typed payload to the per-codec handler. Rust does not
-/// have stable variadic function support, so this translation accepts a
-/// pre-built `va_list`-shaped pointer (opaque `*mut c_void`) from the
-/// caller. A real binding would either declare this as a true C-variadic
-/// `extern "C"` function (nightly only) or call through a per-control-ID
-/// shim that already extracted the typed payload.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_control_(
+/// `vpx_codec_control_`. Accepts the C-style `(ctrl_id, ap)` pair,
+/// maps it to a typed [`ControlCmd`], and dispatches via the trait.
+
+pub unsafe fn vpx_codec_control_(
     ctx: *mut VpxCodecCtx,
     ctrl_id: c_int,
     ap: *mut c_void,
@@ -201,28 +205,69 @@ pub unsafe extern "C" fn vpx_codec_control_(
 
     if ctx.is_null() || ctrl_id == 0 {
         res = VPX_CODEC_INVALID_PARAM;
-    } else if (*ctx).iface.is_null()
-        || (*ctx).priv_.is_null()
-        || (*(*ctx).iface).ctrl_maps.is_null()
-    {
+    } else if (*ctx).iface.is_null() || (*ctx).trait_obj.is_null() {
         res = VPX_CODEC_ERROR;
     } else {
-        let mut local_res = VPX_CODEC_INCAPABLE;
-
-        let mut entry: *mut VpxCodecCtrlFnMap = (*(*ctx).iface).ctrl_maps;
-        while (*entry).fn_.is_some() {
-            if (*entry).ctrl_id == 0 || (*entry).ctrl_id == ctrl_id {
-                // C: va_start(ap, ctrl_id);
-                //    res = entry->fn(priv, ap);
-                //    va_end(ap);
-                let f = (*entry).fn_.unwrap();
-                local_res = f((*ctx).priv_ as *mut VpxCodecAlgPriv, ap);
-                break;
+        // Map the legacy ctrl_id + opaque payload to a typed
+        // `ControlCmd` and dispatch through the trait.
+        let dec = &mut *((*ctx).trait_obj as *mut Vp8Decoder);
+        let cmd = match ctrl_id {
+            VP8_SET_REFERENCE => {
+                if ap.is_null() {
+                    return SAVE_STATUS(ctx, VPX_CODEC_INVALID_PARAM);
+                }
+                ControlCmd::SetReference(&*(ap as *const VpxRefFrame))
             }
-            entry = entry.add(1);
-        }
-
-        res = local_res;
+            VP8_COPY_REFERENCE => {
+                if ap.is_null() {
+                    return SAVE_STATUS(ctx, VPX_CODEC_INVALID_PARAM);
+                }
+                ControlCmd::CopyReference(&mut *(ap as *mut VpxRefFrame))
+            }
+            VP8_SET_POSTPROC => {
+                if ap.is_null() {
+                    return SAVE_STATUS(ctx, VPX_CODEC_INVALID_PARAM);
+                }
+                ControlCmd::SetPostproc(*(ap as *const Vp8PostprocCfg))
+            }
+            VP8D_GET_LAST_REF_UPDATES => {
+                if ap.is_null() {
+                    return SAVE_STATUS(ctx, VPX_CODEC_INVALID_PARAM);
+                }
+                ControlCmd::GetLastRefUpdates(&mut *(ap as *mut i32))
+            }
+            VP8D_GET_FRAME_CORRUPTED => {
+                if ap.is_null() {
+                    return SAVE_STATUS(ctx, VPX_CODEC_INVALID_PARAM);
+                }
+                ControlCmd::GetFrameCorrupted(&mut *(ap as *mut i32))
+            }
+            VP8D_GET_LAST_REF_USED => {
+                if ap.is_null() {
+                    return SAVE_STATUS(ctx, VPX_CODEC_INVALID_PARAM);
+                }
+                ControlCmd::GetLastRefUsed(&mut *(ap as *mut i32))
+            }
+            VPXD_GET_LAST_QUANTIZER => {
+                if ap.is_null() {
+                    return SAVE_STATUS(ctx, VPX_CODEC_INVALID_PARAM);
+                }
+                ControlCmd::GetLastQuantizer(&mut *(ap as *mut i32))
+            }
+            VPXD_SET_DECRYPTOR => {
+                let init = if ap.is_null() {
+                    None
+                } else {
+                    Some(&*(ap as *const VpxDecryptInit))
+                };
+                ControlCmd::SetDecryptor(init)
+            }
+            _ => return SAVE_STATUS(ctx, VPX_CODEC_INCAPABLE),
+        };
+        res = match dec.control(cmd) {
+            Ok(()) => VPX_CODEC_OK,
+            Err(e) => e,
+        };
     }
 
     SAVE_STATUS(ctx, res)

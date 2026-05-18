@@ -357,175 +357,12 @@ pub struct VpxCodecPrivEncMrCfg {
 pub type vpx_codec_priv_enc_mr_cfg_t = VpxCodecPrivEncMrCfg;
 pub type VpxCodecPrivEncMrCfgT = VpxCodecPrivEncMrCfg;
 
-// Vtable function-pointer typedefs (`vpx_codec_internal.h`).
 
-pub type VpxCodecInitFnT = Option<
-    unsafe extern "C" fn(
-        ctx: *mut VpxCodecCtx,
-        data: *mut VpxCodecPrivEncMrCfg,
-    ) -> VpxCodecErr,
->;
-pub type vpx_codec_init_fn_t = VpxCodecInitFnT;
-
-pub type VpxCodecDestroyFnT =
-    Option<unsafe extern "C" fn(ctx: *mut VpxCodecAlgPriv) -> VpxCodecErr>;
-pub type vpx_codec_destroy_fn_t = VpxCodecDestroyFnT;
-
-pub type VpxCodecPeekSiFnT = Option<
-    unsafe extern "C" fn(
-        data: *const u8,
-        data_sz: c_uint,
-        si: *mut VpxCodecStreamInfo,
-    ) -> VpxCodecErr,
->;
-pub type vpx_codec_peek_si_fn_t = VpxCodecPeekSiFnT;
-
-pub type VpxCodecGetSiFnT = Option<
-    unsafe extern "C" fn(
-        ctx: *mut VpxCodecAlgPriv,
-        si: *mut VpxCodecStreamInfo,
-    ) -> VpxCodecErr,
->;
-pub type vpx_codec_get_si_fn_t = VpxCodecGetSiFnT;
-
-/// Control fn — C uses `va_list`; we use `*mut c_void` as an opaque
-/// stand-in.
-pub type VpxCodecControlFnT = Option<
-    unsafe extern "C" fn(ctx: *mut VpxCodecAlgPriv, ap: *mut c_void) -> VpxCodecErr,
->;
-pub type vpx_codec_control_fn_t = VpxCodecControlFnT;
-
-pub type VpxCodecDecodeFnT = Option<
-    unsafe extern "C" fn(
-        ctx: *mut VpxCodecAlgPriv,
-        data: *const u8,
-        data_sz: c_uint,
-        user_priv: *mut c_void,
-    ) -> VpxCodecErr,
->;
-pub type vpx_codec_decode_fn_t = VpxCodecDecodeFnT;
-
-pub type VpxCodecGetFrameFnT = Option<
-    unsafe extern "C" fn(
-        ctx: *mut VpxCodecAlgPriv,
-        iter: *mut VpxCodecIter,
-    ) -> *mut VpxImage,
->;
-pub type vpx_codec_get_frame_fn_t = VpxCodecGetFrameFnT;
-
-pub type VpxCodecSetFbFnT = Option<
-    unsafe extern "C" fn(
-        ctx: *mut VpxCodecAlgPriv,
-        cb_get: VpxGetFrameBufferCbFnT,
-        cb_release: VpxReleaseFrameBufferCbFnT,
-        cb_priv: *mut c_void,
-    ) -> VpxCodecErr,
->;
-pub type vpx_codec_set_fb_fn_t = VpxCodecSetFbFnT;
-
-pub type VpxCodecEncodeFnT = Option<
-    unsafe extern "C" fn(
-        ctx: *mut VpxCodecAlgPriv,
-        img: *const VpxImage,
-        pts: VpxCodecPts,
-        duration: c_ulong,
-        flags: VpxEncFrameFlags,
-        deadline: VpxEncDeadline,
-    ) -> VpxCodecErr,
->;
-pub type vpx_codec_encode_fn_t = VpxCodecEncodeFnT;
-
-pub type VpxCodecGetCxDataFnT = Option<
-    unsafe extern "C" fn(
-        ctx: *mut VpxCodecAlgPriv,
-        iter: *mut VpxCodecIter,
-    ) -> *const VpxCodecCxPkt,
->;
-pub type vpx_codec_get_cx_data_fn_t = VpxCodecGetCxDataFnT;
-
-pub type VpxCodecEncConfigSetFnT = Option<
-    unsafe extern "C" fn(ctx: *mut VpxCodecAlgPriv, cfg: *const VpxCodecEncCfg) -> VpxCodecErr,
->;
-pub type vpx_codec_enc_config_set_fn_t = VpxCodecEncConfigSetFnT;
-
-pub type VpxCodecGetGlobalHeadersFnT =
-    Option<unsafe extern "C" fn(ctx: *mut VpxCodecAlgPriv) -> *mut VpxFixedBuf>;
-pub type vpx_codec_get_global_headers_fn_t = VpxCodecGetGlobalHeadersFnT;
-
-pub type VpxCodecGetPreviewFrameFnT =
-    Option<unsafe extern "C" fn(ctx: *mut VpxCodecAlgPriv) -> *mut VpxImage>;
-pub type vpx_codec_get_preview_frame_fn_t = VpxCodecGetPreviewFrameFnT;
-
-pub type VpxCodecEncMrGetMemLocFnT = Option<
-    unsafe extern "C" fn(cfg: *const VpxCodecEncCfg, mem_loc: *mut *mut c_void) -> VpxCodecErr,
->;
-pub type vpx_codec_enc_mr_get_mem_loc_fn_t = VpxCodecEncMrGetMemLocFnT;
-
-pub type VpxCodecEncMrFreeMemLocFnT =
-    Option<unsafe extern "C" fn(mem_loc: *mut c_void) -> VpxCodecErr>;
-pub type vpx_codec_enc_mr_free_mem_loc_fn_t = VpxCodecEncMrFreeMemLocFnT;
-
-/// `vpx_codec_ctrl_fn_map_t` (`vpx_codec_internal.h:174`). Sentinel is
-/// `{0, NULL}`.
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct VpxCodecCtrlFnMap {
-    pub ctrl_id: c_int,
-    pub fn_: VpxCodecControlFnT,
-}
-pub type vpx_codec_ctrl_fn_map_t = VpxCodecCtrlFnMap;
-pub type VpxCodecCtrlFnMapT = VpxCodecCtrlFnMap;
-
-/// `vpx_codec_enc_cfg_map_t` (`vpx_codec_internal.h:284`). Storage for
-/// the embedded `vpx_codec_enc_cfg_t` is treated as opaque bytes here.
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct VpxCodecEncCfgValue {
-    pub bytes: [u8; 1],
-}
-
-#[repr(C)]
-pub struct VpxCodecEncCfgMap {
-    pub usage: c_int,
-    pub cfg: VpxCodecEncCfgValue,
-}
-pub type vpx_codec_enc_cfg_map_t = VpxCodecEncCfgMap;
-
-/// `struct vpx_codec_dec_iface` (`vpx_codec_internal.h:300`).
-#[repr(C)]
-pub struct VpxCodecDecIface {
-    pub peek_si: VpxCodecPeekSiFnT,
-    pub get_si: VpxCodecGetSiFnT,
-    pub decode: VpxCodecDecodeFnT,
-    pub get_frame: VpxCodecGetFrameFnT,
-    pub set_fb_fn: VpxCodecSetFbFnT,
-}
-
-/// `struct vpx_codec_enc_iface` (`vpx_codec_internal.h:308`).
-#[repr(C)]
-pub struct VpxCodecEncIface {
-    pub cfg_map_count: c_int,
-    pub cfg_maps: *const VpxCodecEncCfgMap,
-    pub encode: VpxCodecEncodeFnT,
-    pub get_cx_data: VpxCodecGetCxDataFnT,
-    pub cfg_set: VpxCodecEncConfigSetFnT,
-    pub get_glob_hdrs: VpxCodecGetGlobalHeadersFnT,
-    pub get_preview: VpxCodecGetPreviewFrameFnT,
-    pub mr_get_mem_loc: VpxCodecEncMrGetMemLocFnT,
-    pub mr_free_mem_loc: VpxCodecEncMrFreeMemLocFnT,
-}
-
-/// `struct vpx_codec_iface` (`vpx_codec_internal.h:293`).
 #[repr(C)]
 pub struct VpxCodecIface {
     pub name: *const c_char,
     pub abi_version: c_int,
     pub caps: VpxCodecCaps,
-    pub init: VpxCodecInitFnT,
-    pub destroy: VpxCodecDestroyFnT,
-    pub ctrl_maps: *mut VpxCodecCtrlFnMap,
-    pub dec: VpxCodecDecIface,
-    pub enc: VpxCodecEncIface,
 }
 pub type vpx_codec_iface_t = VpxCodecIface;
 pub type VpxCodecIfaceT = VpxCodecIface;
@@ -592,6 +429,7 @@ pub struct VpxCodecCtx {
     pub init_flags: VpxCodecFlags,
     pub config: VpxCodecCtxConfig,
     pub priv_: *mut VpxCodecPriv,
+    pub trait_obj: *mut c_void,
 }
 pub type vpx_codec_ctx_t = VpxCodecCtx;
 pub type VpxCodecCtxT = VpxCodecCtx;

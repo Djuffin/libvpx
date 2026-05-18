@@ -178,7 +178,7 @@ unsafe fn filter_block2d(
 // ---------------------------------------------------------------------------
 
 /// `vp8_sixtap_predict4x4_c` — vp8/common/filter.c:125.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_sixtap_predict4x4_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,
@@ -204,7 +204,7 @@ pub unsafe extern "C" fn vp8_sixtap_predict4x4_c(
 }
 
 /// `vp8_sixtap_predict8x8_c` — vp8/common/filter.c:137.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_sixtap_predict8x8_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,
@@ -245,7 +245,7 @@ pub unsafe extern "C" fn vp8_sixtap_predict8x8_c(
 }
 
 /// `vp8_sixtap_predict8x4_c` — vp8/common/filter.c:156.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_sixtap_predict8x4_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,
@@ -286,7 +286,7 @@ pub unsafe extern "C" fn vp8_sixtap_predict8x4_c(
 }
 
 /// `vp8_sixtap_predict16x16_c` — vp8/common/filter.c:175.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_sixtap_predict16x16_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,
@@ -440,7 +440,7 @@ unsafe fn filter_block2d_bil(
 // ---------------------------------------------------------------------------
 
 /// `vp8_bilinear_predict4x4_c` — vp8/common/filter.c:322.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_bilinear_predict4x4_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,
@@ -470,7 +470,7 @@ pub unsafe extern "C" fn vp8_bilinear_predict4x4_c(
 }
 
 /// `vp8_bilinear_predict8x8_c` — vp8/common/filter.c:337.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_bilinear_predict8x8_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,
@@ -500,7 +500,7 @@ pub unsafe extern "C" fn vp8_bilinear_predict8x8_c(
 }
 
 /// `vp8_bilinear_predict8x4_c` — vp8/common/filter.c:352.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_bilinear_predict8x4_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,
@@ -530,7 +530,7 @@ pub unsafe extern "C" fn vp8_bilinear_predict8x4_c(
 }
 
 /// `vp8_bilinear_predict16x16_c` — vp8/common/filter.c:367.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_bilinear_predict16x16_c(
     src_ptr: *mut u8,
     src_pixels_per_line: i32,

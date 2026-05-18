@@ -15,10 +15,14 @@
 #![allow(unused_mut)]
 #![allow(unused_unsafe)]
 #![allow(static_mut_refs)]
+#![allow(unsafe_op_in_unsafe_fn)]
 
 // ---- Foundations (no inter-module deps) ----
 pub mod tables;
 pub mod types;
+pub mod codec;
+pub mod vp8_cx_stub;
+pub mod vp9_dx_stub;
 
 // ---- vp8/common/ ----
 pub mod alloccommon;

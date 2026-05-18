@@ -45,7 +45,7 @@ const sinpi8sqrt2: i32 = 35468;
 
 /// `vp8_short_idct4x4llm_c` — reference 4x4 inverse DCT followed by the
 /// clip-and-add accumulate of RFC 6386 §14.4.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
     input: *mut i16,
     mut pred_ptr: *mut u8,
@@ -152,7 +152,7 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
 /// `vp8_dc_only_idct_add_c` — fast path taken when only the DC
 /// coefficient is non-zero (`eobs[block] == 1`). The DC value is
 /// pre-multiplied by `dq[0]` by the caller.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
     input_dc: i16,
     mut pred_ptr: *mut u8,
@@ -193,7 +193,7 @@ pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
 /// `vp8_short_inv_walsh4x4_c` — inverse WHT for the macroblock Y2 block,
 /// scattering the 16 recovered luma DCs into the DC slot of each Y
 /// residual block (`mb_dqcoeff[i * 16]`).
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
     input: *mut i16,
     mb_dqcoeff: *mut i16,
@@ -264,7 +264,7 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(
 
 /// `vp8_short_inv_walsh4x4_1_c` — fast path when only the WHT DC is
 /// non-zero; every Y block gets the same recovered DC.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_short_inv_walsh4x4_1_c(
     input: *mut i16,
     mb_dqcoeff: *mut i16,

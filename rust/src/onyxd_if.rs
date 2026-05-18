@@ -445,7 +445,7 @@ pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxR
 }
 
 /// `vp8dx_get_raw_frame` — `vp8/decoder/onyxd_if.c:376`.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8dx_get_raw_frame(
     pbi: *mut Vp8dComp<'static>,
     sd: *mut Yv12BufferConfig,
@@ -489,7 +489,7 @@ pub unsafe extern "C" fn vp8dx_get_raw_frame(
 /// Linear scan over the mode-info grid (`oci->mi`) checking whether any
 /// macroblock referenced `ref_frame`. The trailing `mi = mi.add(1)` past
 /// each row skips the sentinel column at `mode_info_stride - 1`.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8dx_references_buffer(
     oci: *mut Vp8Common,
     ref_frame: i32,
@@ -514,7 +514,7 @@ pub unsafe extern "C" fn vp8dx_references_buffer(
 }
 
 /// `vp8_create_decoder_instances` — `vp8/decoder/onyxd_if.c:424`.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_create_decoder_instances(
     fb: *mut FrameBuffers<'static>,
     oxcf: *mut Vp8dConfig,
@@ -530,7 +530,7 @@ pub unsafe extern "C" fn vp8_create_decoder_instances(
 }
 
 /// `vp8_remove_decoder_instances` — `vp8/decoder/onyxd_if.c:446`.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8_remove_decoder_instances(fb: *mut FrameBuffers<'static>) -> i32 {
     let pbi: *mut Vp8dComp<'static> = (*fb).pbi[0];
 
@@ -545,7 +545,7 @@ pub unsafe extern "C" fn vp8_remove_decoder_instances(fb: *mut FrameBuffers<'sta
 }
 
 /// `vp8dx_get_quantizer` — `vp8/decoder/onyxd_if.c:460`.
-#[no_mangle]
+
 pub unsafe extern "C" fn vp8dx_get_quantizer(pbi: *const Vp8dComp<'static>) -> i32 {
     (*pbi).common.base_qindex
 }

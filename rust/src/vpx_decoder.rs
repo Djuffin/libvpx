@@ -1,9 +1,6 @@
-//! Literal Rust transliteration of `vpx/src/vpx_decoder.c`.
-//!
-//! Decoder-side public-API dispatcher: every entry point validates its
-//! arguments, validates the bound algorithm's capabilities, then routes
-//! through `ctx->iface->dec.<slot>(...)` (or, for the put-frame /
-//! put-slice callback registrations, mutates `ctx->priv` directly).
+//! Decoder-side public-API dispatcher. Each entry point validates
+//! arguments + capability bits, then dispatches through the
+//! `Decoder` trait stashed on `VpxCodecCtx::trait_obj`.
 //!
 //! Public types and constants live in `crate::vpx_api`.
 
@@ -16,21 +13,14 @@ use core::ptr;
 
 use crate::vpx_api::*;
 use crate::vpx_codec::vpx_codec_destroy;
+use crate::vp8_dx_iface::Vp8Decoder;
+use crate::codec::Decoder;
 
 // ===========================================================================
-// Helpers (translation of file-static helpers in `vpx_decoder.c`).
+// Helpers
 // ===========================================================================
 
-/// Returns truthy in the C sense — every non-OK error code is `true`,
-/// matching the `if (res) { ... }` idiom in the C source.
-#[inline]
-fn err_is_set(res: VpxCodecErr) -> bool {
-    res as i32 != 0
-}
-
-/// `SAVE_STATUS(ctx, var)` — write-through error reporting. Mirrors the
-/// C macro: stash `var` into `ctx->err` iff `ctx` is non-NULL, then
-/// return `var`.
+/// Stash `var` into `ctx->err` iff `ctx` is non-NULL, then return `var`.
 #[inline]
 unsafe fn save_status(ctx: *mut VpxCodecCtx, var: VpxCodecErr) -> VpxCodecErr {
     if !ctx.is_null() {
@@ -39,22 +29,13 @@ unsafe fn save_status(ctx: *mut VpxCodecCtx, var: VpxCodecErr) -> VpxCodecErr {
     var
 }
 
-/// `get_alg_priv` — cast `ctx->priv` (a `*mut vpx_codec_priv`) down to
-/// the opaque, codec-private `*mut vpx_codec_alg_priv_t`. Safe by
-/// contract: every algorithm allocates `vpx_codec_alg_priv_t` such that
-/// its first bytes are a `vpx_codec_priv` header.
-#[inline]
-unsafe fn get_alg_priv(ctx: *mut VpxCodecCtx) -> *mut VpxCodecAlgPriv {
-    (*ctx).priv_ as *mut VpxCodecAlgPriv
-}
-
 // ===========================================================================
 // Public-API dispatcher functions (literal C→Rust transliteration).
 // ===========================================================================
 
 /// `vpx_codec_dec_init_ver` — bind a context to an algorithm.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_dec_init_ver(
+
+pub unsafe fn vpx_codec_dec_init_ver(
     ctx: *mut VpxCodecCtx,
     iface: *mut VpxCodecIface,
     cfg: *const VpxCodecDecCfg,
@@ -92,24 +73,39 @@ pub unsafe extern "C" fn vpx_codec_dec_init_ver(
         (*ctx).init_flags = flags;
         (*ctx).config.dec = cfg;
 
-        let init_res = ((*(*ctx).iface).init.expect("iface->init"))(ctx, ptr::null_mut());
-        res = init_res;
-        if err_is_set(res) {
-            (*ctx).err_detail = if !(*ctx).priv_.is_null() {
-                (*(*ctx).priv_).err_detail
-            } else {
-                ptr::null()
-            };
-            vpx_codec_destroy(ctx);
+        // VP8 is currently the only algorithm; when VP9 lands a small
+        // per-algo registry will choose between constructors.
+        match Vp8Decoder::new(flags) {
+            Ok(dec) => {
+                // Mirror the threads config into the priv_ if cfg
+                // was supplied (preserves the legacy iface-init
+                // behavior of copying cfg into Vp8AlgPriv).
+                if !cfg.is_null() {
+                    (*dec.as_ptr()).cfg = *cfg;
+                }
+                // priv_ is set as a non-null sentinel for
+                // initialized-state checks elsewhere; it points at the
+                // same Vp8AlgPriv that the trait object owns.
+                (*ctx).priv_ = dec.as_ptr() as *mut VpxCodecPriv;
+                let boxed = Box::new(dec);
+                (*ctx).trait_obj = Box::into_raw(boxed) as *mut c_void;
+                res = VPX_CODEC_OK;
+            }
+            Err(e) => {
+                res = e;
+                vpx_codec_destroy(ctx);
+            }
         }
     }
 
     save_status(ctx, res)
 }
 
-/// `vpx_codec_peek_stream_info` — parse without committing.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_peek_stream_info(
+/// `vpx_codec_peek_stream_info` — parse without committing. The
+/// `iface` parameter is kept only for null-check + param validation;
+/// dispatch uses `Decoder::peek_stream_info`.
+
+pub unsafe fn vpx_codec_peek_stream_info(
     iface: *mut VpxCodecIface,
     data: *const u8,
     data_sz: c_uint,
@@ -129,15 +125,24 @@ pub unsafe extern "C" fn vpx_codec_peek_stream_info(
         (*si).w = 0;
         (*si).h = 0;
 
-        res = ((*iface).dec.peek_si.expect("iface->dec.peek_si"))(data, data_sz, si);
+        let slice = core::slice::from_raw_parts(data, data_sz as usize);
+        match Vp8Decoder::peek_stream_info(slice) {
+            Ok(out) => {
+                *si = out;
+                res = VPX_CODEC_OK;
+            }
+            Err(e) => {
+                res = e;
+            }
+        }
     }
 
     res
 }
 
 /// `vpx_codec_get_stream_info` — query an active context.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_get_stream_info(
+
+pub unsafe fn vpx_codec_get_stream_info(
     ctx: *mut VpxCodecCtx,
     si: *mut VpxCodecStreamInfo,
 ) -> VpxCodecErr {
@@ -148,22 +153,29 @@ pub unsafe extern "C" fn vpx_codec_get_stream_info(
         || ((*si).sz as usize) < core::mem::size_of::<VpxCodecStreamInfo>()
     {
         res = VPX_CODEC_INVALID_PARAM;
-    } else if (*ctx).iface.is_null() || (*ctx).priv_.is_null() {
+    } else if (*ctx).iface.is_null() || (*ctx).trait_obj.is_null() {
         res = VPX_CODEC_ERROR;
     } else {
         // Set default/unknown values
         (*si).w = 0;
         (*si).h = 0;
 
-        res = ((*(*ctx).iface).dec.get_si.expect("iface->dec.get_si"))(get_alg_priv(ctx), si);
+        let dec = &*((*ctx).trait_obj as *const Vp8Decoder);
+        res = match dec.stream_info() {
+            Ok(out) => {
+                *si = out;
+                VPX_CODEC_OK
+            }
+            Err(e) => e,
+        };
     }
 
     save_status(ctx, res)
 }
 
 /// `vpx_codec_decode` — feed encoded bytes in.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_decode(
+
+pub unsafe fn vpx_codec_decode(
     ctx: *mut VpxCodecCtx,
     data: *const u8,
     data_sz: c_uint,
@@ -179,23 +191,30 @@ pub unsafe extern "C" fn vpx_codec_decode(
         || (!data.is_null() && data_sz == 0)
     {
         res = VPX_CODEC_INVALID_PARAM;
-    } else if (*ctx).iface.is_null() || (*ctx).priv_.is_null() {
+    } else if (*ctx).iface.is_null() || (*ctx).trait_obj.is_null() {
         res = VPX_CODEC_ERROR;
     } else {
-        res = ((*(*ctx).iface).dec.decode.expect("iface->dec.decode"))(
-            get_alg_priv(ctx),
-            data,
-            data_sz,
-            user_priv,
-        );
+        let dec = &mut *((*ctx).trait_obj as *mut Vp8Decoder);
+        dec.set_user_priv(user_priv);
+        let slice = if data.is_null() {
+            &[][..]
+        } else {
+            core::slice::from_raw_parts(data, data_sz as usize)
+        };
+        res = match dec.decode(slice, core::time::Duration::ZERO) {
+            Ok(()) => VPX_CODEC_OK,
+            Err(e) => e,
+        };
     }
 
     save_status(ctx, res)
 }
 
-/// `vpx_codec_get_frame` — drain decoded pictures.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_get_frame(
+/// `vpx_codec_get_frame` — drain decoded pictures. The user's `iter`
+/// is mirrored to the trait's internal iter: first call after a decode
+/// returns the new image and toggles iter; subsequent calls return null.
+
+pub unsafe fn vpx_codec_get_frame(
     ctx: *mut VpxCodecCtx,
     iter: *mut VpxCodecIter,
 ) -> *mut VpxImage {
@@ -204,96 +223,78 @@ pub unsafe extern "C" fn vpx_codec_get_frame(
     if ctx.is_null()
         || iter.is_null()
         || (*ctx).iface.is_null()
-        || (*ctx).priv_.is_null()
+        || (*ctx).trait_obj.is_null()
     {
         img = ptr::null_mut();
+    } else if !(*iter).is_null() {
+        // Caller's iter already advanced past the single VP8 output —
+        // no more frames in the queue.
+        img = ptr::null_mut();
     } else {
-        img = ((*(*ctx).iface).dec.get_frame.expect("iface->dec.get_frame"))(
-            get_alg_priv(ctx),
-            iter,
-        );
+        let dec = &mut *((*ctx).trait_obj as *mut Vp8Decoder);
+        img = match dec.get_frame() {
+            Some(image) => {
+                // Mark user's iter as advanced for C-side drain loops.
+                *iter = image as *const VpxImage as *const c_void;
+                image as *const VpxImage as *mut VpxImage
+            }
+            None => ptr::null_mut(),
+        };
     }
 
     img
 }
 
-/// `vpx_codec_register_put_frame_cb`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_register_put_frame_cb(
+/// `vpx_codec_register_put_frame_cb`. The VP8 build lacks
+/// `VPX_CODEC_CAP_PUT_FRAME`, so this always returns `INCAPABLE`.
+
+pub unsafe fn vpx_codec_register_put_frame_cb(
     ctx: *mut VpxCodecCtx,
     cb: VpxCodecPutFrameCbFnT,
-    user_priv: *mut c_void,
+    _user_priv: *mut c_void,
 ) -> VpxCodecErr {
     let res: VpxCodecErr;
-
     if ctx.is_null() || cb.is_none() {
         res = VPX_CODEC_INVALID_PARAM;
-    } else if (*ctx).iface.is_null() || (*ctx).priv_.is_null() {
-        res = VPX_CODEC_ERROR;
-    } else if ((*(*ctx).iface).caps & VPX_CODEC_CAP_PUT_FRAME) == 0 {
-        res = VPX_CODEC_INCAPABLE;
     } else {
-        // ctx->priv->dec.put_frame_cb.u.put_frame = cb;
-        (*(*ctx).priv_).dec.put_frame_cb.u =
-            core::mem::transmute::<VpxCodecPutFrameCbFnT, *mut c_void>(cb);
-        (*(*ctx).priv_).dec.put_frame_cb.user_priv = user_priv;
-        res = VPX_CODEC_OK;
+        res = VPX_CODEC_INCAPABLE;
     }
-
     save_status(ctx, res)
 }
 
-/// `vpx_codec_register_put_slice_cb`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_register_put_slice_cb(
+/// `vpx_codec_register_put_slice_cb`. The VP8 build lacks
+/// `VPX_CODEC_CAP_PUT_SLICE`, so this always returns `INCAPABLE`.
+
+pub unsafe fn vpx_codec_register_put_slice_cb(
     ctx: *mut VpxCodecCtx,
     cb: VpxCodecPutSliceCbFnT,
-    user_priv: *mut c_void,
+    _user_priv: *mut c_void,
 ) -> VpxCodecErr {
     let res: VpxCodecErr;
-
     if ctx.is_null() || cb.is_none() {
         res = VPX_CODEC_INVALID_PARAM;
-    } else if (*ctx).iface.is_null() || (*ctx).priv_.is_null() {
-        res = VPX_CODEC_ERROR;
-    } else if ((*(*ctx).iface).caps & VPX_CODEC_CAP_PUT_SLICE) == 0 {
-        res = VPX_CODEC_INCAPABLE;
     } else {
-        // ctx->priv->dec.put_slice_cb.u.put_slice = cb;
-        (*(*ctx).priv_).dec.put_slice_cb.u =
-            core::mem::transmute::<VpxCodecPutSliceCbFnT, *mut c_void>(cb);
-        (*(*ctx).priv_).dec.put_slice_cb.user_priv = user_priv;
-        res = VPX_CODEC_OK;
+        res = VPX_CODEC_INCAPABLE;
     }
-
     save_status(ctx, res)
 }
 
-/// `vpx_codec_set_frame_buffer_functions` — external frame-buffer
-/// registration.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vpx_codec_set_frame_buffer_functions(
+/// `vpx_codec_set_frame_buffer_functions`. The VP8 build lacks
+/// `VPX_CODEC_CAP_EXTERNAL_FRAME_BUFFER`; the trait-based
+/// `FrameBufferAllocator` hook in `crate::codec` is the future
+/// replacement.
+
+pub unsafe fn vpx_codec_set_frame_buffer_functions(
     ctx: *mut VpxCodecCtx,
     cb_get: VpxGetFrameBufferCbFnT,
     cb_release: VpxReleaseFrameBufferCbFnT,
-    cb_priv: *mut c_void,
+    _cb_priv: *mut c_void,
 ) -> VpxCodecErr {
     let res: VpxCodecErr;
-
     if ctx.is_null() || cb_get.is_none() || cb_release.is_none() {
         res = VPX_CODEC_INVALID_PARAM;
-    } else if (*ctx).iface.is_null() || (*ctx).priv_.is_null() {
-        res = VPX_CODEC_ERROR;
-    } else if ((*(*ctx).iface).caps & VPX_CODEC_CAP_EXTERNAL_FRAME_BUFFER) == 0 {
-        res = VPX_CODEC_INCAPABLE;
     } else {
-        res = ((*(*ctx).iface).dec.set_fb_fn.expect("iface->dec.set_fb_fn"))(
-            get_alg_priv(ctx),
-            cb_get,
-            cb_release,
-            cb_priv,
-        );
+        res = VPX_CODEC_INCAPABLE;
     }
-
     save_status(ctx, res)
 }

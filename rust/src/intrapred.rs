@@ -334,7 +334,7 @@ unsafe fn dc_predictor(
 // Hand-unrolled 4x4 entry points.
 // ===========================================================================
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_he_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -353,7 +353,7 @@ pub unsafe extern "C" fn vpx_he_predictor_4x4_c(
     ptr::write_bytes(dst.offset(stride * 3), avg3(K, L, L), 4);
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_ve_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -376,7 +376,7 @@ pub unsafe extern "C" fn vpx_ve_predictor_4x4_c(
     ptr::copy_nonoverlapping(dst, dst.offset(stride * 3), 4);
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d207_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -413,7 +413,7 @@ pub unsafe extern "C" fn vpx_d207_predictor_4x4_c(
     dst_set(dst, stride, 3, 3, vL);
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d63_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -453,7 +453,7 @@ pub unsafe extern "C" fn vpx_d63_predictor_4x4_c(
     dst_set(dst, stride, 3, 3, avg3(E, F, G)); // differs from vp8
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d63e_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -494,7 +494,7 @@ pub unsafe extern "C" fn vpx_d63e_predictor_4x4_c(
     dst_set(dst, stride, 3, 3, avg3(F, G, H));
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d45_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -533,7 +533,7 @@ pub unsafe extern "C" fn vpx_d45_predictor_4x4_c(
     dst_set(dst, stride, 3, 3, H as u8); // differs from vp8
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d45e_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -572,7 +572,7 @@ pub unsafe extern "C" fn vpx_d45e_predictor_4x4_c(
     dst_set(dst, stride, 3, 3, avg3(G, H, H));
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d117_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -613,7 +613,7 @@ pub unsafe extern "C" fn vpx_d117_predictor_4x4_c(
     dst_set(dst, stride, 3, 1, avg3(B, C, D));
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d135_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -653,7 +653,7 @@ pub unsafe extern "C" fn vpx_d135_predictor_4x4_c(
     dst_set(dst, stride, 3, 0, avg3(D, C, B));
 }
 
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_d153_predictor_4x4_c(
     dst: *mut u8,
     stride: isize,
@@ -706,7 +706,7 @@ pub unsafe extern "C" fn vpx_d153_predictor_4x4_c(
 
 macro_rules! intra_pred_sized_rs {
     ($name:ident, $tpl:ident, $size:expr) => {
-        #[no_mangle]
+        
         pub unsafe extern "C" fn $name(
             dst: *mut u8,
             stride: isize,

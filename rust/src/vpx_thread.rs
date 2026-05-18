@@ -306,7 +306,7 @@ static mut g_worker_interface: VPxWorkerInterface = VPxWorkerInterface {
 /// `int vpx_set_worker_interface(const VPxWorkerInterface *const winterface)`.
 /// Validates that every entry of `winterface` is non-NULL, then copies
 /// the struct into the global. Returns 1 on success, 0 on invalid input.
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_set_worker_interface(
     winterface: *const VPxWorkerInterface,
 ) -> c_int {
@@ -326,7 +326,7 @@ pub unsafe extern "C" fn vpx_set_worker_interface(
 
 /// `const VPxWorkerInterface *vpx_get_worker_interface(void)`.
 /// Returns a pointer to the (possibly-overridden) default vtable.
-#[no_mangle]
+
 pub unsafe extern "C" fn vpx_get_worker_interface() -> *const VPxWorkerInterface {
     ptr::addr_of!(g_worker_interface)
 }

@@ -58,7 +58,7 @@ fn setup_rtcd_internal() {
 /// lifetime, regardless of how many threads race to enter this function.
 /// Name kept verbatim (no `vpx_dsp_rtcd_rs` etc.) per the literal-translation
 /// rule.
-#[no_mangle]
+
 pub extern "C" fn vpx_dsp_rtcd() {
     SETUP_RTCD_ONCE.call_once(setup_rtcd_internal);
 }

@@ -36,7 +36,7 @@ fn setup_rtcd_internal() {
 /// Idempotent and safe to call from any thread. Mirrors
 /// `void vp8_rtcd(void) { once(setup_rtcd_internal); }` from
 /// `vp8/common/rtcd.c:15`.
-#[no_mangle]
+
 pub extern "C" fn vp8_rtcd() {
     RTCD_ONCE.call_once(setup_rtcd_internal);
 }

@@ -39,7 +39,7 @@ pub use crate::yv12extend::{
 ///
 /// Safe to call from any thread at any time; idempotent. Must be
 /// called before any of the dispatched YV12 primitives is invoked.
-#[no_mangle]
+
 pub extern "C" fn vpx_scale_rtcd() {
     SCALE_RTCD_ONCE.call_once(setup_rtcd_internal);
 }

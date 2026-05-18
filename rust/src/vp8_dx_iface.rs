@@ -37,12 +37,6 @@ pub const VP8_CAP_POSTPROC: VpxCodecCaps = 0;
 /// Expansion of `VP8_CAP_ERROR_CONCEALMENT` (`vp8_dx_iface.c:35-36`).
 pub const VP8_CAP_ERROR_CONCEALMENT: VpxCodecCaps = 0;
 
-/// `NELEMENTS` (`vp8_dx_iface.c:42`).
-#[inline]
-pub const fn n_elements<T, const N: usize>(_x: &[T; N]) -> i32 {
-    N as i32
-}
-
 /// VP8 carries no extra fields — `vp8_stream_info_t` is an alias.
 /// (`vp8_dx_iface.c:38`)
 pub type Vp8StreamInfo = VpxCodecStreamInfo;
@@ -94,23 +88,6 @@ pub const VP8D_GET_FRAME_CORRUPTED: i32 = 10;
 pub const VP8D_GET_LAST_REF_USED: i32 = 11;
 pub const VPXD_GET_LAST_QUANTIZER: i32 = 12;
 pub const VPXD_SET_DECRYPTOR: i32 = 13;
-
-/// `va_list` placeholder — varargs do not have a stable Rust ABI; the
-/// FFI shim that bridges into this module deals with the platform's
-/// `va_list`. Local to this translation unit.
-#[repr(C)]
-pub struct VaList {
-    pub raw: *mut c_void,
-}
-
-impl VaList {
-    pub unsafe fn arg_ptr<T>(&mut self) -> *mut T {
-        self.raw as *mut T
-    }
-    pub unsafe fn arg_i32(&mut self) -> i32 {
-        self.raw as i32
-    }
-}
 
 /// `vpx_codec_alg_priv_t` for the VP8 decoder (`vp8_dx_iface.c:44-64`).
 /// Concrete adapter-private state — distinct from `vpx_api::VpxCodecAlgPriv`
@@ -183,65 +160,8 @@ unsafe fn vp8_zero<T>(t: &mut T) {
 // `vp8_dx_iface.c` static helpers
 // ===========================================================================
 
-/// `vp8_init_ctx` — `vp8/vp8_dx_iface.c:66`.
-unsafe fn vp8_init_ctx(ctx: *mut VpxCodecCtx) -> i32 {
-    let priv_ =
-        vpx_calloc(1, core::mem::size_of::<Vp8AlgPriv<'static>>()) as *mut Vp8AlgPriv<'static>;
-    if priv_.is_null() {
-        return 1;
-    }
-
-    (*ctx).priv_ = priv_ as *mut VpxCodecPriv;
-    (*(*ctx).priv_).init_flags = (*ctx).init_flags;
-
-    (*priv_).si.sz = core::mem::size_of::<Vp8StreamInfo>() as u32;
-    (*priv_).decrypt_cb = None;
-    (*priv_).decrypt_state = ptr::null_mut();
-
-    if !(*ctx).config.dec.is_null() {
-        // Update the reference to the config structure to an internal copy.
-        (*priv_).cfg = *(*ctx).config.dec;
-        (*ctx).config.dec = &mut (*priv_).cfg;
-    }
-
-    0
-}
-
-/// `vp8_init` — `vp8/vp8_dx_iface.c:87`. Vtable `init` slot.
-pub unsafe fn vp8_init(
-    ctx: *mut VpxCodecCtx,
-    data: *mut VpxCodecPrivEncMrCfg,
-) -> VpxCodecErr {
-    let res: VpxCodecErr = VPX_CODEC_OK;
-    let _ = data;
-
-    vp8_rtcd();
-    vpx_dsp_rtcd();
-    vpx_scale_rtcd();
-
-    // This function only allocates space for the vpx_codec_alg_priv_t
-    // structure. More memory may be required at the time the stream
-    // information becomes known.
-    if (*ctx).priv_.is_null() {
-        if vp8_init_ctx(ctx) != 0 {
-            return VPX_CODEC_MEM_ERROR;
-        }
-
-        let priv_ = (*ctx).priv_ as *mut Vp8AlgPriv<'static>;
-
-        // initialize number of fragments to zero
-        (*priv_).fragments.count = 0;
-        // is input fragments enabled?
-        (*priv_).fragments.enabled =
-            (((*priv_).base.init_flags & VPX_CODEC_USE_INPUT_FRAGMENTS) != 0) as i32;
-
-        // post processing level initialized to do nothing
-    }
-
-    res
-}
-
-/// `vp8_destroy` — `vp8/vp8_dx_iface.c:119`. Vtable `destroy` slot.
+/// `vp8_destroy` — `vp8/vp8_dx_iface.c:119`. Internal teardown used by
+/// `Vp8Decoder::Drop`.
 pub unsafe fn vp8_destroy(ctx: *mut Vp8AlgPriv<'static>) -> VpxCodecErr {
     vp8_remove_decoder_instances(&mut (*ctx).yv12_frame_buffers);
 
@@ -699,307 +619,11 @@ unsafe fn image2yuvconfig(img: *const VpxImage, yv12: *mut Yv12BufferConfig) -> 
     res
 }
 
-/// `vp8_set_reference` — `vp8/vp8_dx_iface.c:587`. Control callback.
-pub unsafe fn vp8_set_reference(
-    ctx: *mut Vp8AlgPriv<'static>,
-    mut args: VaList,
-) -> VpxCodecErr {
-    let data: *mut VpxRefFrame = args.arg_ptr::<VpxRefFrame>();
-
-    if !data.is_null() {
-        let frame: *mut VpxRefFrame = data;
-        let mut sd: Yv12BufferConfig = core::mem::zeroed();
-
-        image2yuvconfig(&(*frame).img, &mut sd);
-
-        if (*ctx).yv12_frame_buffers.pbi[0].is_null() {
-            return VPX_CODEC_CORRUPT_FRAME;
-        }
-
-        match vp8dx_set_reference(
-            (*ctx).yv12_frame_buffers.pbi[0],
-            (*frame).frame_type,
-            &mut sd,
-        ) {
-            Ok(()) => VPX_CODEC_OK,
-            Err(e) => e,
-        }
-    } else {
-        VPX_CODEC_INVALID_PARAM
-    }
-}
-
-/// `vp8_get_reference` — `vp8/vp8_dx_iface.c:606`. Control callback.
-pub unsafe fn vp8_get_reference(
-    ctx: *mut Vp8AlgPriv<'static>,
-    mut args: VaList,
-) -> VpxCodecErr {
-    let data: *mut VpxRefFrame = args.arg_ptr::<VpxRefFrame>();
-
-    if !data.is_null() {
-        let frame: *mut VpxRefFrame = data;
-        let mut sd: Yv12BufferConfig = core::mem::zeroed();
-
-        image2yuvconfig(&(*frame).img, &mut sd);
-
-        if (*ctx).yv12_frame_buffers.pbi[0].is_null() {
-            return VPX_CODEC_CORRUPT_FRAME;
-        }
-
-        match vp8dx_get_reference(
-            (*ctx).yv12_frame_buffers.pbi[0],
-            (*frame).frame_type,
-            &mut sd,
-        ) {
-            Ok(()) => VPX_CODEC_OK,
-            Err(e) => e,
-        }
-    } else {
-        VPX_CODEC_INVALID_PARAM
-    }
-}
-
-/// `vp8_get_quantizer` — `vp8/vp8_dx_iface.c:625`. Control callback.
-pub unsafe fn vp8_get_quantizer(
-    ctx: *mut Vp8AlgPriv<'static>,
-    mut args: VaList,
-) -> VpxCodecErr {
-    let arg: *mut i32 = args.arg_ptr::<i32>();
-    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
-    if arg.is_null() {
-        return VPX_CODEC_INVALID_PARAM;
-    }
-    if pbi.is_null() {
-        return VPX_CODEC_CORRUPT_FRAME;
-    }
-    *arg = vp8dx_get_quantizer(pbi);
-    VPX_CODEC_OK
-}
-
-/// `vp8_set_postproc` — `vp8/vp8_dx_iface.c:635`. Control callback.
-pub unsafe fn vp8_set_postproc(
-    _ctx: *mut Vp8AlgPriv<'static>,
-    _args: VaList,
-) -> VpxCodecErr {
-    // CONFIG_POSTPROC is 0 in the minimal build.
-    VPX_CODEC_INCAPABLE
-}
-
-/// `vp8_get_last_ref_updates` — `vp8/vp8_dx_iface.c:655`. Control callback.
-pub unsafe fn vp8_get_last_ref_updates(
-    ctx: *mut Vp8AlgPriv<'static>,
-    mut args: VaList,
-) -> VpxCodecErr {
-    let update_info: *mut i32 = args.arg_ptr::<i32>();
-
-    if !update_info.is_null() {
-        let pbi = (*ctx).yv12_frame_buffers.pbi[0];
-        if pbi.is_null() {
-            return VPX_CODEC_CORRUPT_FRAME;
-        }
-
-        *update_info = (*pbi).common.refresh_alt_ref_frame * VP8_ALTR_FRAME
-            + (*pbi).common.refresh_golden_frame * VP8_GOLD_FRAME
-            + (*pbi).common.refresh_last_frame * VP8_LAST_FRAME;
-
-        VPX_CODEC_OK
-    } else {
-        VPX_CODEC_INVALID_PARAM
-    }
-}
-
-/// `vp8_get_last_ref_frame` — `vp8/vp8_dx_iface.c:673`. Control callback.
-pub unsafe fn vp8_get_last_ref_frame(
-    ctx: *mut Vp8AlgPriv<'static>,
-    mut args: VaList,
-) -> VpxCodecErr {
-    let ref_info: *mut i32 = args.arg_ptr::<i32>();
-
-    if !ref_info.is_null() {
-        let pbi = (*ctx).yv12_frame_buffers.pbi[0];
-        if !pbi.is_null() {
-            let oci = &mut (*pbi).common as *mut crate::types::Vp8Common;
-            *ref_info = (if vp8dx_references_buffer(oci, ALTREF_FRAME as i32) != 0 {
-                VP8_ALTR_FRAME
-            } else {
-                0
-            }) | (if vp8dx_references_buffer(oci, GOLDEN_FRAME as i32) != 0 {
-                VP8_GOLD_FRAME
-            } else {
-                0
-            }) | (if vp8dx_references_buffer(oci, LAST_FRAME as i32) != 0 {
-                VP8_LAST_FRAME
-            } else {
-                0
-            });
-            VPX_CODEC_OK
-        } else {
-            VPX_CODEC_CORRUPT_FRAME
-        }
-    } else {
-        VPX_CODEC_INVALID_PARAM
-    }
-}
-
-/// `vp8_get_frame_corrupted` — `vp8/vp8_dx_iface.c:694`. Control callback.
-pub unsafe fn vp8_get_frame_corrupted(
-    ctx: *mut Vp8AlgPriv<'static>,
-    mut args: VaList,
-) -> VpxCodecErr {
-    let corrupted: *mut i32 = args.arg_ptr::<i32>();
-    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
-
-    if !corrupted.is_null() && !pbi.is_null() {
-        let frame = (*pbi).common.frame_to_show as *const Yv12BufferConfig;
-        if frame.is_null() {
-            return VPX_CODEC_ERROR;
-        }
-        *corrupted = (*frame).corrupted;
-        VPX_CODEC_OK
-    } else {
-        VPX_CODEC_INVALID_PARAM
-    }
-}
-
-/// `vp8_set_decryptor` — `vp8/vp8_dx_iface.c:709`. Control callback.
-pub unsafe fn vp8_set_decryptor(
-    ctx: *mut Vp8AlgPriv<'static>,
-    mut args: VaList,
-) -> VpxCodecErr {
-    let init: *mut VpxDecryptInit = args.arg_ptr::<VpxDecryptInit>();
-
-    if !init.is_null() {
-        (*ctx).decrypt_cb = (*init).decrypt_cb;
-        (*ctx).decrypt_state = (*init).decrypt_state;
-    } else {
-        (*ctx).decrypt_cb = None;
-        (*ctx).decrypt_state = ptr::null_mut();
-    }
-    VPX_CODEC_OK
-}
-
 // ===========================================================================
-// extern "C" trampolines — bridge the plain-Rust impl fns above to the
-// canonical `VpxCodecIface` slot signatures (which use `extern "C"` and
-// the opaque `*mut VpxCodecAlgPriv` pointer type).
+// Codec descriptor — `{ name, abi_version, caps }` metadata only.
+// Dispatch lives on the `Decoder` trait impl below.
 // ===========================================================================
 
-unsafe extern "C" fn vp8_init_c(
-    ctx: *mut VpxCodecCtx,
-    data: *mut VpxCodecPrivEncMrCfg,
-) -> VpxCodecErr {
-    vp8_init(ctx, data)
-}
-
-unsafe extern "C" fn vp8_destroy_c(ctx: *mut VpxCodecAlgPriv) -> VpxCodecErr {
-    vp8_destroy(ctx as *mut Vp8AlgPriv<'static>)
-}
-
-unsafe extern "C" fn vp8_peek_si_c(
-    data: *const u8,
-    data_sz: c_uint,
-    si: *mut VpxCodecStreamInfo,
-) -> VpxCodecErr {
-    vp8_peek_si(data, data_sz, si)
-}
-
-unsafe extern "C" fn vp8_get_si_c(
-    ctx: *mut VpxCodecAlgPriv,
-    si: *mut VpxCodecStreamInfo,
-) -> VpxCodecErr {
-    vp8_get_si(ctx as *mut Vp8AlgPriv<'static>, si)
-}
-
-unsafe extern "C" fn vp8_decode_c(
-    ctx: *mut VpxCodecAlgPriv,
-    data: *const u8,
-    data_sz: c_uint,
-    user_priv: *mut c_void,
-) -> VpxCodecErr {
-    vp8_decode(ctx as *mut Vp8AlgPriv<'static>, data, data_sz, user_priv)
-}
-
-unsafe extern "C" fn vp8_get_frame_c(
-    ctx: *mut VpxCodecAlgPriv,
-    iter: *mut VpxCodecIter,
-) -> *mut VpxImage {
-    vp8_get_frame(ctx as *mut Vp8AlgPriv<'static>, iter)
-}
-
-unsafe extern "C" fn vp8_set_reference_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_set_reference(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-unsafe extern "C" fn vp8_get_reference_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_get_reference(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-unsafe extern "C" fn vp8_set_postproc_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_set_postproc(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-unsafe extern "C" fn vp8_get_last_ref_updates_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_get_last_ref_updates(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-unsafe extern "C" fn vp8_get_frame_corrupted_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_get_frame_corrupted(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-unsafe extern "C" fn vp8_get_last_ref_frame_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_get_last_ref_frame(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-unsafe extern "C" fn vp8_get_quantizer_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_get_quantizer(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-unsafe extern "C" fn vp8_set_decryptor_c(
-    ctx: *mut VpxCodecAlgPriv,
-    ap: *mut c_void,
-) -> VpxCodecErr {
-    vp8_set_decryptor(ctx as *mut Vp8AlgPriv<'static>, VaList { raw: ap })
-}
-
-// ===========================================================================
-// Vtable and control map — `vp8_dx_iface.c:723-765`
-// ===========================================================================
-
-/// `vp8_ctf_maps` — `vp8/vp8_dx_iface.c:723`.
-pub static mut VP8_CTF_MAPS: [VpxCodecCtrlFnMap; 9] = [
-    VpxCodecCtrlFnMap { ctrl_id: VP8_SET_REFERENCE, fn_: Some(vp8_set_reference_c) },
-    VpxCodecCtrlFnMap { ctrl_id: VP8_COPY_REFERENCE, fn_: Some(vp8_get_reference_c) },
-    VpxCodecCtrlFnMap { ctrl_id: VP8_SET_POSTPROC, fn_: Some(vp8_set_postproc_c) },
-    VpxCodecCtrlFnMap { ctrl_id: VP8D_GET_LAST_REF_UPDATES, fn_: Some(vp8_get_last_ref_updates_c) },
-    VpxCodecCtrlFnMap { ctrl_id: VP8D_GET_FRAME_CORRUPTED, fn_: Some(vp8_get_frame_corrupted_c) },
-    VpxCodecCtrlFnMap { ctrl_id: VP8D_GET_LAST_REF_USED, fn_: Some(vp8_get_last_ref_frame_c) },
-    VpxCodecCtrlFnMap { ctrl_id: VPXD_GET_LAST_QUANTIZER, fn_: Some(vp8_get_quantizer_c) },
-    VpxCodecCtrlFnMap { ctrl_id: VPXD_SET_DECRYPTOR, fn_: Some(vp8_set_decryptor_c) },
-    VpxCodecCtrlFnMap { ctrl_id: -1, fn_: None },
-];
-
-/// `vpx_codec_vp8_dx_algo` — `vp8/vp8_dx_iface.c:738-765`.
 pub static mut VPX_CODEC_VP8_DX_ALGO: VpxCodecIface = VpxCodecIface {
     name: b"WebM Project VP8 Decoder\0".as_ptr() as *const c_char,
     abi_version: VPX_CODEC_INTERNAL_ABI_VERSION,
@@ -1007,35 +631,230 @@ pub static mut VPX_CODEC_VP8_DX_ALGO: VpxCodecIface = VpxCodecIface {
         | VP8_CAP_POSTPROC
         | VP8_CAP_ERROR_CONCEALMENT
         | VPX_CODEC_CAP_INPUT_FRAGMENTS,
-    init: Some(vp8_init_c),
-    destroy: Some(vp8_destroy_c),
-    ctrl_maps: ptr::null_mut(), // populated by `vpx_codec_vp8_dx` lazily
-    dec: VpxCodecDecIface {
-        peek_si: Some(vp8_peek_si_c),
-        get_si: Some(vp8_get_si_c),
-        decode: Some(vp8_decode_c),
-        get_frame: Some(vp8_get_frame_c),
-        set_fb_fn: None,
-    },
-    enc: VpxCodecEncIface {
-        cfg_map_count: 0,
-        cfg_maps: ptr::null(),
-        encode: None,
-        get_cx_data: None,
-        cfg_set: None,
-        get_glob_hdrs: None,
-        get_preview: None,
-        mr_get_mem_loc: None,
-        mr_free_mem_loc: None,
-    },
 };
 
-/// `vpx_codec_vp8_dx` — `vp8/vp8_dx_iface.c:738` (via `CODEC_INTERFACE`).
-///
-/// Returns a pointer to the canonical `VpxCodecIface` block for VP8.
+/// VP8 decoder iface descriptor pointer.
 pub unsafe fn vpx_codec_vp8_dx() -> *mut VpxCodecIface {
-    if VPX_CODEC_VP8_DX_ALGO.ctrl_maps.is_null() {
-        VPX_CODEC_VP8_DX_ALGO.ctrl_maps = VP8_CTF_MAPS.as_mut_ptr();
-    }
     &raw mut VPX_CODEC_VP8_DX_ALGO
+}
+
+// ===========================================================================
+// `Decoder` trait implementation.
+// ===========================================================================
+
+use crate::codec::{ControlCmd, Decoder, Error, Image};
+
+/// Newtype wrapper owning a `Vp8AlgPriv` allocated via libvpx's
+/// `vpx_calloc`. Dropping the `Box<Vp8Decoder>` runs `vp8_destroy`,
+/// which calls `vpx_free` — keeping allocator/deallocator matched.
+///
+/// `iter` mirrors the C `vpx_codec_iter_t` flip-flop: reset to null on
+/// each `decode()` call, advanced by `get_frame()`. Lets the trait
+/// `get_frame` return `Some` on the first call after a decode and
+/// `None` thereafter without exposing the iter to callers.
+pub struct Vp8Decoder {
+    priv_: *mut Vp8AlgPriv<'static>,
+    iter: VpxCodecIter,
+}
+
+impl Vp8Decoder {
+    /// Construct a new VP8 decoder. Equivalent to `vp8_init` over a
+    /// freshly-zeroed context.
+    pub unsafe fn new(init_flags: VpxCodecFlags) -> Result<Self, Error> {
+        let priv_ =
+            vpx_calloc(1, core::mem::size_of::<Vp8AlgPriv<'static>>())
+                as *mut Vp8AlgPriv<'static>;
+        if priv_.is_null() {
+            return Err(VPX_CODEC_MEM_ERROR);
+        }
+
+        // Mirrors vp8_init_ctx / vp8_init bodies but operates directly
+        // on the Vp8AlgPriv (no VpxCodecCtx wrapper required).
+        vp8_rtcd();
+        vpx_dsp_rtcd();
+        vpx_scale_rtcd();
+
+        (*priv_).base.init_flags = init_flags;
+        (*priv_).si.sz = core::mem::size_of::<Vp8StreamInfo>() as u32;
+        (*priv_).decrypt_cb = None;
+        (*priv_).decrypt_state = ptr::null_mut();
+        (*priv_).fragments.count = 0;
+        (*priv_).fragments.enabled =
+            ((init_flags & VPX_CODEC_USE_INPUT_FRAGMENTS) != 0) as i32;
+
+        Ok(Vp8Decoder { priv_, iter: ptr::null() })
+    }
+
+    /// Raw pointer into the underlying `Vp8AlgPriv`.
+    pub fn as_ptr(&self) -> *mut Vp8AlgPriv<'static> {
+        self.priv_
+    }
+
+    /// Stash a `user_priv` pointer that will be tagged onto the next
+    /// emitted `VpxImage`. Mirrors `vp8_decode`'s `user_priv` param,
+    /// which the trait API dropped.
+    pub unsafe fn set_user_priv(&mut self, user_priv: *mut c_void) {
+        if !self.priv_.is_null() {
+            (*self.priv_).user_priv = user_priv;
+        }
+    }
+}
+
+impl Drop for Vp8Decoder {
+    fn drop(&mut self) {
+        // Matches the C `vp8_destroy` cleanup — frees decoder
+        // instances first, then the `Vp8AlgPriv` itself.
+        unsafe {
+            if !self.priv_.is_null() {
+                let _ = vp8_destroy(self.priv_);
+                self.priv_ = ptr::null_mut();
+            }
+        }
+    }
+}
+
+impl Decoder for Vp8Decoder {
+    fn decode(&mut self, data: &[u8], _deadline: core::time::Duration) -> Result<(), Error> {
+        unsafe {
+            let (ptr, len) = if data.is_empty() {
+                (ptr::null(), 0u32)
+            } else {
+                (data.as_ptr(), data.len() as u32)
+            };
+            // Reset the iter so the next get_frame() reports the
+            // newly-decoded image instead of replaying the previous one.
+            self.iter = core::ptr::null();
+            let err = vp8_decode(self.priv_, ptr, len, ptr::null_mut());
+            if err == VPX_CODEC_OK { Ok(()) } else { Err(err) }
+        }
+    }
+
+    fn get_frame(&mut self) -> Option<&Image> {
+        unsafe {
+            let img = vp8_get_frame(self.priv_, &mut self.iter);
+            if img.is_null() {
+                None
+            } else {
+                Some(&*img)
+            }
+        }
+    }
+
+    fn control(&mut self, cmd: ControlCmd<'_>) -> Result<(), Error> {
+        unsafe {
+            let ctx = self.priv_;
+            match cmd {
+                ControlCmd::SetReference(frame) => {
+                    let mut sd: Yv12BufferConfig = core::mem::zeroed();
+                    image2yuvconfig(&frame.img, &mut sd);
+                    if (*ctx).yv12_frame_buffers.pbi[0].is_null() {
+                        return Err(VPX_CODEC_CORRUPT_FRAME);
+                    }
+                    vp8dx_set_reference(
+                        (*ctx).yv12_frame_buffers.pbi[0],
+                        frame.frame_type,
+                        &mut sd,
+                    )
+                }
+                ControlCmd::CopyReference(frame) => {
+                    let mut sd: Yv12BufferConfig = core::mem::zeroed();
+                    image2yuvconfig(&frame.img, &mut sd);
+                    if (*ctx).yv12_frame_buffers.pbi[0].is_null() {
+                        return Err(VPX_CODEC_CORRUPT_FRAME);
+                    }
+                    vp8dx_get_reference(
+                        (*ctx).yv12_frame_buffers.pbi[0],
+                        frame.frame_type,
+                        &mut sd,
+                    )
+                }
+                ControlCmd::SetPostproc(_cfg) => {
+                    // CONFIG_POSTPROC=0 in the minimal build.
+                    Err(VPX_CODEC_INCAPABLE)
+                }
+                ControlCmd::GetLastRefUpdates(out) => {
+                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    if pbi.is_null() {
+                        return Err(VPX_CODEC_CORRUPT_FRAME);
+                    }
+                    *out = (*pbi).common.refresh_alt_ref_frame * VP8_ALTR_FRAME
+                        + (*pbi).common.refresh_golden_frame * VP8_GOLD_FRAME
+                        + (*pbi).common.refresh_last_frame * VP8_LAST_FRAME;
+                    Ok(())
+                }
+                ControlCmd::GetFrameCorrupted(out) => {
+                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    if pbi.is_null() {
+                        return Err(VPX_CODEC_INVALID_PARAM);
+                    }
+                    let frame = (*pbi).common.frame_to_show as *const Yv12BufferConfig;
+                    if frame.is_null() {
+                        return Err(VPX_CODEC_ERROR);
+                    }
+                    *out = (*frame).corrupted;
+                    Ok(())
+                }
+                ControlCmd::GetLastRefUsed(out) => {
+                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    if pbi.is_null() {
+                        return Err(VPX_CODEC_CORRUPT_FRAME);
+                    }
+                    let oci = &mut (*pbi).common as *mut crate::types::Vp8Common;
+                    *out = (if vp8dx_references_buffer(oci, ALTREF_FRAME as i32) != 0 {
+                        VP8_ALTR_FRAME
+                    } else {
+                        0
+                    }) | (if vp8dx_references_buffer(oci, GOLDEN_FRAME as i32) != 0 {
+                        VP8_GOLD_FRAME
+                    } else {
+                        0
+                    }) | (if vp8dx_references_buffer(oci, LAST_FRAME as i32) != 0 {
+                        VP8_LAST_FRAME
+                    } else {
+                        0
+                    });
+                    Ok(())
+                }
+                ControlCmd::GetLastQuantizer(out) => {
+                    let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+                    if pbi.is_null() {
+                        return Err(VPX_CODEC_CORRUPT_FRAME);
+                    }
+                    *out = vp8dx_get_quantizer(pbi);
+                    Ok(())
+                }
+                ControlCmd::SetDecryptor(init) => {
+                    match init {
+                        Some(i) => {
+                            (*ctx).decrypt_cb = i.decrypt_cb;
+                            (*ctx).decrypt_state = i.decrypt_state;
+                        }
+                        None => {
+                            (*ctx).decrypt_cb = None;
+                            (*ctx).decrypt_state = ptr::null_mut();
+                        }
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn peek_stream_info(data: &[u8]) -> Result<crate::codec::StreamInfo, Error> {
+        unsafe {
+            let mut si: VpxCodecStreamInfo = core::mem::zeroed();
+            si.sz = core::mem::size_of::<VpxCodecStreamInfo>() as u32;
+            let res = vp8_peek_si(data.as_ptr(), data.len() as u32, &mut si);
+            if res == VPX_CODEC_OK { Ok(si) } else { Err(res) }
+        }
+    }
+
+    fn stream_info(&self) -> Result<crate::codec::StreamInfo, Error> {
+        unsafe {
+            let mut si: VpxCodecStreamInfo = core::mem::zeroed();
+            si.sz = core::mem::size_of::<VpxCodecStreamInfo>() as u32;
+            let res = vp8_get_si(self.priv_, &mut si);
+            if res == VPX_CODEC_OK { Ok(si) } else { Err(res) }
+        }
+    }
 }
