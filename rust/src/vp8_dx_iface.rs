@@ -43,14 +43,6 @@ pub const fn n_elements<T, const N: usize>(_x: &[T; N]) -> i32 {
     N as i32
 }
 
-/// `mem_seg_id_t` (`vp8_dx_iface.c:41`).
-#[repr(i32)]
-#[derive(Copy, Clone)]
-pub enum MemSegId {
-    Vp8SegAlgPriv = 256,
-    Vp8SegMax,
-}
-
 /// VP8 carries no extra fields — `vp8_stream_info_t` is an alias.
 /// (`vp8_dx_iface.c:38`)
 pub type Vp8StreamInfo = VpxCodecStreamInfo;
@@ -92,18 +84,6 @@ pub struct VpxRefFrame {
     pub frame_type: i32,
     pub img: VpxImage,
 }
-
-/// Reference-frame bitmap constants (`vpx/vp8.h`).
-pub const VP8_LAST_FRAME: i32 = 1;
-pub const VP8_GOLD_FRAME: i32 = 2;
-pub const VP8_ALTR_FRAME: i32 = 4;
-
-/// `MV_REFERENCE_FRAME` values consumed by `vp8dx_references_buffer`
-/// (`blockd.h`).
-pub const INTRA_FRAME: i32 = 0;
-pub const LAST_FRAME: i32 = 1;
-pub const GOLDEN_FRAME: i32 = 2;
-pub const ALTREF_FRAME: i32 = 3;
 
 /// Control IDs used by `vp8_ctf_maps` (`vpx/vp8.h`, `vpx/vp8dx.h`).
 pub const VP8_SET_REFERENCE: i32 = 1;
@@ -173,6 +153,11 @@ use crate::vpx_dsp_rtcd::vpx_dsp_rtcd;
 use crate::vpx_scale_rtcd::vpx_scale_rtcd;
 
 use crate::vpx_ports::vpx_clear_system_state;
+
+use crate::types::{
+    ALTREF_FRAME, GOLDEN_FRAME, LAST_FRAME, VP8_ALTR_FRAME, VP8_GOLD_FRAME,
+    VP8_LAST_FRAME,
+};
 
 // ===========================================================================
 // Helpers
@@ -834,15 +819,15 @@ pub unsafe fn vp8_get_last_ref_frame(
         let pbi = (*ctx).yv12_frame_buffers.pbi[0];
         if !pbi.is_null() {
             let oci = &mut (*pbi).common as *mut crate::types::Vp8Common;
-            *ref_info = (if vp8dx_references_buffer(oci, ALTREF_FRAME) != 0 {
+            *ref_info = (if vp8dx_references_buffer(oci, ALTREF_FRAME as i32) != 0 {
                 VP8_ALTR_FRAME
             } else {
                 0
-            }) | (if vp8dx_references_buffer(oci, GOLDEN_FRAME) != 0 {
+            }) | (if vp8dx_references_buffer(oci, GOLDEN_FRAME as i32) != 0 {
                 VP8_GOLD_FRAME
             } else {
                 0
-            }) | (if vp8dx_references_buffer(oci, LAST_FRAME) != 0 {
+            }) | (if vp8dx_references_buffer(oci, LAST_FRAME as i32) != 0 {
                 VP8_LAST_FRAME
             } else {
                 0

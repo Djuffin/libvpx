@@ -41,16 +41,12 @@ pub const DCT_VAL_CATEGORY6: i32 = 10;
 /// `DCT_EOB_TOKEN` — end-of-block sentinel.
 pub const DCT_EOB_TOKEN: i32 = 11;
 
-/// `PROB_UPDATE_BASELINE_COST` (`entropy.h:53`).
-pub const PROB_UPDATE_BASELINE_COST: i32 = 7;
-
 // Re-exports of bitstream-fixed constants already declared in
 // `crate::tables`. The aliases preserve the original C identifiers so
 // translated call-sites in other modules don't need to learn the
 // SCREAMING_SNAKE_CASE Rust spelling.
 
 pub use crate::tables::DCT_MAX_VALUE;
-pub use crate::tables::MAX_PROB;
 pub use crate::tables::{
     BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MAX_ENTROPY_TOKENS, PREV_COEF_CONTEXTS,
 };
@@ -75,19 +71,8 @@ pub use crate::tables::VP8_DEFAULT_ZIG_ZAG_MASK as vp8_default_zig_zag_mask;
 pub use crate::tables::VP8_MB_FEATURE_DATA_BITS as vp8_mb_feature_data_bits;
 /// `vp8_coef_tree[22]` — coefficient-token decoding tree.
 pub use crate::tables::VP8_COEF_TREE as vp8_coef_tree;
-/// `vp8_coef_encodings[12]` — encoder-side codewords for the token tree.
-pub use crate::tables::VP8_COEF_ENCODINGS as vp8_coef_encodings;
 /// `vp8_extra_bits[12]` — per-token extra-bit dispatch table.
 pub use crate::tables::VP8_EXTRA_BITS as vp8_extra_bits;
-/// `vp8_coef_update_probs` — per-frame coefficient-probability update probs.
-pub use crate::tables::VP8_COEF_UPDATE_PROBS as vp8_coef_update_probs;
-
-// The `static const` extra-bit tree / probability tables (`Pcat1..6`,
-// `cat1..6`) are file-local in C; we re-export them at module scope here
-// in case other Rust modules want to walk them directly. The canonical
-// references are through `vp8_extra_bits[].tree` / `.prob`.
-pub use crate::tables::{CAT1 as cat1, CAT2 as cat2, CAT3 as cat3, CAT4 as cat4, CAT5 as cat5, CAT6 as cat6};
-pub use crate::tables::{PCAT1 as Pcat1, PCAT2 as Pcat2, PCAT3 as Pcat3, PCAT4 as Pcat4, PCAT5 as Pcat5, PCAT6 as Pcat6};
 
 /// `default_coef_probs` — the static initial coefficient-probability cube.
 /// File-local in C (`#include "default_coef_probs.h"` defines it as a

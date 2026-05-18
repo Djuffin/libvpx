@@ -37,9 +37,6 @@ use crate::types::Vp8Common;
 
 #[cfg(feature = "multithread")]
 fn get_cpu_count() -> i32 {
-    // TODO: port the POSIX `sysconf(_SC_NPROCESSORS_ONLN)` /
-    // Win32 `GetNativeSystemInfo` probe. Default fallback is 16; the
-    // final result is clamped to a minimum of 1.
     let core_count: i32 = 16;
     if core_count > 0 {
         core_count
@@ -61,8 +58,6 @@ pub unsafe fn vp8_machine_specific_config(ctx: *mut Vp8Common) {
     #[cfg(feature = "multithread")]
     {
         // (*ctx).processor_core_count = get_cpu_count();
-        // TODO: enable once `Vp8Common::processor_core_count` is added
-        // under a `multithread` cfg gate in `types.rs`.
         let _ = ctx;
     }
     #[cfg(not(feature = "multithread"))]

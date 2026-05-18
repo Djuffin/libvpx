@@ -50,50 +50,23 @@ const LEFT_TOP_MARGIN: i32 = 16 << 3;
 /// `RIGHT_BOTTOM_MARGIN` (findnearmv.h:33).
 const RIGHT_BOTTOM_MARGIN: i32 = 16 << 3;
 
-/// `vp8_prob_half` — used by `vp8_read_bit`. Mirrors `treecoder.h`.
-const VP8_PROB_HALF: i32 = 128;
-
-use crate::dboolhuff::{vp8_decode_value, vp8dx_bool_error, vp8dx_decode_bool};
+use crate::dboolhuff::vp8dx_bool_error;
 
 // ===========================================================================
-// Local re-implementations of trivial `treereader.h` wrappers / helpers.
+// `treereader.h` wrappers — re-exported from `treereader.rs`.
 // ===========================================================================
 
-/// `vp8_read` (`treereader.h:24`) — `#define vp8_read vp8dx_decode_bool`.
-#[inline]
-unsafe fn vp8_read(r: *mut Vp8Reader<'_>, probability: i32) -> i32 {
-    vp8dx_decode_bool(r, probability)
-}
+use crate::treereader::{vp8_read, vp8_read_bit, vp8_read_literal, vp8_treed_read as vp8_treed_read_raw};
 
-/// `vp8_read_literal` (`treereader.h:25`) — `#define vp8_read_literal
-/// vp8_decode_value`.
-#[inline]
-unsafe fn vp8_read_literal(r: *mut Vp8Reader<'_>, bits: i32) -> i32 {
-    vp8_decode_value(r, bits)
-}
-
-/// `vp8_read_bit` (`treereader.h:26`) — `vp8_read(R, vp8_prob_half)`.
-#[inline]
-unsafe fn vp8_read_bit(r: *mut Vp8Reader<'_>) -> i32 {
-    vp8_read(r, VP8_PROB_HALF)
-}
-
-/// `vp8_treed_read` (`treereader.h:30`) — walk a tree-coded value.
+/// Slice-friendly wrapper around [`vp8_treed_read`] — most local call
+/// sites pass a static array reference.
 #[inline]
 unsafe fn vp8_treed_read(
     r: *mut Vp8Reader<'_>,
     t: &[TreeIndex],
     p: *const Prob,
 ) -> i32 {
-    let mut i: TreeIndex = 0;
-    loop {
-        let idx = (i as usize).wrapping_add(vp8_read(r, *p.add((i >> 1) as usize) as i32) as usize);
-        i = t[idx];
-        if i <= 0 {
-            break;
-        }
-    }
-    -i as i32
+    vp8_treed_read_raw(r, t.as_ptr(), p)
 }
 
 // ===========================================================================
@@ -105,15 +78,11 @@ unsafe fn vp8_treed_read(
 // { i16, i16 }` and is therefore layout-compatible with `u32`.
 // ===========================================================================
 
-#[inline]
-fn mv_as_int(m: Mv) -> u32 {
-    // Bit-cast Mv -> u32. Safe because of #[repr(C)] and matching size.
-    unsafe { core::mem::transmute::<Mv, u32>(m) }
-}
+use crate::types::{mv_as_int, mv_from_int};
 
 #[inline]
 fn int_as_mv(v: u32) -> Mv {
-    unsafe { core::mem::transmute::<u32, Mv>(v) }
+    mv_from_int(v)
 }
 
 // ===========================================================================

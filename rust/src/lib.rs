@@ -29,7 +29,6 @@ pub mod entropymode;
 pub mod entropymv;
 pub mod extend;
 pub mod filter;
-pub mod findnearmv;
 pub mod idct_blk;
 pub mod idctllm;
 pub mod loopfilter_filters;
@@ -43,7 +42,6 @@ pub mod rtcd;
 pub mod setupintrarecon;
 pub mod swapyv12buffer;
 pub mod systemdependent;
-pub mod treecoder;
 pub mod vp8_loopfilter;
 
 // ---- vp8/decoder/ ----
@@ -69,7 +67,6 @@ pub mod vpx_image;
 
 // ---- vpx_dsp/ ----
 pub mod intrapred;
-pub mod prob;
 pub mod vpx_dsp_rtcd;
 
 // ---- vpx_mem/ ----
@@ -82,7 +79,6 @@ pub mod yv12extend;
 
 // ---- vpx_util/ ----
 pub mod vpx_thread;
-pub mod vpx_write_yuv_frame;
 
 // ---- vpx_ports/ (header-only shims) ----
 pub mod vpx_ports;

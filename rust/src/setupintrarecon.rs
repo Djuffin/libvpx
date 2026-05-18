@@ -1,73 +1,24 @@
 //! Intra-prediction border seeding (`vp8/common/setupintrarecon.c`).
 //!
 //! Literal Rust transliteration of libvpx's `setupintrarecon.c` /
-//! `setupintrarecon.h`. Two public entry points
-//! ([`vp8_setup_intra_recon`], [`vp8_setup_intra_recon_top_line`]) plus
-//! the `static INLINE` helper [`setup_intra_recon_left`] from the
-//! header.
+//! `setupintrarecon.h`. The decoder uses
+//! [`vp8_setup_intra_recon_top_line`] (called once per frame) plus the
+//! `static INLINE` helper [`setup_intra_recon_left`] from the header
+//! (called per MB row). The full-frame encoder-side `vp8_setup_intra_recon`
+//! was pruned in the dead-code cleanup.
 //!
-//! All three routines write the synthetic boundary samples that VP8
-//! intra prediction reads when no real neighbour exists: `127` along
-//! the row above each plane (and the above-left corner) and `129`
-//! down the column to the left of each plane. The asymmetry is
-//! engineered so that every intra mode degenerates to the neutral
-//! grey value `128` when fed only synthetic samples — see
+//! Both routines write the synthetic boundary samples that VP8 intra
+//! prediction reads when no real neighbour exists: `127` along the row
+//! above each plane (and the above-left corner) and `129` down the
+//! column to the left of each plane. The asymmetry is engineered so
+//! that every intra mode degenerates to the neutral grey value `128`
+//! when fed only synthetic samples — see
 //! `documentation/vp8_files/setupintrarecon.md` for the derivation.
 
 use core::ptr::write_bytes;
 
 use crate::tables::{INTRA_RECON_ABOVE_SEED, INTRA_RECON_LEFT_SEED};
 use crate::types::Yv12BufferConfig;
-
-/// `vp8_setup_intra_recon` (vp8/common/setupintrarecon.c:14).
-///
-/// Seeds the full intra-prediction border for the frame `ybf`: the
-/// above row of every plane (with the `+5` trailing bytes for
-/// `B_LD_PRED`'s right-reach), the above-left corner, and the left
-/// column of every visible row. Encoder-side path; the decoder uses
-/// the cheaper [`vp8_setup_intra_recon_top_line`] +
-/// [`setup_intra_recon_left`] pair.
-pub unsafe fn vp8_setup_intra_recon(ybf: *mut Yv12BufferConfig) {
-    let i: i32;
-    let _ = i;
-
-    /* set up frame new frame for intra coded blocks */
-    write_bytes(
-        (*ybf).y_buffer.offset(-1 - (*ybf).y_stride as isize),
-        INTRA_RECON_ABOVE_SEED,
-        ((*ybf).y_width + 5) as usize,
-    );
-    let mut i = 0;
-    while i < (*ybf).y_height {
-        *(*ybf).y_buffer.offset(((*ybf).y_stride * i - 1) as isize) =
-            INTRA_RECON_LEFT_SEED;
-        i += 1;
-    }
-
-    write_bytes(
-        (*ybf).u_buffer.offset(-1 - (*ybf).uv_stride as isize),
-        INTRA_RECON_ABOVE_SEED,
-        ((*ybf).uv_width + 5) as usize,
-    );
-    let mut i = 0;
-    while i < (*ybf).uv_height {
-        *(*ybf).u_buffer.offset(((*ybf).uv_stride * i - 1) as isize) =
-            INTRA_RECON_LEFT_SEED;
-        i += 1;
-    }
-
-    write_bytes(
-        (*ybf).v_buffer.offset(-1 - (*ybf).uv_stride as isize),
-        INTRA_RECON_ABOVE_SEED,
-        ((*ybf).uv_width + 5) as usize,
-    );
-    let mut i = 0;
-    while i < (*ybf).uv_height {
-        *(*ybf).v_buffer.offset(((*ybf).uv_stride * i - 1) as isize) =
-            INTRA_RECON_LEFT_SEED;
-        i += 1;
-    }
-}
 
 /// `vp8_setup_intra_recon_top_line` (vp8/common/setupintrarecon.c:34).
 ///
@@ -108,9 +59,6 @@ pub unsafe fn setup_intra_recon_left(
     y_stride: i32,
     uv_stride: i32,
 ) {
-    let i: i32;
-    let _ = i;
-
     let mut i = 0;
     while i < 16 {
         *y_buffer.offset((y_stride * i) as isize) = INTRA_RECON_LEFT_SEED;

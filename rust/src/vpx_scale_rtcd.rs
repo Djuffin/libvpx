@@ -33,7 +33,6 @@ fn setup_rtcd_internal() {}
 pub use crate::yv12extend::{
     vp8_yv12_copy_frame_c as vp8_yv12_copy_frame,
     vp8_yv12_extend_frame_borders_c as vp8_yv12_extend_frame_borders,
-    vpx_yv12_copy_y_c as vpx_yv12_copy_y,
 };
 
 /// Public entry point of the YV12 dispatch subsystem.

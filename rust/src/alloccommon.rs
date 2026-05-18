@@ -15,7 +15,7 @@ use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{
-    ClampType, EntropyContextPlanes, FrameType, LoopFilterType, ModeInfo, TokenPartition,
+    ClampType, EntropyContextPlanes, LoopFilterType, ModeInfo, TokenPartition,
     Vp8Common, Yv12BufferConfig, MAX_REF_FRAMES, NUM_YV12_BUFFERS, VP8_BORDER_IN_PIXELS,
 };
 
@@ -225,10 +225,6 @@ pub unsafe fn vp8_create_common(oci: *mut Vp8Common) {
     /* Default disable buffer to buffer copying */
     (*oci).copy_buffer_to_gf = 0;
     (*oci).copy_buffer_to_arf = 0;
-
-    // Silence unused-import warnings for types referenced only by other
-    // entry points in this file.
-    let _ = FrameType::Key;
 }
 
 /// `vp8_remove_common` — instance teardown. Forwards to the frame-buffer

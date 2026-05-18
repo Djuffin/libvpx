@@ -77,6 +77,23 @@ pub struct Mv {
     pub col: i16,
 }
 
+/// Pack an [`Mv`] the way the C `int_mv` union exposes its `as_int`
+/// field: low 16 bits = `row`, high 16 bits = `col`. Used for cheap
+/// equality / zero compares.
+#[inline]
+pub fn mv_as_int(m: Mv) -> u32 {
+    ((m.col as u16 as u32) << 16) | (m.row as u16 as u32)
+}
+
+/// Inverse of [`mv_as_int`].
+#[inline]
+pub fn mv_from_int(v: u32) -> Mv {
+    Mv {
+        row: (v & 0xFFFF) as i16,
+        col: ((v >> 16) & 0xFFFF) as i16,
+    }
+}
+
 /// `POS` (`blockd.h`).
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -152,6 +169,18 @@ pub enum MvReferenceFrame {
     Golden = 2,
     Altref = 3,
 }
+
+/// Slot indices that match [`MvReferenceFrame`] discriminants, used for
+/// `usize` array indexing into per-frame reference-buffer state.
+pub const INTRA_FRAME: usize = 0;
+pub const LAST_FRAME: usize = 1;
+pub const GOLDEN_FRAME: usize = 2;
+pub const ALTREF_FRAME: usize = 3;
+
+/// Reference-frame bitmap constants (`vpx/vp8.h`).
+pub const VP8_LAST_FRAME: i32 = 1;
+pub const VP8_GOLD_FRAME: i32 = 2;
+pub const VP8_ALTR_FRAME: i32 = 4;
 
 /// `MB_LVL_FEATURES` (`blockd.h`) — segment-feature kinds. RFC 6386 §10.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

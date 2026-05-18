@@ -225,7 +225,6 @@ unsafe fn img_alloc_helper(
          * always succeeds.) */
         let ret = vpx_img_set_rect(img, 0, 0, d_w, d_h);
         debug_assert!(ret == 0);
-        let _ = ret;
         return img;
     }
 

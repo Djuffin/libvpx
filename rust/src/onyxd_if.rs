@@ -24,7 +24,7 @@ use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{
-    FragmentData, FrameBuffers, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame, Vp8Common,
+    FragmentData, FrameBuffers, MbModeInfo, ModeInfo, MvReferenceFrame, Vp8Common,
     Vp8dComp, Vp8dConfig, Vp8PpFlags, VpxResult, Yv12BufferConfig, MAX_FB_MT_DEC, NUM_YV12_BUFFERS,
 };
 
@@ -37,19 +37,14 @@ use crate::types::{
 /// passed through opaquely.
 use crate::vpx_api::{VpxCodecErr, VPX_CODEC_ERROR, VPX_CODEC_OK};
 
+use crate::types::{
+    ALTREF_FRAME, GOLDEN_FRAME, INTRA_FRAME, LAST_FRAME, VP8_ALTR_FRAME,
+    VP8_GOLD_FRAME, VP8_LAST_FRAME,
+};
+
 /// `enum vpx_ref_frame_type` (`vpx/vp8.h`). Bitmask values used by the
 /// `VP8_COPY_REFERENCE` / `VP8_SET_REFERENCE` control codes.
 pub type VpxRefFrameType = i32;
-pub const VP8_LAST_FRAME: VpxRefFrameType = 1;
-pub const VP8_GOLD_FRAME: VpxRefFrameType = 2;
-pub const VP8_ALTR_FRAME: VpxRefFrameType = 4;
-
-/// `INTRA_FRAME`/`LAST_FRAME`/`GOLDEN_FRAME`/`ALTREF_FRAME` slot indices
-/// into [`Vp8dComp::dec_fb_ref`] (`vp8/common/blockd.h`).
-pub const INTRA_FRAME: usize = MvReferenceFrame::Intra as usize;
-pub const LAST_FRAME: usize = MvReferenceFrame::Last as usize;
-pub const GOLDEN_FRAME: usize = MvReferenceFrame::Golden as usize;
-pub const ALTREF_FRAME: usize = MvReferenceFrame::Altref as usize;
 
 // ===========================================================================
 // Cross-translation-unit dependencies.
@@ -515,7 +510,6 @@ pub unsafe extern "C" fn vp8dx_references_buffer(
         mi = mi.add(1);
         mb_row += 1;
     }
-    let _ = MbPredictionMode::DcPred; // keep MbPredictionMode use exercised
     0
 }
 

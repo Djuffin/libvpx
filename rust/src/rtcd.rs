@@ -17,10 +17,6 @@
 
 #![allow(dead_code)]
 
-// TODO: `std::sync::Once` is the natural Rust analogue of libvpx's
-// `once()` helper (`vpx_ports/vpx_once.h`). Pulled in even though the
-// generic-build `setup_rtcd_internal` is empty, so the call shape
-// matches the C source verbatim.
 use std::sync::Once;
 
 static RTCD_ONCE: Once = Once::new();

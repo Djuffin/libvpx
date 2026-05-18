@@ -110,8 +110,6 @@ pub struct VPxWorkerInterface {
 // the multithreaded code paths that are dead in this build.
 // ===========================================================================
 
-use crate::vpx_mem::{vpx_calloc, vpx_free};
-
 // ===========================================================================
 // `#if CONFIG_MULTITHREAD` block — the pthread-backed implementation.
 // Translated literally for fidelity but never invoked in the single-thread
@@ -232,11 +230,6 @@ unsafe extern "C" fn reset(worker: *mut VPxWorker) -> c_int {
             //     return 0;
             //   }
             //
-            // Reference vpx_calloc/vpx_free so the extern decls are not
-            // pruned by the linker in case a future threaded build wires
-            // this in.
-            let _ = vpx_calloc as unsafe extern "C" fn(usize, usize) -> *mut c_void;
-            let _ = vpx_free as unsafe extern "C" fn(*mut c_void);
         } else {
             (*worker).status_ = VPX_WORKER_STATUS_OK;
         }

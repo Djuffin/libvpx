@@ -22,15 +22,13 @@
 #![allow(non_upper_case_globals)]
 
 use crate::tables::{
-    Prob, Token, TreeIndex, SUBMVREF_COUNT, SUB_MV_REF_PROB, VP8_BINTRAMODES,
-    VP8_BMODE_ENCODINGS, VP8_BMODE_PROB, VP8_BMODE_TREE, VP8_KF_BMODE_PROB,
-    VP8_KF_UV_MODE_PROB, VP8_KF_YMODE_ENCODINGS, VP8_KF_YMODE_PROB,
-    VP8_KF_YMODE_TREE, VP8_MBSPLITS, VP8_MBSPLIT_COUNT, VP8_MBSPLIT_ENCODINGS,
-    VP8_MBSPLIT_PROBS, VP8_MBSPLIT_TREE, VP8_MV_REF_ENCODING_ARRAY,
-    VP8_MV_REF_TREE, VP8_NUMMBSPLITS, VP8_SMALL_MVENCODINGS, VP8_SMALL_MVTREE,
-    VP8_SUBMVREFS, VP8_SUB_MV_REF_ENCODING_ARRAY, VP8_SUB_MV_REF_PROB2,
-    VP8_SUB_MV_REF_TREE, VP8_UV_MODES, VP8_UV_MODE_ENCODINGS, VP8_UV_MODE_PROB,
-    VP8_UV_MODE_TREE, VP8_YMODES, VP8_YMODE_ENCODINGS, VP8_YMODE_PROB,
+    Prob, TreeIndex, SUBMVREF_COUNT, SUB_MV_REF_PROB, VP8_BINTRAMODES,
+    VP8_BMODE_PROB, VP8_BMODE_TREE, VP8_KF_BMODE_PROB,
+    VP8_KF_UV_MODE_PROB, VP8_KF_YMODE_PROB,
+    VP8_KF_YMODE_TREE, VP8_MBSPLITS, VP8_MBSPLIT_TREE,
+    VP8_MV_REF_TREE, VP8_NUMMBSPLITS, VP8_SMALL_MVTREE,
+    VP8_SUBMVREFS, VP8_SUB_MV_REF_TREE, VP8_UV_MODES, VP8_UV_MODE_PROB,
+    VP8_UV_MODE_TREE, VP8_YMODES, VP8_YMODE_PROB,
     VP8_YMODE_TREE,
 };
 use crate::types::{Mv, Vp8Common};
@@ -72,18 +70,8 @@ pub const VP8_NUMMBSPLITS_C: usize = VP8_NUMMBSPLITS;
 /// `vp8_mbsplits[VP8_NUMMBSPLITS]` (entropymode.c:45).
 pub const vp8_mbsplits: [vp8_mbsplit; VP8_NUMMBSPLITS] = VP8_MBSPLITS;
 
-/// `vp8_mbsplit_count[VP8_NUMMBSPLITS]` (entropymode.c:52).
-pub const vp8_mbsplit_count: [i32; VP8_NUMMBSPLITS] = VP8_MBSPLIT_COUNT;
-
-/// `vp8_mbsplit_probs[VP8_NUMMBSPLITS - 1]` (entropymode.c:54).
-pub const vp8_mbsplit_probs: [Prob; VP8_NUMMBSPLITS - 1] = VP8_MBSPLIT_PROBS;
-
 /// `SUBMVREF_COUNT` (entropymode.h:40).
 pub const SUBMVREF_COUNT_C: usize = SUBMVREF_COUNT;
-
-/// `vp8_sub_mv_ref_prob2[SUBMVREF_COUNT][VP8_SUBMVREFS - 1]` (entropymode.c:37).
-pub const vp8_sub_mv_ref_prob2: [[Prob; VP8_SUBMVREFS - 1]; SUBMVREF_COUNT] =
-    VP8_SUB_MV_REF_PROB2;
 
 /// `vp8_bmode_tree[18]` (entropymode.c:58).
 pub const vp8_bmode_tree: [TreeIndex; 18] = VP8_BMODE_TREE;
@@ -108,34 +96,6 @@ pub const vp8_sub_mv_ref_tree: [TreeIndex; 6] = VP8_SUB_MV_REF_TREE;
 
 /// `vp8_small_mvtree[14]` (entropymode.c:93).
 pub const vp8_small_mvtree: [TreeIndex; 14] = VP8_SMALL_MVTREE;
-
-// ---- Encoder-side codeword tables (defined in vp8_entropymodedata.h). ----
-
-/// `vp8_bmode_encodings[VP8_BINTRAMODES]` (vp8_entropymodedata.h).
-pub const vp8_bmode_encodings: [Token; VP8_BINTRAMODES] = VP8_BMODE_ENCODINGS;
-
-/// `vp8_ymode_encodings[VP8_YMODES]` (vp8_entropymodedata.h).
-pub const vp8_ymode_encodings: [Token; VP8_YMODES] = VP8_YMODE_ENCODINGS;
-
-/// `vp8_kf_ymode_encodings[VP8_YMODES]` (vp8_entropymodedata.h).
-pub const vp8_kf_ymode_encodings: [Token; VP8_YMODES] = VP8_KF_YMODE_ENCODINGS;
-
-/// `vp8_uv_mode_encodings[VP8_UV_MODES]` (vp8_entropymodedata.h).
-pub const vp8_uv_mode_encodings: [Token; VP8_UV_MODES] = VP8_UV_MODE_ENCODINGS;
-
-/// `vp8_mbsplit_encodings[VP8_NUMMBSPLITS]` (vp8_entropymodedata.h).
-pub const vp8_mbsplit_encodings: [Token; VP8_NUMMBSPLITS] = VP8_MBSPLIT_ENCODINGS;
-
-/// `vp8_mv_ref_encoding_array[VP8_MVREFS]` (vp8_entropymodedata.h).
-/// `VP8_MVREFS == 5`.
-pub const vp8_mv_ref_encoding_array: [Token; 5] = VP8_MV_REF_ENCODING_ARRAY;
-
-/// `vp8_sub_mv_ref_encoding_array[VP8_SUBMVREFS]` (vp8_entropymodedata.h).
-pub const vp8_sub_mv_ref_encoding_array: [Token; VP8_SUBMVREFS] =
-    VP8_SUB_MV_REF_ENCODING_ARRAY;
-
-/// `vp8_small_mvencodings[8]` (vp8_entropymodedata.h).
-pub const vp8_small_mvencodings: [Token; 8] = VP8_SMALL_MVENCODINGS;
 
 // ---- Key-frame default mode probability tables. ----
 

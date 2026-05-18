@@ -19,7 +19,7 @@ use core::ffi::{c_int, c_uint, c_void};
 use core::ptr;
 
 use crate::tables::{
-    Prob, BLOCK_TYPES, COEF_BANDS, DEFAULT_COEF_PROBS, ENTROPY_NODES, MAXQ, PREV_COEF_CONTEXTS,
+    Prob, BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MAXQ, PREV_COEF_CONTEXTS,
     VP8_COEF_UPDATE_PROBS, VP8_DEFAULT_MV_CONTEXT, VP8_MB_FEATURE_DATA_BITS,
 };
 use crate::types::{
@@ -474,8 +474,6 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
         i += 1;
     }
-
-    let _ = src_ptr1;
 }
 
 // ---------------------------------------------------------------------------
@@ -668,7 +666,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
         (*xd).recon_above[1] = (*xd).recon_above[1].offset(-((*xd).dst.uv_stride as isize));
         (*xd).recon_above[2] = (*xd).recon_above[2].offset(-((*xd).dst.uv_stride as isize));
 
-        /* TODO: move to outside row loop */
         (*xd).recon_left_stride[0] = (*xd).dst.y_stride;
         (*xd).recon_left_stride[1] = (*xd).dst.uv_stride;
 
@@ -1490,10 +1487,6 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
         (*pc).fc = (*pc).lfc;
         (*pbi).independent_partitions = prev_independent_partitions;
     }
-
-    // Drop unused-import warnings for tables only referenced in commented-out
-    // C branches (kept here for completeness):
-    let _ = DEFAULT_COEF_PROBS;
 
     Ok(())
 }

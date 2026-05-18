@@ -60,126 +60,6 @@ fn clip_pixel(val: i32) -> u8 {
 // below pin it to a compile-time constant.
 // ===========================================================================
 
-unsafe fn d207_predictor(
-    mut dst: *mut u8,
-    stride: isize,
-    bs: i32,
-    _above: *const u8,
-    left: *const u8,
-) {
-    // first column
-    for r in 0..(bs - 1) {
-        *dst.offset(r as isize * stride) =
-            avg2(*left.offset(r as isize) as i32, *left.offset(r as isize + 1) as i32);
-    }
-    *dst.offset((bs - 1) as isize * stride) = *left.offset((bs - 1) as isize);
-    dst = dst.offset(1);
-
-    // second column
-    for r in 0..(bs - 2) {
-        *dst.offset(r as isize * stride) = avg3(
-            *left.offset(r as isize) as i32,
-            *left.offset(r as isize + 1) as i32,
-            *left.offset(r as isize + 2) as i32,
-        );
-    }
-    *dst.offset((bs - 2) as isize * stride) = avg3(
-        *left.offset((bs - 2) as isize) as i32,
-        *left.offset((bs - 1) as isize) as i32,
-        *left.offset((bs - 1) as isize) as i32,
-    );
-    *dst.offset((bs - 1) as isize * stride) = *left.offset((bs - 1) as isize);
-    dst = dst.offset(1);
-
-    // rest of last row
-    for c in 0..(bs - 2) {
-        *dst.offset((bs - 1) as isize * stride + c as isize) = *left.offset((bs - 1) as isize);
-    }
-
-    let mut r = bs - 2;
-    while r >= 0 {
-        for c in 0..(bs - 2) {
-            *dst.offset(r as isize * stride + c as isize) =
-                *dst.offset((r + 1) as isize * stride + c as isize - 2);
-        }
-        r -= 1;
-    }
-}
-
-unsafe fn d63_predictor(
-    dst: *mut u8,
-    stride: isize,
-    bs: i32,
-    above: *const u8,
-    _left: *const u8,
-) {
-    for c in 0..bs {
-        *dst.offset(c as isize) =
-            avg2(*above.offset(c as isize) as i32, *above.offset(c as isize + 1) as i32);
-        *dst.offset(stride + c as isize) = avg3(
-            *above.offset(c as isize) as i32,
-            *above.offset(c as isize + 1) as i32,
-            *above.offset(c as isize + 2) as i32,
-        );
-    }
-    let mut r = 2i32;
-    let mut size = bs - 2;
-    while r < bs {
-        ptr::copy_nonoverlapping(
-            dst.offset((r >> 1) as isize),
-            dst.offset((r + 0) as isize * stride),
-            size as usize,
-        );
-        ptr::write_bytes(
-            dst.offset((r + 0) as isize * stride + size as isize),
-            *above.offset((bs - 1) as isize),
-            (bs - size) as usize,
-        );
-        ptr::copy_nonoverlapping(
-            dst.offset(stride + (r >> 1) as isize),
-            dst.offset((r + 1) as isize * stride),
-            size as usize,
-        );
-        ptr::write_bytes(
-            dst.offset((r + 1) as isize * stride + size as isize),
-            *above.offset((bs - 1) as isize),
-            (bs - size) as usize,
-        );
-        r += 2;
-        size -= 1;
-    }
-}
-
-unsafe fn d45_predictor(
-    mut dst: *mut u8,
-    stride: isize,
-    bs: i32,
-    above: *const u8,
-    _left: *const u8,
-) {
-    let above_right = *above.offset((bs - 1) as isize);
-    let dst_row0 = dst;
-
-    for x in 0..(bs - 1) {
-        *dst.offset(x as isize) = avg3(
-            *above.offset(x as isize) as i32,
-            *above.offset(x as isize + 1) as i32,
-            *above.offset(x as isize + 2) as i32,
-        );
-    }
-    *dst.offset((bs - 1) as isize) = above_right;
-    dst = dst.offset(stride);
-    let mut x = 1i32;
-    let mut size = bs - 2;
-    while x < bs {
-        ptr::copy_nonoverlapping(dst_row0.offset(x as isize), dst, size as usize);
-        ptr::write_bytes(dst.offset(size as isize), above_right, (x + 1) as usize);
-        dst = dst.offset(stride);
-        x += 1;
-        size -= 1;
-    }
-}
-
 unsafe fn d117_predictor(
     mut dst: *mut u8,
     stride: isize,
@@ -838,74 +718,49 @@ macro_rules! intra_pred_sized_rs {
     };
 }
 
-// d207 — sizes 8, 16, 32
-intra_pred_sized_rs!(vpx_d207_predictor_8x8_c, d207_predictor, 8);
-intra_pred_sized_rs!(vpx_d207_predictor_16x16_c, d207_predictor, 16);
-intra_pred_sized_rs!(vpx_d207_predictor_32x32_c, d207_predictor, 32);
-
-// d63 — sizes 8, 16, 32
-intra_pred_sized_rs!(vpx_d63_predictor_8x8_c, d63_predictor, 8);
-intra_pred_sized_rs!(vpx_d63_predictor_16x16_c, d63_predictor, 16);
-intra_pred_sized_rs!(vpx_d63_predictor_32x32_c, d63_predictor, 32);
-
-// d45 — sizes 8, 16, 32
-intra_pred_sized_rs!(vpx_d45_predictor_8x8_c, d45_predictor, 8);
-intra_pred_sized_rs!(vpx_d45_predictor_16x16_c, d45_predictor, 16);
-intra_pred_sized_rs!(vpx_d45_predictor_32x32_c, d45_predictor, 32);
-
-// d117 — sizes 8, 16, 32
+// d117 — sizes 8, 16
 intra_pred_sized_rs!(vpx_d117_predictor_8x8_c, d117_predictor, 8);
 intra_pred_sized_rs!(vpx_d117_predictor_16x16_c, d117_predictor, 16);
-intra_pred_sized_rs!(vpx_d117_predictor_32x32_c, d117_predictor, 32);
 
-// d135 — sizes 8, 16, 32
+// d135 — sizes 8, 16
 intra_pred_sized_rs!(vpx_d135_predictor_8x8_c, d135_predictor, 8);
 intra_pred_sized_rs!(vpx_d135_predictor_16x16_c, d135_predictor, 16);
-intra_pred_sized_rs!(vpx_d135_predictor_32x32_c, d135_predictor, 32);
 
-// d153 — sizes 8, 16, 32
+// d153 — sizes 8, 16
 intra_pred_sized_rs!(vpx_d153_predictor_8x8_c, d153_predictor, 8);
 intra_pred_sized_rs!(vpx_d153_predictor_16x16_c, d153_predictor, 16);
-intra_pred_sized_rs!(vpx_d153_predictor_32x32_c, d153_predictor, 32);
 
-// v — sizes 4, 8, 16, 32
+// v — sizes 4, 8, 16
 intra_pred_sized_rs!(vpx_v_predictor_4x4_c, v_predictor, 4);
 intra_pred_sized_rs!(vpx_v_predictor_8x8_c, v_predictor, 8);
 intra_pred_sized_rs!(vpx_v_predictor_16x16_c, v_predictor, 16);
-intra_pred_sized_rs!(vpx_v_predictor_32x32_c, v_predictor, 32);
 
-// h — sizes 4, 8, 16, 32
+// h — sizes 4, 8, 16
 intra_pred_sized_rs!(vpx_h_predictor_4x4_c, h_predictor, 4);
 intra_pred_sized_rs!(vpx_h_predictor_8x8_c, h_predictor, 8);
 intra_pred_sized_rs!(vpx_h_predictor_16x16_c, h_predictor, 16);
-intra_pred_sized_rs!(vpx_h_predictor_32x32_c, h_predictor, 32);
 
-// tm — sizes 4, 8, 16, 32
+// tm — sizes 4, 8, 16
 intra_pred_sized_rs!(vpx_tm_predictor_4x4_c, tm_predictor, 4);
 intra_pred_sized_rs!(vpx_tm_predictor_8x8_c, tm_predictor, 8);
 intra_pred_sized_rs!(vpx_tm_predictor_16x16_c, tm_predictor, 16);
-intra_pred_sized_rs!(vpx_tm_predictor_32x32_c, tm_predictor, 32);
 
-// dc_128 — sizes 4, 8, 16, 32
+// dc_128 — sizes 4, 8, 16
 intra_pred_sized_rs!(vpx_dc_128_predictor_4x4_c, dc_128_predictor, 4);
 intra_pred_sized_rs!(vpx_dc_128_predictor_8x8_c, dc_128_predictor, 8);
 intra_pred_sized_rs!(vpx_dc_128_predictor_16x16_c, dc_128_predictor, 16);
-intra_pred_sized_rs!(vpx_dc_128_predictor_32x32_c, dc_128_predictor, 32);
 
-// dc_left — sizes 4, 8, 16, 32
+// dc_left — sizes 4, 8, 16
 intra_pred_sized_rs!(vpx_dc_left_predictor_4x4_c, dc_left_predictor, 4);
 intra_pred_sized_rs!(vpx_dc_left_predictor_8x8_c, dc_left_predictor, 8);
 intra_pred_sized_rs!(vpx_dc_left_predictor_16x16_c, dc_left_predictor, 16);
-intra_pred_sized_rs!(vpx_dc_left_predictor_32x32_c, dc_left_predictor, 32);
 
-// dc_top — sizes 4, 8, 16, 32
+// dc_top — sizes 4, 8, 16
 intra_pred_sized_rs!(vpx_dc_top_predictor_4x4_c, dc_top_predictor, 4);
 intra_pred_sized_rs!(vpx_dc_top_predictor_8x8_c, dc_top_predictor, 8);
 intra_pred_sized_rs!(vpx_dc_top_predictor_16x16_c, dc_top_predictor, 16);
-intra_pred_sized_rs!(vpx_dc_top_predictor_32x32_c, dc_top_predictor, 32);
 
-// dc — sizes 4, 8, 16, 32
+// dc — sizes 4, 8, 16
 intra_pred_sized_rs!(vpx_dc_predictor_4x4_c, dc_predictor, 4);
 intra_pred_sized_rs!(vpx_dc_predictor_8x8_c, dc_predictor, 8);
 intra_pred_sized_rs!(vpx_dc_predictor_16x16_c, dc_predictor, 16);
-intra_pred_sized_rs!(vpx_dc_predictor_32x32_c, dc_predictor, 32);
