@@ -22,7 +22,6 @@
 
 #![allow(dead_code)]
 
-use core::ffi::c_void;
 
 use crate::tables::{
     BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MvContext, PREV_COEF_CONTEXTS, Prob, QINDEX_RANGE,
@@ -518,11 +517,6 @@ pub struct Macroblockd {
     pub subpixel_predict8x4: SubpixFn,
     pub subpixel_predict8x8: SubpixFn,
     pub subpixel_predict16x16: SubpixFn,
-
-    /// Currently-active bool decoder for this MB row. Erased to
-    /// `*mut c_void` because the lifetime cannot be carried through
-    /// the C-style aggregate.
-    pub current_bc: *mut c_void,
 
     pub corrupted: i32,
 

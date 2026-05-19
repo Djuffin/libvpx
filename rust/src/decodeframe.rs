@@ -13,7 +13,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
 
-use core::ffi::{c_int, c_uint, c_void};
+use core::ffi::{c_int, c_uint};
 use core::ptr;
 
 use crate::tables::{
@@ -174,13 +174,18 @@ pub unsafe fn vp8_mb_init_dequantizer(pbi: *mut Vp8dComp<'static>, xd: *mut Macr
 // ---------------------------------------------------------------------------
 
 /// `decode_macroblock` (vp8/decoder/decodeframe.c:94). Static helper.
-unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, mb_col: c_int) {
+unsafe fn decode_macroblock(
+    pbi: *mut Vp8dComp<'static>,
+    xd: *mut Macroblockd,
+    mb_col: c_int,
+    bc: *mut Vp8Reader<'static>,
+) {
     let mode: MbPredictionMode;
 
     if (*(*xd).mode_info_context).mbmi.mb_skip_coeff {
         vp8_reset_mb_tokens_context(pbi, xd, mb_col);
-    } else if vp8dx_bool_error((*xd).current_bc as *mut Vp8Reader<'static>) == 0 {
-        let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd, mb_col);
+    } else if vp8dx_bool_error(bc) == 0 {
+        let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd, mb_col, bc);
 
         /* Special case:  Force the loopfilter to skip when eobtotal is zero */
         (*(*xd).mode_info_context).mbmi.mb_skip_coeff = eobtotal == 0;
@@ -626,14 +631,18 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
     /* Decode the individual macro block */
     mb_row = 0;
     while mb_row < (*pc).mb_rows {
-        if num_part > 1 {
-            (*xd).current_bc =
-                &mut (*pbi).mbc[ibc as usize] as *mut Vp8Reader<'static> as *mut c_void;
+        // Pick the bool reader for this row: cycle through the N token
+        // partitions when multi-partition, else always the lone reader.
+        let bc: *mut Vp8Reader<'static> = if num_part > 1 {
+            let p = &mut (*pbi).mbc[ibc as usize] as *mut Vp8Reader<'static>;
             ibc += 1;
             if ibc == num_part {
                 ibc = 0;
             }
-        }
+            p
+        } else {
+            &mut (*pbi).mbc[0] as *mut Vp8Reader<'static>
+        };
 
         recon_yoffset = mb_row * recon_y_stride * 16;
         recon_uvoffset = mb_row * recon_uv_stride * 8;
@@ -698,12 +707,12 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             /* propagate errors from reference frames */
             (*xd).corrupted |= ref_fb_corrupted[(*(*xd).mode_info_context).mbmi.ref_frame as usize];
 
-            decode_macroblock(pbi, xd, mb_col);
+            decode_macroblock(pbi, xd, mb_col, bc);
 
             (*xd).left_available = true;
 
             /* check if the boolean decoder has suffered an error */
-            (*xd).corrupted |= vp8dx_bool_error((*xd).current_bc as *mut Vp8Reader<'static>);
+            (*xd).corrupted |= vp8dx_bool_error(bc);
 
             (*xd).recon_above[0] = (*xd).recon_above[0].add(16);
             (*xd).recon_above[1] = (*xd).recon_above[1].add(8);
@@ -1300,8 +1309,6 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     }
 
     setup_token_decoder(pbi, data.offset(first_partition_length_in_bytes as isize))?;
-
-    (*xd).current_bc = &mut (*pbi).mbc[0] as *mut Vp8Reader<'static> as *mut c_void;
 
     /* Read the default quantizers. */
     {

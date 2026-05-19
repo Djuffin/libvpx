@@ -238,8 +238,8 @@ pub unsafe fn vp8_decode_mb_tokens(
     dx: *mut Vp8dComp<'static>,
     x: *mut Macroblockd,
     mb_col: i32,
+    bc: *mut BoolDecoder<'static>,
 ) -> i32 {
-    let bc: *mut BoolDecoder<'static> = (*x).current_bc as *mut BoolDecoder<'static>;
     let fc = &(*dx).common.fc as *const FrameContext;
     let eobs: *mut i8 = (*x).eobs.as_mut_ptr();
 
