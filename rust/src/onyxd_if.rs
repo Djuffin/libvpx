@@ -109,7 +109,7 @@ unsafe fn create_decompressor_inner(
     pbi: *mut Vp8dComp<'static>,
     oxcf: &Vp8dConfig,
 ) -> VpxResult<()> {
-    vp8_create_common(&mut (*pbi).common as *mut Vp8Common);
+    vp8_create_common(&mut (*pbi).common);
 
     (*pbi).common.current_video_frame = 0;
     (*pbi).ready_for_new_data = 1;
@@ -511,17 +511,11 @@ pub fn vp8_create_decoder_instances(
 /// `vp8_remove_decoder_instances` — `vp8/decoder/onyxd_if.c:446`.
 ///
 /// `take()`-ing the `Box` makes a double-call safe by construction (the
-/// second call sees `None`). The inner `unsafe` block covers the kernel
-/// teardown of `vp8_remove_common`, which is sound on a valid
-/// `&mut Vp8dComp` whose inner heap allocations haven't been freed yet —
-/// guaranteed because we only reach `remove_common` via the consumed Box.
+/// second call sees `None`).
 pub fn vp8_remove_decoder_instances(fb: &mut FrameBuffers<'static>) -> i32 {
     match fb.pbi.take() {
         Some(mut b) => {
-            // SAFETY: `b` was constructed by `create_decompressor`; its
-            // inner allocations (yv12 buffers, mi grid, above_context)
-            // are live until this call.
-            unsafe { vp8_remove_common(&mut b.common); }
+            vp8_remove_common(&mut b.common);
             // Outer shell freed by Box drop here.
             VPX_CODEC_OK as i32
         }

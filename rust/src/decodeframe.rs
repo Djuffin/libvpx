@@ -1126,7 +1126,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
         data = data.add(3);
         clear = clear.add(3);
 
-        vp8_setup_version(pc);
+        vp8_setup_version(&mut *pc);
 
         if (*pc).frame_type == KEY_FRAME {
             if (data_end as isize) - (data as isize) >= 7 {

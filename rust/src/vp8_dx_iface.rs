@@ -500,7 +500,7 @@ unsafe fn vp8_decode_resolution_change(
         return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
     }
 
-    if vp8_alloc_frame_buffers(pc, (*pc).width, (*pc).height) != 0 {
+    if vp8_alloc_frame_buffers(&mut *pc, (*pc).width, (*pc).height) != 0 {
         return vpx_internal_error(&mut (*pc).error, VPX_CODEC_MEM_ERROR);
     }
 
