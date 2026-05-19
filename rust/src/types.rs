@@ -392,19 +392,21 @@ pub type Vp8Reader<'a> = BoolDecoder<'a>;
 // `BLOCKD` / `MACROBLOCKD`
 // ===========================================================================
 
-/// `BLOCKD` (`blockd.h`) — per-4x4-block working context. Each entry's
-/// pointer fields are set up once by `vp8_setup_block_dptrs`
-/// (`mbpitch.c`) to alias into the parent [`Macroblockd`]'s scratch
-/// arrays.
+/// `BLOCKD` (`blockd.h`) — per-4x4-block working context.
+///
+/// The C struct also carries `qcoeff`/`dqcoeff`/`predictor`/`dequant`/`eob`
+/// pointer fields. All five are encoder-only convenience aliases (see
+/// `vp8/encoder/{loongarch/vp8_quantize_lsx, rdopt}.c` and
+/// `vp8/encoder/encodeframe.c` for the consumers) into either
+/// `Macroblockd`'s flat coefficient arrays (`qcoeff`/`dqcoeff`/`eob`
+/// → `Macroblockd.{qcoeff,dqcoeff,eobs}` at fixed offset
+/// `block_idx * 16`) or its encoder-only `predictor[384]` scratch.
+/// The decoder-only Rust port omits all of them; consumers compute
+/// the offset directly from the block index when they need it.
 #[repr(C)]
 pub struct Blockd {
-    pub qcoeff: *mut i16,
-    pub dqcoeff: *mut i16,
-    pub predictor: *mut u8,
-    pub dequant: *mut i16,
     /// Pixel offset from the MB's top-left into the destination plane.
     pub offset: i32,
-    pub eob: *mut i8,
     pub bmi: BModeInfo,
 }
 
@@ -451,11 +453,10 @@ pub struct VpxInternalErrorInfo {
 
 /// `MACROBLOCKD` (`blockd.h`) — the working state for one macroblock
 /// during decode. Heavy alignment (`align(16)`) because libvpx's
-/// reference SIMD reads `predictor` / `qcoeff` / `dqcoeff` / `eobs`
-/// directly as vector registers. RFC 6386 §12–§14 (per-MB pipeline).
+/// reference SIMD reads `qcoeff` / `dqcoeff` / `eobs` directly as
+/// vector registers. RFC 6386 §12–§14 (per-MB pipeline).
 #[repr(C, align(16))]
 pub struct Macroblockd {
-    pub predictor: [u8; 384],
     pub qcoeff: [i16; 400],
     pub dqcoeff: [i16; 400],
     pub eobs: [i8; 25],

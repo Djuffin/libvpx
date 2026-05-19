@@ -153,51 +153,6 @@ unsafe fn vp8_copy_mem8x4(src: *mut u8, src_stride: i32, dst: *mut u8, dst_strid
     vp8_copy_mem8x4_c(src, src_stride, dst, dst_stride);
 }
 
-// ===========================================================================
-// 4×4 sub-block predict (with sub-pel branch)
-// ===========================================================================
-
-/// `vp8_build_inter_predictors_b` — predict one 4×4 sub-block into the
-/// per-`BLOCKD` `predictor` scratch buffer at the given pitch.
-/// Encoder-only entry point retained for ABI parity.
-///
-/// Source: `vp8/common/reconinter.c:59`.
-pub unsafe fn vp8_build_inter_predictors_b(
-    d: *mut Blockd,
-    pitch: i32,
-    base_pre: *mut u8,
-    pre_stride: i32,
-    sppf: SubpixFn,
-) {
-    let mut pred_ptr: *mut u8 = (*d).predictor;
-    let mut ptr: *mut u8;
-    let mv = bmi_mv(&(*d).bmi);
-    ptr = base_pre
-        .offset((*d).offset as isize)
-        .offset(((mv.row as i32 >> 3) * pre_stride) as isize)
-        .offset((mv.col as i32 >> 3) as isize);
-
-    if (mv.row as i32 & 7) != 0 || (mv.col as i32 & 7) != 0 {
-        sppf(
-            ptr,
-            pre_stride,
-            mv.col as i32 & 7,
-            mv.row as i32 & 7,
-            pred_ptr,
-            pitch,
-        );
-    } else {
-        for _ in 0..4 {
-            *pred_ptr.offset(0) = *ptr.offset(0);
-            *pred_ptr.offset(1) = *ptr.offset(1);
-            *pred_ptr.offset(2) = *ptr.offset(2);
-            *pred_ptr.offset(3) = *ptr.offset(3);
-            pred_ptr = pred_ptr.offset(pitch as isize);
-            ptr = ptr.offset(pre_stride as isize);
-        }
-    }
-}
-
 /// `build_inter_predictors4b` — predict an 8×8 quadrant of luma under a
 /// coarse SPLITMV partition.
 ///

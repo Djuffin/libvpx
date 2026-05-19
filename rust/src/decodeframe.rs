@@ -221,6 +221,7 @@ unsafe fn decode_macroblock(
 
             for i in 0..16 {
                 let b: *mut Blockd = &mut (*xd).block[i as usize];
+                let qcoeff: *mut i16 = (*xd).qcoeff.as_mut_ptr().add((i as usize) * 16);
                 let dst: *mut u8 = (*xd).dst.y_buffer.offset((*b).offset as isize);
                 // Extract the 4x4 intra mode from the BModeInfo enum at this
                 // sub-block slot. In C this is `bmi[i].as_mode` — a plain
@@ -251,9 +252,9 @@ unsafe fn decode_macroblock(
 
                 if (*xd).eobs[i as usize] != 0 {
                     if (*xd).eobs[i as usize] > 1 {
-                        vp8_dequant_idct_add((*b).qcoeff, DQC, dst, dst_stride);
+                        vp8_dequant_idct_add(qcoeff, DQC, dst, dst_stride);
                     } else {
-                        let q0 = *(*b).qcoeff;
+                        let q0 = *qcoeff;
                         let dqc0 = *DQC;
                         vp8_dc_only_idct_add(
                             (q0 as i32 * dqc0 as i32) as i16,
@@ -263,7 +264,7 @@ unsafe fn decode_macroblock(
                             dst_stride,
                         );
                         ptr::write_bytes(
-                            (*b).qcoeff as *mut u8,
+                            qcoeff as *mut u8,
                             0,
                             2 * core::mem::size_of::<i16>(),
                         );
@@ -281,20 +282,23 @@ unsafe fn decode_macroblock(
             let mut DQC: *mut i16 = (*xd).dequant_y1.as_mut_ptr();
 
             if mode != SPLITMV {
-                let b: *mut Blockd = &mut (*xd).block[24];
+                // Y2 is block index 24; its coefficients sit at
+                // `qcoeff[24*16..]` / `dqcoeff[24*16..]`.
+                let y2_qcoeff: *mut i16 = (*xd).qcoeff.as_mut_ptr().add(24 * 16);
+                let y2_dqcoeff: *mut i16 = (*xd).dqcoeff.as_mut_ptr().add(24 * 16);
 
                 /* do 2nd order transform on the dc block */
                 if (*xd).eobs[24] > 1 {
-                    vp8_dequantize_b(b, (*xd).dequant_y2.as_mut_ptr());
+                    vp8_dequantize_b(y2_qcoeff, y2_dqcoeff, (*xd).dequant_y2.as_mut_ptr());
 
-                    vp8_short_inv_walsh4x4((*b).dqcoeff, (*xd).qcoeff.as_mut_ptr());
-                    ptr::write_bytes((*b).qcoeff as *mut u8, 0, 16 * core::mem::size_of::<i16>());
+                    vp8_short_inv_walsh4x4(y2_dqcoeff, (*xd).qcoeff.as_mut_ptr());
+                    ptr::write_bytes(y2_qcoeff as *mut u8, 0, 16 * core::mem::size_of::<i16>());
                 } else {
-                    let q0 = *(*b).qcoeff;
+                    let q0 = *y2_qcoeff;
                     let dq0 = (*xd).dequant_y2[0];
-                    *(*b).dqcoeff = (q0 as i32 * dq0 as i32) as i16;
-                    vp8_short_inv_walsh4x4_1((*b).dqcoeff, (*xd).qcoeff.as_mut_ptr());
-                    ptr::write_bytes((*b).qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
+                    *y2_dqcoeff = (q0 as i32 * dq0 as i32) as i16;
+                    vp8_short_inv_walsh4x4_1(y2_dqcoeff, (*xd).qcoeff.as_mut_ptr());
+                    ptr::write_bytes(y2_qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
                 }
 
                 /* override the dc dequant constant in order to preserve the

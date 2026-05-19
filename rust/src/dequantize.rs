@@ -13,7 +13,6 @@
 use core::ptr;
 
 use crate::idctllm::vp8_short_idct4x4llm_c;
-use crate::types::Blockd;
 
 // ---------------------------------------------------------------------------
 // Public kernels
@@ -21,19 +20,22 @@ use crate::types::Blockd;
 
 /// `vp8_dequantize_b_c` — vp8/common/dequantize.c:16.
 ///
-/// Multiplies the 16 quantized coefficients held in `d->qcoeff` by the
+/// Multiplies the 16 quantized coefficients in `qcoeff` by the
 /// 16-element dequantizer table `DQC`, writing the result to
-/// `d->dqcoeff`. Used only for the Y2 second-order block (the rest of
+/// `dqcoeff`. Used only for the Y2 second-order block (the rest of
 /// the MB uses the fused [`vp8_dequant_idct_add_c`] form).
-pub unsafe fn vp8_dequantize_b_c(d: *mut Blockd, DQC: *mut i16) {
-    let DQ: *mut i16 = (*d).dqcoeff;
-    let Q: *mut i16 = (*d).qcoeff;
-
+///
+/// C signature is `vp8_dequantize_b_c(BLOCKD *d, short *DQC)`; the
+/// `BLOCKD` argument's only purpose was to carry `d->qcoeff` and
+/// `d->dqcoeff` — which in this port are just `xd.{qcoeff,dqcoeff} +
+/// 24 * 16` (the Y2 block's slot). We take them directly to avoid the
+/// `Blockd` indirection.
+pub unsafe fn vp8_dequantize_b_c(qcoeff: *mut i16, dqcoeff: *mut i16, DQC: *mut i16) {
     for i in 0..16isize {
         // `Q[i] * DQC[i]` is promoted to `int` in C and truncated back
         // to `short` on store — match with a wrapping i32 multiply.
-        let prod = (*Q.offset(i) as i32).wrapping_mul(*DQC.offset(i) as i32);
-        *DQ.offset(i) = prod as i16;
+        let prod = (*qcoeff.offset(i) as i32).wrapping_mul(*DQC.offset(i) as i32);
+        *dqcoeff.offset(i) = prod as i16;
     }
 }
 

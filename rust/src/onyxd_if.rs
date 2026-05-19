@@ -53,7 +53,6 @@ use crate::decodeframe::{vp8_decode_frame, vp8cx_init_de_quantizer};
 use crate::vpx_codec::vpx_internal_error;
 
 use crate::alloccommon::{vp8_create_common, vp8_remove_common};
-use crate::mbpitch::vp8_setup_block_dptrs;
 use crate::reconintra::vp8_init_intra_predictors;
 use crate::vp8_loopfilter::vp8_loop_filter_init;
 use crate::vpx_dsp_rtcd::vpx_dsp_rtcd;
@@ -135,8 +134,6 @@ unsafe fn create_decompressor_inner(
     // probability table to have equal probabilities over the PREV_COEF
     // context.
     (*pbi).independent_partitions = 0;
-
-    vp8_setup_block_dptrs(&mut (*pbi).mb as *mut crate::types::Macroblockd);
 
     once(initialize_dec);
 
