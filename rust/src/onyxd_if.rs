@@ -414,7 +414,6 @@ pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxR
 
     if (*cm).show_frame != 0 {
         (*cm).current_video_frame += 1;
-        (*cm).show_frame_mi = (*cm).mi;
     }
 
     // CONFIG_ERROR_CONCEALMENT block omitted on this build.

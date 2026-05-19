@@ -53,7 +53,6 @@ pub unsafe fn vp8_de_alloc_frame_buffers(oci: *mut Vp8Common) {
     (*oci).above_context = ptr::null_mut();
     (*oci).mip = ptr::null_mut();
     (*oci).mi = ptr::null_mut();
-    (*oci).show_frame_mi = ptr::null_mut();
     (*oci).frame_to_show_idx = -1;
 }
 

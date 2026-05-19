@@ -669,8 +669,6 @@ pub struct Vp8Common {
     pub mip: *mut ModeInfo,
     /// First visible MB slot inside `mip` (offset by `stride + 1`).
     pub mi: *mut ModeInfo,
-    /// MI grid for the frame currently being shown.
-    pub show_frame_mi: *mut ModeInfo,
 
     pub filter_type: LoopFilterType,
     pub lf_info: LoopFilterInfoN,

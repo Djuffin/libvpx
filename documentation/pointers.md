@@ -15,8 +15,17 @@ The following raw pointers have already been replaced. They are listed here so f
 | `Vp8Common.frame_to_show: *mut Yv12BufferConfig` | `frame_to_show_idx: i32` (`-1` = none) | Plain index into `yv12_fb[]`. Explicit `-1` init in `vp8_create_common` because `vpx_calloc`'s zero would otherwise be a valid index. |
 | `Vp8dComp.dec_fb_ref: [*mut Yv12BufferConfig; 4]` | `dec_fb_ref_idx: [i32; 4]` | Indexed by `MvReferenceFrame` (INTRA/LAST/GOLDEN/ALTREF). Reads go `pc.yv12_fb[dec_fb_ref_idx[r] as usize]`. |
 | `FrameBuffers.pbi: [*mut Vp8dComp<'a>; 32]` | `pbi: Option<Box<Vp8dComp<'a>>>` | Single owned slot. Allocated via `Box::<T>::new_zeroed().assume_init()` (same byte pattern as the old `vpx_memalign + write_bytes(0)`; preserves the same UB-by-letter-of-spec for the non-nullable `SubpixFn` fields, which are overwritten in `init_frame`). Drop of the Box replaces the manual `vpx_free`. Kernel call sites use the `pbi_ptr()` helper to recover a raw pointer where still required. |
+| `Vp8Common.show_frame_mi: *mut ModeInfo` | (deleted) | Was written per frame but never read in the minimal build (C source uses it for postproc / MFQE, both disabled). Three sites removed. |
 
-All three were verified bit-exact against the libvpx C reference via the 62-vector conformance suite.
+All were verified bit-exact against the libvpx C reference via the 62-vector conformance suite.
+
+### Companion `unsafe` relaxations enabled by these refactors
+
+| Function | Before | After |
+|---|---|---|
+| `vp8dx_get_quantizer` | `pub unsafe fn(_: *const Vp8dComp)` | `pub fn(_: &Vp8dComp)` |
+| `vp8_remove_decoder_instances` | `pub unsafe fn(_: *mut FrameBuffers)` | `pub fn(_: &mut FrameBuffers)` — `Option::take` consumes the Box so double-call is harmless; the `remove_decompressor` helper was inlined |
+| `vp8_create_decoder_instances` | `pub unsafe fn(_: *mut FrameBuffers, _: *mut Vp8dConfig)` | `pub fn(_: &mut FrameBuffers, _: &Vp8dConfig)` with one internal `unsafe { create_decompressor(...) }` block |
 
 ---
 
@@ -30,9 +39,9 @@ All three were verified bit-exact against the libvpx C reference via the 62-vect
 *   **Context:** Points to the current MB column's slot in the `above_context` array (owned by `Vp8Common`). It advances linearly as the decoder processes a row of macroblocks.
 *   **Conversion Complexity: MEDIUM-HIGH.** Similar to `mode_info_context`, it is an interior pointer into an array owned elsewhere. Converting it would mean explicitly passing the relevant slice or index per macroblock instead of keeping a crawling pointer inside the state struct.
 
-### `left_context: *mut EntropyContextPlanes`
-*   **Context:** Points to the left-column entropy context (which usually points directly to `common.left_context`).
-*   **Conversion Complexity: MEDIUM.** It generally points to a single struct rather than crawling an array. However, replacing it with a `&mut EntropyContextPlanes` would require tying `Macroblockd`'s lifetime to `Vp8Common` via a lifetime parameter (`Macroblockd<'a>`), which would ripple up to `Vp8dComp`.
+### `left_context: *mut EntropyContextPlanes` *(next candidate)*
+*   **Context:** Points to the left-column entropy context. In practice it is **always** set to `&mut common.left_context` (see `decodeframe.rs:1051`) and never advanced — the field aliases a single struct rather than a cursor into an array.
+*   **Conversion Complexity: LOW (now).** Because the field carries no state of its own, the cleanest removal is to **delete the field entirely** and at each read site reach the context through `(*pc).left_context` directly. Most call sites already have `pc` (or `pbi`) in scope, so the replacement is mechanical and doesn't introduce a lifetime parameter on `Macroblockd`. (The earlier MEDIUM rating assumed replacement with a `&mut` reference — deletion avoids that.)
 
 ### `current_bc: *mut c_void`
 *   **Context:** A type-erased pointer to the currently-active `BoolDecoder` (`Vp8Reader`) for the current macroblock row. Reset per row at `decodeframe.rs:629` (round-robin across token partitions) and cast back to `*mut Vp8Reader<'static>` at every read site (`detokenize.rs:233`, `decodeframe.rs:182, 707`). It is type-erased because `Vp8Reader` has a lifetime parameter (`Vp8Reader<'a>`), and the port sought to avoid adding lifetimes to the `Macroblockd` aggregate.
@@ -46,8 +55,8 @@ All three were verified bit-exact against the libvpx C reference via the 62-vect
 
 ## 2. Inside `Vp8Common` (Per-sequence/frame state)
 
-### `mip: *mut ModeInfo`, `mi: *mut ModeInfo`, `show_frame_mi: *mut ModeInfo`
-*   **Context:** `mip` points to the base heap allocation of the `ModeInfo` grid (which includes padding for top/left borders). `mi` is an offset view into `mip` pointing to the first visible macroblock (allowing negative indexing to hit the padding). `show_frame_mi` points to the grid for the frame currently being shown.
+### `mip: *mut ModeInfo`, `mi: *mut ModeInfo`
+*   **Context:** `mip` points to the base heap allocation of the `ModeInfo` grid (which includes padding for top/left borders). `mi` is an offset view into `mip` pointing to the first visible macroblock (allowing negative indexing to hit the padding).
 *   **Conversion Complexity: HIGH.** The grid is allocated via `vpx_calloc` and aliased heavily. Replacing this requires changing the raw allocation to a `Vec<ModeInfo>` or `Box<[ModeInfo]>`. Because Rust slices do not support negative indexing, the concept of `mi` as an offset pointer would need to be replaced by a custom 2D grid abstraction that safely encapsulates the border padding and provides safe `get(row, col)` methods.
 
 ### `above_context: *mut EntropyContextPlanes`
