@@ -178,7 +178,7 @@ unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _
     let mode: MbPredictionMode;
 
     if (*(*xd).mode_info_context).mbmi.mb_skip_coeff {
-        vp8_reset_mb_tokens_context(xd);
+        vp8_reset_mb_tokens_context(pbi, xd);
     } else if vp8dx_bool_error((*xd).current_bc as *mut Vp8Reader<'static>) == 0 {
         let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd);
 
@@ -642,7 +642,7 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
         /* reset contexts */
         (*xd).above_context = (*pc).above_context;
         ptr::write_bytes(
-            (*xd).left_context as *mut u8,
+            &mut (*pc).left_context as *mut _ as *mut u8,
             0,
             core::mem::size_of::<EntropyContextPlanes>(),
         );
@@ -1050,7 +1050,6 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
         // decoded_key_frame/ec_enabled/ec_active toggle is also off.
     }
 
-    (*xd).left_context = &mut (*pc).left_context;
     (*xd).mode_info_context = (*pc).mi;
     (*xd).frame_type = (*pc).frame_type;
     (*(*xd).mode_info_context).mbmi.mode = DC_PRED;

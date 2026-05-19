@@ -205,9 +205,9 @@ unsafe fn GetCoeffs(
 /// and left contexts. The 9th byte (Y2) is only cleared when the MB
 /// uses the second-order transform (`!is_4x4`); B_PRED MBs intentionally
 /// preserve whatever Y2 context the previous MB left there.
-pub unsafe fn vp8_reset_mb_tokens_context(x: *mut Macroblockd) {
+pub unsafe fn vp8_reset_mb_tokens_context(dx: *mut Vp8dComp<'static>, x: *mut Macroblockd) {
     let a_ctx: *mut EntropyContext = (*x).above_context as *mut EntropyContext;
-    let l_ctx: *mut EntropyContext = (*x).left_context as *mut EntropyContext;
+    let l_ctx: *mut EntropyContext = &mut (*dx).common.left_context as *mut _ as *mut EntropyContext;
 
     core::ptr::write_bytes(a_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
     core::ptr::write_bytes(l_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
@@ -239,7 +239,8 @@ pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macrobloc
 
     let mut coef_probs: ProbaArray;
     let mut a_ctx: *mut EntropyContext = (*x).above_context as *mut EntropyContext;
-    let mut l_ctx: *mut EntropyContext = (*x).left_context as *mut EntropyContext;
+    let mut l_ctx: *mut EntropyContext =
+        &mut (*dx).common.left_context as *mut _ as *mut EntropyContext;
     let mut a: *mut EntropyContext;
     let mut l: *mut EntropyContext;
     let skip_dc: i32;
