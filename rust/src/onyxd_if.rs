@@ -23,7 +23,7 @@
 use core::ptr;
 
 use crate::types::{
-    FragmentData, FrameBuffers, MbModeInfo, ModeInfo, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
+    FragmentData, FrameBuffers, ModeInfo, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
     Vp8dComp, Vp8dConfig, VpxResult, Yv12BufferConfig,
 };
 
@@ -144,104 +144,84 @@ unsafe fn create_decompressor_inner(
 }
 
 /// `static int get_free_fb(VP8_COMMON *)` — `vp8/decoder/onyxd_if.c:193`.
-unsafe fn get_free_fb(cm: *mut Vp8Common) -> i32 {
+fn get_free_fb(cm: &mut Vp8Common) -> i32 {
     let i = (0..NUM_YV12_BUFFERS as i32)
-        .find(|&i| (*cm).fb_idx_ref_cnt[i as usize] == 0)
+        .find(|&i| cm.fb_idx_ref_cnt[i as usize] == 0)
         .unwrap_or(NUM_YV12_BUFFERS as i32);
 
     debug_assert!(i < NUM_YV12_BUFFERS as i32);
-    (*cm).fb_idx_ref_cnt[i as usize] = 1;
+    cm.fb_idx_ref_cnt[i as usize] = 1;
     i
 }
 
 /// `static void ref_cnt_fb(int *buf, int *idx, int new_idx)` —
 /// `vp8/decoder/onyxd_if.c:204`.
-unsafe fn ref_cnt_fb(buf: *mut i32, idx: *mut i32, new_idx: i32) {
-    if *buf.offset(*idx as isize) > 0 {
-        *buf.offset(*idx as isize) -= 1;
+fn ref_cnt_fb(buf: &mut [i32; NUM_YV12_BUFFERS], idx: &mut i32, new_idx: i32) {
+    if buf[*idx as usize] > 0 {
+        buf[*idx as usize] -= 1;
     }
 
     *idx = new_idx;
 
-    *buf.offset(new_idx as isize) += 1;
+    buf[new_idx as usize] += 1;
 }
 
 /// `static int swap_frame_buffers(VP8_COMMON *)` —
 /// `vp8/decoder/onyxd_if.c:213`.
 ///
 /// If any buffer copy / swapping is signalled it should be done here.
-unsafe fn swap_frame_buffers(cm: *mut Vp8Common) -> i32 {
+fn swap_frame_buffers(cm: &mut Vp8Common) -> i32 {
     let mut err: i32 = 0;
 
     // The alternate reference frame or golden frame can be updated using
     // the new, last, or golden/alt ref frame. If it is updated using the
     // newly decoded frame it is a refresh. An update using the last or
     // golden/alt ref frame is a copy.
-    if (*cm).copy_buffer_to_arf != 0 {
+    if cm.copy_buffer_to_arf != 0 {
         let mut new_fb: i32 = 0;
 
-        if (*cm).copy_buffer_to_arf == 1 {
-            new_fb = (*cm).lst_fb_idx;
-        } else if (*cm).copy_buffer_to_arf == 2 {
-            new_fb = (*cm).gld_fb_idx;
+        if cm.copy_buffer_to_arf == 1 {
+            new_fb = cm.lst_fb_idx;
+        } else if cm.copy_buffer_to_arf == 2 {
+            new_fb = cm.gld_fb_idx;
         } else {
             err = -1;
         }
 
-        ref_cnt_fb(
-            (*cm).fb_idx_ref_cnt.as_mut_ptr(),
-            &mut (*cm).alt_fb_idx,
-            new_fb,
-        );
+        ref_cnt_fb(&mut cm.fb_idx_ref_cnt, &mut cm.alt_fb_idx, new_fb);
     }
 
-    if (*cm).copy_buffer_to_gf != 0 {
+    if cm.copy_buffer_to_gf != 0 {
         let mut new_fb: i32 = 0;
 
-        if (*cm).copy_buffer_to_gf == 1 {
-            new_fb = (*cm).lst_fb_idx;
-        } else if (*cm).copy_buffer_to_gf == 2 {
-            new_fb = (*cm).alt_fb_idx;
+        if cm.copy_buffer_to_gf == 1 {
+            new_fb = cm.lst_fb_idx;
+        } else if cm.copy_buffer_to_gf == 2 {
+            new_fb = cm.alt_fb_idx;
         } else {
             err = -1;
         }
 
-        ref_cnt_fb(
-            (*cm).fb_idx_ref_cnt.as_mut_ptr(),
-            &mut (*cm).gld_fb_idx,
-            new_fb,
-        );
+        ref_cnt_fb(&mut cm.fb_idx_ref_cnt, &mut cm.gld_fb_idx, new_fb);
     }
 
-    if (*cm).refresh_golden_frame != 0 {
-        ref_cnt_fb(
-            (*cm).fb_idx_ref_cnt.as_mut_ptr(),
-            &mut (*cm).gld_fb_idx,
-            (*cm).new_fb_idx,
-        );
+    if cm.refresh_golden_frame != 0 {
+        ref_cnt_fb(&mut cm.fb_idx_ref_cnt, &mut cm.gld_fb_idx, cm.new_fb_idx);
     }
 
-    if (*cm).refresh_alt_ref_frame != 0 {
-        ref_cnt_fb(
-            (*cm).fb_idx_ref_cnt.as_mut_ptr(),
-            &mut (*cm).alt_fb_idx,
-            (*cm).new_fb_idx,
-        );
+    if cm.refresh_alt_ref_frame != 0 {
+        ref_cnt_fb(&mut cm.fb_idx_ref_cnt, &mut cm.alt_fb_idx, cm.new_fb_idx);
     }
 
-    if (*cm).refresh_last_frame != 0 {
-        ref_cnt_fb(
-            (*cm).fb_idx_ref_cnt.as_mut_ptr(),
-            &mut (*cm).lst_fb_idx,
-            (*cm).new_fb_idx,
-        );
+    if cm.refresh_last_frame != 0 {
+        ref_cnt_fb(&mut cm.fb_idx_ref_cnt, &mut cm.lst_fb_idx, cm.new_fb_idx);
 
-        (*cm).frame_to_show_idx = (*cm).lst_fb_idx;
+        cm.frame_to_show_idx = cm.lst_fb_idx;
     } else {
-        (*cm).frame_to_show_idx = (*cm).new_fb_idx;
+        cm.frame_to_show_idx = cm.new_fb_idx;
     }
 
-    (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] -= 1;
+    cm.fb_idx_ref_cnt[cm.new_fb_idx as usize] -= 1;
 
     err
 }
@@ -261,7 +241,7 @@ unsafe fn check_fragments_for_errors(pbi: *mut Vp8dComp<'static>) -> i32 {
             // corrupt, otherwise we will make multiple buffers corrupt.
             let prev_idx = (*cm).lst_fb_idx;
             (*cm).fb_idx_ref_cnt[prev_idx as usize] -= 1;
-            (*cm).lst_fb_idx = get_free_fb(cm);
+            (*cm).lst_fb_idx = get_free_fb(&mut *cm);
             vp8_yv12_copy_frame(
                 &(*cm).yv12_fb[prev_idx as usize] as *const Yv12BufferConfig,
                 &mut (*cm).yv12_fb[(*cm).lst_fb_idx as usize] as *mut Yv12BufferConfig,
@@ -349,13 +329,13 @@ pub unsafe fn vp8dx_set_reference(
         return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
     }
     // Find an empty frame buffer.
-    free_fb = get_free_fb(cm);
+    free_fb = get_free_fb(&mut *cm);
     // Decrease fb_idx_ref_cnt since it will be increased again in
     // ref_cnt_fb() below.
     (*cm).fb_idx_ref_cnt[free_fb as usize] -= 1;
 
     // Manage the reference counters and copy image.
-    ref_cnt_fb((*cm).fb_idx_ref_cnt.as_mut_ptr(), ref_fb_ptr, free_fb);
+    ref_cnt_fb(&mut (*cm).fb_idx_ref_cnt, &mut *ref_fb_ptr, free_fb);
     vp8_yv12_copy_frame(
         sd,
         &mut (*cm).yv12_fb[*ref_fb_ptr as usize] as *mut Yv12BufferConfig,
@@ -378,7 +358,7 @@ pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxR
         return Ok(());
     }
 
-    (*cm).new_fb_idx = get_free_fb(cm);
+    (*cm).new_fb_idx = get_free_fb(&mut *cm);
 
     // setup reference frames for vp8_decode_frame
     (*pbi).dec_fb_ref_idx[INTRA_FRAME] = (*cm).new_fb_idx;
@@ -403,7 +383,7 @@ pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxR
         return Err(e);
     }
 
-    if swap_frame_buffers(cm) != 0 {
+    if swap_frame_buffers(&mut *cm) != 0 {
         (*pbi).common.error.error_code = VPX_CODEC_ERROR;
         // goto decode_exit;
         vpx_clear_system_state();
@@ -470,18 +450,24 @@ pub unsafe fn vp8dx_get_raw_frame(
 /// macroblock referenced `ref_frame`. The trailing `mi = mi.add(1)` past
 /// each row skips the sentinel column at `mode_info_stride - 1`.
 
-pub unsafe fn vp8dx_references_buffer(oci: *mut Vp8Common, ref_frame: i32) -> i32 {
-    let mut mi: *const ModeInfo = (*oci).mi_base_ptr() as *const ModeInfo;
+pub fn vp8dx_references_buffer(oci: &mut Vp8Common, ref_frame: i32) -> i32 {
+    let mb_rows = oci.mb_rows;
+    let mb_cols = oci.mb_cols;
+    let mut mi: *const ModeInfo = oci.mi_base_ptr() as *const ModeInfo;
 
-    for _ in 0..(*oci).mb_rows {
-        for _ in 0..(*oci).mb_cols {
-            let mbmi: *const MbModeInfo = &(*mi).mbmi;
-            if (*mbmi).ref_frame as i32 == ref_frame {
-                return 1;
+    // SAFETY: `mi` points into the Box-owned MI grid; the `(mb_rows *
+    // (mb_cols + 1))` strides we walk land inside the
+    // `(mb_cols+1)*(mb_rows+1)` slab.
+    unsafe {
+        for _ in 0..mb_rows {
+            for _ in 0..mb_cols {
+                if (*mi).mbmi.ref_frame as i32 == ref_frame {
+                    return 1;
+                }
+                mi = mi.add(1);
             }
             mi = mi.add(1);
         }
-        mi = mi.add(1);
     }
     0
 }

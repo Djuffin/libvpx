@@ -742,7 +742,7 @@ impl Decoder for Vp8Decoder {
                     if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
-                    let oci = &mut (*pbi).common as *mut crate::types::Vp8Common;
+                    let oci = &mut (*pbi).common;
                     *out = (if vp8dx_references_buffer(oci, ALTREF_FRAME as i32) != 0 {
                         VP8_ALTR_FRAME
                     } else {
