@@ -186,7 +186,7 @@ unsafe fn decode_macroblock(
         let y_stride: isize = (*xd).dst.y_stride as isize;
         let uv_stride: isize = (*xd).dst.uv_stride as isize;
         vp8_build_intra_predictors_mbuv_s(
-            xd,
+            &*xd,
             mi,
             (*xd).dst.u_buffer.offset(-uv_stride), // uabove_row
             (*xd).dst.v_buffer.offset(-uv_stride), // vabove_row
@@ -200,7 +200,7 @@ unsafe fn decode_macroblock(
 
         if mode != B_PRED {
             vp8_build_intra_predictors_mby_s(
-                xd,
+                &*xd,
                 mi,
                 (*xd).dst.y_buffer.offset(-y_stride), // yabove_row
                 (*xd).dst.y_buffer.offset(-1),        // yleft
@@ -217,7 +217,7 @@ unsafe fn decode_macroblock(
                 ptr::write_bytes((*xd).eobs.as_mut_ptr(), 0, 25);
             }
 
-            intra_prediction_down_copy(xd, (*xd).dst.y_buffer.offset(-y_stride).add(16));
+            intra_prediction_down_copy(&*xd, (*xd).dst.y_buffer.offset(-y_stride).add(16));
 
             for i in 0..16 {
                 let b: *mut Blockd = &mut (*xd).block[i as usize];
@@ -273,7 +273,7 @@ unsafe fn decode_macroblock(
             }
         }
     } else {
-        vp8_build_inter_predictors_mb(xd, mi);
+        vp8_build_inter_predictors_mb(&mut *xd, mi);
     }
 
     if !mi.mbmi.mb_skip_coeff {

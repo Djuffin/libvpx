@@ -44,6 +44,26 @@ All were verified bit-exact against the libvpx C reference via the 62-vector con
 | `vp8_alloc_frame_buffers` | `pub unsafe fn(_: *mut Vp8Common, ...)` | `pub fn(_: &mut Vp8Common, ...)` — two small internal `unsafe` blocks around `vp8_yv12_alloc_frame_buffer` calls (the `vpx_calloc` and `mip.offset(...)` blocks went away when the MI grid became a `Box<[ModeInfo]>`) |
 | `vp8_mb_init_dequantizer` *(§3 split-borrow pilot)* | `pub unsafe fn(_: *mut Vp8dComp, _: *mut Macroblockd)` | `pub fn(_: &Vp8Common, _: &mut Macroblockd)` — body almost fully safe; one internal `unsafe { (*mb.mode_info_context).mbmi.segment_id }` line for the remaining MI-grid cursor deref. Caller pattern: `vp8_mb_init_dequantizer(&(*pbi).common, &mut *xd)`. Validates that per-function disjoint-borrow conversion works in this codebase. |
 
+### Split-borrow refactor — Phase 1 (reconinter / reconintra / reconintra4x4)
+
+Phase 1 of the §1 split-borrow refactor: convert leaf kernel functions taking `xd: *mut Macroblockd` to take `&[mut] Macroblockd` or drop the param entirely. 4 more `unsafe fn` markers removed; 7 function signatures relaxed to `&[mut] Macroblockd`.
+
+| Function | Before | After |
+|---|---|---|
+| `clamp_mv_to_umv_border` / `clamp_uvmv_to_umv_border` | `unsafe fn(_: &mut Mv, _: *const Macroblockd)` | `fn(_: &mut Mv, l: i32, r: i32, t: i32, bot: i32)` — pass the 4 edge i32s directly; body fully safe (zero unsafe ops) |
+| `vp8_build_intra_predictors_mby_s` / `_mbuv_s` | `pub unsafe fn(x: *mut Macroblockd, ...)` | `pub unsafe fn(x: &Macroblockd, ...)` — still `unsafe fn` due to raw pixel ptrs + static-mut dispatch tables, but the Macroblockd access is type-checked |
+| `intra_prediction_down_copy` | `pub unsafe fn(xd: *mut Macroblockd, ...)` | `pub fn(xd: &Macroblockd, ...)` — body has one internal `unsafe { }` for pixel ptr offsets |
+| `build_inter_predictors4b` / `2b` | `unsafe fn(x: *mut Macroblockd, d: *mut Blockd, ...)` | `unsafe fn(subpixel_predict_*: SubpixFn, d: &Blockd, ...)` — dropped `x` param entirely; takes `SubpixFn` directly |
+| `build_inter_predictors_b` | `unsafe fn(d: *mut Blockd, ...)` | `unsafe fn(d: &Blockd, ...)` |
+| `vp8_build_inter16x16_predictors_mb` | `pub unsafe fn(x: *mut Macroblockd, ...)` | `pub unsafe fn(x: &Macroblockd, ...)` |
+| `build_4x4uvmvs` | `unsafe fn(x: *mut Macroblockd, mi: &ModeInfo)` | `fn(x: &mut Macroblockd, mi: &ModeInfo)` — fully safe `fn`; edges captured up-front to avoid borrow conflict with `bmi_mv_mut` |
+| `build_inter4x4_predictors_mb` | `unsafe fn(x: *mut Macroblockd, mi: &ModeInfo)` | `unsafe fn(x: &mut Macroblockd, mi: &ModeInfo)` — Tier C orchestrator; full rewrite to snapshot `SubpixFn`/plane-base ptrs up front, then sub-call with `&x.block[i]` shared borrows |
+| `vp8_build_inter_predictors_mb` | `pub unsafe fn(xd: *mut Macroblockd, mi: &ModeInfo)` | `pub unsafe fn(xd: &mut Macroblockd, mi: &ModeInfo)` |
+
+**Bench delta vs. baseline**: 480p -0.42% (no change p=0.06), 720p **-1.01% improvement** (p<0.01). The cumulative trajectory (MI-grid + recon_* + Blockd + Phase 1) now lands **at or below baseline**. The Phase 1 gain came from eliminating `(*x).subpixel_predict*` function-pointer derefs through a raw pointer — passing the `SubpixFn` value directly let the compiler optimize better.
+
+Caller pattern at `decode_macroblock` boundaries: `&*xd` / `&mut *xd` to bridge from the still-raw `xd: *mut Macroblockd` to the new safe signatures. The bridge is zero-cost and uses the established pattern from earlier refactors.
+
 The kernel callers that still hold raw `*mut Vp8Common` cross into these safe APIs via `&mut *pc` at the call site — keeping the per-frame decoder loop raw-pointer-shaped while everything from `Vp8Common`-level alloc/teardown upward is type-checked.
 
 ---

@@ -69,18 +69,25 @@ pub unsafe fn vp8_init_intra4x4_predictors_internal() {
 /// `above_right_src` downward into the three interior rows of the
 /// above-right slot. Called once per `B_PRED` MB, right before the
 /// per-sub-block dispatch loop.
-pub unsafe fn intra_prediction_down_copy(xd: *mut Macroblockd, above_right_src: *mut u8) {
-    let dst_stride: i32 = (*xd).dst.y_stride;
-    let above_right_dst: *mut u8 = (*xd).dst.y_buffer.offset(-(dst_stride as isize)).offset(16);
+pub fn intra_prediction_down_copy(xd: &Macroblockd, above_right_src: *mut u8) {
+    let dst_stride: i32 = xd.dst.y_stride;
 
-    let src_ptr: *mut u32 = above_right_src as *mut u32;
-    let dst_ptr0: *mut u32 = above_right_dst.offset((4 * dst_stride) as isize) as *mut u32;
-    let dst_ptr1: *mut u32 = above_right_dst.offset((8 * dst_stride) as isize) as *mut u32;
-    let dst_ptr2: *mut u32 = above_right_dst.offset((12 * dst_stride) as isize) as *mut u32;
+    // SAFETY: `xd.dst.y_buffer` is a frame-buffer pointer that the caller
+    // already established as valid (set per-MB in `decode_mb_rows`). The
+    // negative-stride and +16/+4*stride offsets stay within the current
+    // MB's column of the destination plane.
+    unsafe {
+        let above_right_dst: *mut u8 = xd.dst.y_buffer.offset(-(dst_stride as isize)).offset(16);
 
-    *dst_ptr0 = *src_ptr;
-    *dst_ptr1 = *src_ptr;
-    *dst_ptr2 = *src_ptr;
+        let src_ptr: *mut u32 = above_right_src as *mut u32;
+        let dst_ptr0: *mut u32 = above_right_dst.offset((4 * dst_stride) as isize) as *mut u32;
+        let dst_ptr1: *mut u32 = above_right_dst.offset((8 * dst_stride) as isize) as *mut u32;
+        let dst_ptr2: *mut u32 = above_right_dst.offset((12 * dst_stride) as isize) as *mut u32;
+
+        *dst_ptr0 = *src_ptr;
+        *dst_ptr1 = *src_ptr;
+        *dst_ptr2 = *src_ptr;
+    }
 }
 
 /// `vp8_intra4x4_predict` (reconintra4x4.c:39).

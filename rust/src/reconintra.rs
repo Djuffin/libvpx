@@ -97,7 +97,7 @@ unsafe fn vp8_init_intra_predictors_internal() {
 /// macroblock described by `x`. Caller must have set
 /// `x->left_available` / `x->up_available` and `x->mode_info_context`.
 pub unsafe fn vp8_build_intra_predictors_mby_s(
-    x: *mut Macroblockd,
+    x: &Macroblockd,
     mi: &ModeInfo,
     yabove_row: *mut u8,
     yleft: *mut u8,
@@ -117,7 +117,7 @@ pub unsafe fn vp8_build_intra_predictors_mby_s(
     }
 
     let fn_: IntraPredFn = if mode == MbPredictionMode::DcPred {
-        dc_pred[(*x).left_available as usize][(*x).up_available as usize][SIZE_16].unwrap()
+        dc_pred[x.left_available as usize][x.up_available as usize][SIZE_16].unwrap()
     } else {
         pred[mode as usize][SIZE_16].unwrap()
     };
@@ -131,7 +131,7 @@ pub unsafe fn vp8_build_intra_predictors_mby_s(
 /// `vpred_ptr`. U and V always share the single `uv_mode` selector
 /// per RFC 6386 §13.4.
 pub unsafe fn vp8_build_intra_predictors_mbuv_s(
-    x: *mut Macroblockd,
+    x: &Macroblockd,
     mi: &ModeInfo,
     uabove_row: *mut u8,
     vabove_row: *mut u8,
@@ -155,7 +155,7 @@ pub unsafe fn vp8_build_intra_predictors_mbuv_s(
     }
 
     let fn_: IntraPredFn = if uvmode == MbPredictionMode::DcPred {
-        dc_pred[(*x).left_available as usize][(*x).up_available as usize][SIZE_8].unwrap()
+        dc_pred[x.left_available as usize][x.up_available as usize][SIZE_8].unwrap()
     } else {
         pred[uvmode as usize][SIZE_8].unwrap()
     };
