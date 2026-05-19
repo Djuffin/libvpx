@@ -18,16 +18,16 @@ use crate::types::Macroblockd;
 /// whenever `dst.y_stride` or `dst.uv_stride` changes.
 ///
 /// Source: `vp8/common/mbpitch.c:43`.
-pub unsafe fn vp8_build_block_doffsets(x: *mut Macroblockd) {
+pub fn vp8_build_block_doffsets(x: &mut Macroblockd) {
     // y blocks
     for block in 0..16i32 {
-        (*x).block[block as usize].offset = (block >> 2) * 4 * (*x).dst.y_stride + (block & 3) * 4;
+        x.block[block as usize].offset = (block >> 2) * 4 * x.dst.y_stride + (block & 3) * 4;
     }
 
     // U and V blocks
     for block in 16..20i32 {
-        let off = ((block - 16) >> 1) * 4 * (*x).dst.uv_stride + (block & 1) * 4;
-        (*x).block[block as usize].offset = off;
-        (*x).block[(block + 4) as usize].offset = off;
+        let off = ((block - 16) >> 1) * 4 * x.dst.uv_stride + (block & 1) * 4;
+        x.block[block as usize].offset = off;
+        x.block[(block + 4) as usize].offset = off;
     }
 }

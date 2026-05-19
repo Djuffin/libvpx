@@ -224,103 +224,88 @@ pub unsafe fn vp8_get_si(ctx: &Vp8AlgPriv<'static>, si: *mut VpxCodecStreamInfo)
 /// `update_error_state` — `vp8/vp8_dx_iface.c:199`. The variadic
 /// detail-message channel was dropped during the port, so this just
 /// returns the error code.
-unsafe fn update_error_state(
-    _ctx: *mut Vp8AlgPriv<'static>,
-    error: *const VpxInternalErrorInfo,
-) -> VpxCodecErr {
-    (*error).error_code
+fn update_error_state(error: &VpxInternalErrorInfo) -> VpxCodecErr {
+    error.error_code
 }
 
 /// `yuvconfig2image` — `vp8/vp8_dx_iface.c:210`.
-unsafe fn yuvconfig2image(
-    img: *mut VpxImage,
-    yv12: *const Yv12BufferConfig,
-    user_priv: *mut c_void,
-) {
+fn yuvconfig2image(img: &mut VpxImage, yv12: &Yv12BufferConfig, user_priv: *mut c_void) {
     // vpx_img_wrap() doesn't allow specifying independent strides for
     // the Y, U, and V planes, nor other alignment adjustments that
     // might be representable by a YV12_BUFFER_CONFIG, so we just
     // initialize all the fields.
-    (*img).fmt = VPX_IMG_FMT_I420;
-    (*img).w = (*yv12).y_stride as u32;
-    (*img).h = (((*yv12).y_height + 2 * VP8_BORDER_IN_PIXELS + 15) & !15) as u32;
-    (*img).d_w = (*yv12).y_width as u32;
-    (*img).r_w = (*yv12).y_width as u32;
-    (*img).d_h = (*yv12).y_height as u32;
-    (*img).r_h = (*yv12).y_height as u32;
-    (*img).x_chroma_shift = 1;
-    (*img).y_chroma_shift = 1;
-    (*img).planes[VPX_PLANE_Y] = (*yv12).y_buffer;
-    (*img).planes[VPX_PLANE_U] = (*yv12).u_buffer;
-    (*img).planes[VPX_PLANE_V] = (*yv12).v_buffer;
-    (*img).planes[VPX_PLANE_ALPHA] = ptr::null_mut();
-    (*img).stride[VPX_PLANE_Y] = (*yv12).y_stride;
-    (*img).stride[VPX_PLANE_U] = (*yv12).uv_stride;
-    (*img).stride[VPX_PLANE_V] = (*yv12).uv_stride;
-    (*img).stride[VPX_PLANE_ALPHA] = (*yv12).y_stride;
-    (*img).bit_depth = 8;
-    (*img).bps = 12;
-    (*img).user_priv = user_priv;
-    (*img).img_data = (*yv12).buffer_alloc;
-    (*img).img_data_owner = 0;
-    (*img).self_allocd = 0;
+    img.fmt = VPX_IMG_FMT_I420;
+    img.w = yv12.y_stride as u32;
+    img.h = ((yv12.y_height + 2 * VP8_BORDER_IN_PIXELS + 15) & !15) as u32;
+    img.d_w = yv12.y_width as u32;
+    img.r_w = yv12.y_width as u32;
+    img.d_h = yv12.y_height as u32;
+    img.r_h = yv12.y_height as u32;
+    img.x_chroma_shift = 1;
+    img.y_chroma_shift = 1;
+    img.planes[VPX_PLANE_Y] = yv12.y_buffer;
+    img.planes[VPX_PLANE_U] = yv12.u_buffer;
+    img.planes[VPX_PLANE_V] = yv12.v_buffer;
+    img.planes[VPX_PLANE_ALPHA] = ptr::null_mut();
+    img.stride[VPX_PLANE_Y] = yv12.y_stride;
+    img.stride[VPX_PLANE_U] = yv12.uv_stride;
+    img.stride[VPX_PLANE_V] = yv12.uv_stride;
+    img.stride[VPX_PLANE_ALPHA] = yv12.y_stride;
+    img.bit_depth = 8;
+    img.bps = 12;
+    img.user_priv = user_priv;
+    img.img_data = yv12.buffer_alloc;
+    img.img_data_owner = 0;
+    img.self_allocd = 0;
 }
 
 /// `update_fragments` — `vp8/vp8_dx_iface.c:239`.
-unsafe fn update_fragments(
-    ctx: *mut Vp8AlgPriv<'static>,
+fn update_fragments(
+    ctx: &mut Vp8AlgPriv<'static>,
     data: *const u8,
     data_sz: u32,
-    res: *mut VpxCodecErr,
+    res: &mut VpxCodecErr,
 ) -> i32 {
     *res = VPX_CODEC_OK;
 
-    if (*ctx).fragments.count == 0 {
+    if ctx.fragments.count == 0 {
         // New frame, reset fragment pointers and sizes
-        ptr::write_bytes(
-            (*ctx).fragments.ptrs.as_mut_ptr(),
-            0,
-            (*ctx).fragments.ptrs.len(),
-        );
-        ptr::write_bytes(
-            (*ctx).fragments.sizes.as_mut_ptr(),
-            0,
-            (*ctx).fragments.sizes.len(),
-        );
+        ctx.fragments.ptrs.fill(ptr::null());
+        ctx.fragments.sizes.fill(0);
     }
 
     // Flush signal in fragment mode but no fragments were accumulated yet.
     // Nothing to decode; treat as a no-op.
-    if (*ctx).fragments.enabled != 0
+    if ctx.fragments.enabled != 0
         && data.is_null()
         && data_sz == 0
-        && (*ctx).fragments.count == 0
+        && ctx.fragments.count == 0
     {
         return 0;
     }
 
-    if (*ctx).fragments.enabled != 0 && !(data.is_null() && data_sz == 0) {
+    if ctx.fragments.enabled != 0 && !(data.is_null() && data_sz == 0) {
         // Store a pointer to this fragment and return. We haven't
         // received the complete frame yet, so we will wait with decoding.
-        if (*ctx).fragments.count as usize >= MAX_PARTITIONS {
-            (*ctx).fragments.count = 0;
+        if ctx.fragments.count as usize >= MAX_PARTITIONS {
+            ctx.fragments.count = 0;
             *res = VPX_CODEC_INVALID_PARAM;
             return -1;
         }
-        (*ctx).fragments.ptrs[(*ctx).fragments.count as usize] = data;
-        (*ctx).fragments.sizes[(*ctx).fragments.count as usize] = data_sz;
-        (*ctx).fragments.count += 1;
+        ctx.fragments.ptrs[ctx.fragments.count as usize] = data;
+        ctx.fragments.sizes[ctx.fragments.count as usize] = data_sz;
+        ctx.fragments.count += 1;
         return 0;
     }
 
-    if (*ctx).fragments.enabled == 0 && data.is_null() && data_sz == 0 {
+    if ctx.fragments.enabled == 0 && data.is_null() && data_sz == 0 {
         return 0;
     }
 
-    if (*ctx).fragments.enabled == 0 {
-        (*ctx).fragments.ptrs[0] = data;
-        (*ctx).fragments.sizes[0] = data_sz;
-        (*ctx).fragments.count = 1;
+    if ctx.fragments.enabled == 0 {
+        ctx.fragments.ptrs[0] = data;
+        ctx.fragments.sizes[0] = data_sz;
+        ctx.fragments.count = 1;
     }
 
     1
@@ -346,7 +331,7 @@ pub unsafe fn vp8_decode(
 
     // Update the input fragment data
     let mut res_local: VpxCodecErr = VPX_CODEC_OK;
-    if update_fragments(ctx, data, data_sz, &mut res_local) <= 0 {
+    if update_fragments(&mut *ctx, data, data_sz, &mut res_local) <= 0 {
         return res_local;
     }
 
@@ -444,7 +429,7 @@ pub unsafe fn vp8_decode(
             (*pc).width = (*ctx).si.w as i32;
             (*pc).height = (*ctx).si.h as i32;
             if vp8_decode_resolution_change(pbi, w, h).is_err() {
-                res = update_error_state(ctx, &(*pbi).common.error);
+                res = update_error_state(&(*pbi).common.error);
                 (*ctx).fragments.count = 0;
                 (*ctx).decrypt = (*pbi).decrypt.take();
                 return res;
@@ -461,7 +446,7 @@ pub unsafe fn vp8_decode(
             if (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] > 0 {
                 (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] -= 1;
             }
-            res = update_error_state(ctx, &(*pbi).common.error);
+            res = update_error_state(&(*pbi).common.error);
         }
 
         // get ready for the next series of fragments
@@ -555,29 +540,29 @@ pub unsafe fn vp8_get_frame(
 }
 
 /// `image2yuvconfig` — `vp8/vp8_dx_iface.c:560`.
-unsafe fn image2yuvconfig(img: *const VpxImage, yv12: *mut Yv12BufferConfig) -> VpxCodecErr {
-    let y_w = (*img).d_w as i32;
-    let y_h = (*img).d_h as i32;
-    let uv_w = ((*img).d_w as i32 + 1) / 2;
-    let uv_h = ((*img).d_h as i32 + 1) / 2;
+fn image2yuvconfig(img: &VpxImage, yv12: &mut Yv12BufferConfig) -> VpxCodecErr {
+    let y_w = img.d_w as i32;
+    let y_h = img.d_h as i32;
+    let uv_w = (img.d_w as i32 + 1) / 2;
+    let uv_h = (img.d_h as i32 + 1) / 2;
     let res: VpxCodecErr = VPX_CODEC_OK;
-    (*yv12).y_buffer = (*img).planes[VPX_PLANE_Y];
-    (*yv12).u_buffer = (*img).planes[VPX_PLANE_U];
-    (*yv12).v_buffer = (*img).planes[VPX_PLANE_V];
+    yv12.y_buffer = img.planes[VPX_PLANE_Y];
+    yv12.u_buffer = img.planes[VPX_PLANE_U];
+    yv12.v_buffer = img.planes[VPX_PLANE_V];
 
-    (*yv12).y_crop_width = y_w;
-    (*yv12).y_crop_height = y_h;
-    (*yv12).y_width = y_w;
-    (*yv12).y_height = y_h;
-    (*yv12).uv_crop_width = uv_w;
-    (*yv12).uv_crop_height = uv_h;
-    (*yv12).uv_width = uv_w;
-    (*yv12).uv_height = uv_h;
+    yv12.y_crop_width = y_w;
+    yv12.y_crop_height = y_h;
+    yv12.y_width = y_w;
+    yv12.y_height = y_h;
+    yv12.uv_crop_width = uv_w;
+    yv12.uv_crop_height = uv_h;
+    yv12.uv_width = uv_w;
+    yv12.uv_height = uv_h;
 
-    (*yv12).y_stride = (*img).stride[VPX_PLANE_Y];
-    (*yv12).uv_stride = (*img).stride[VPX_PLANE_U];
+    yv12.y_stride = img.stride[VPX_PLANE_Y];
+    yv12.uv_stride = img.stride[VPX_PLANE_U];
 
-    (*yv12).border = ((*img).stride[VPX_PLANE_Y] - (*img).d_w as i32) / 2;
+    yv12.border = (img.stride[VPX_PLANE_Y] - img.d_w as i32) / 2;
     res
 }
 

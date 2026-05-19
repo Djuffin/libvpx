@@ -404,7 +404,7 @@ pub const VP8_SUB_MV_REF_PROB3: [[Prob; VP8_SUBMVREFS - 1]; 8] = [
 // `get_sub_mv_ref_prob` (decodemv.c:176).
 // ===========================================================================
 
-unsafe fn get_sub_mv_ref_prob(left: u32, above: u32) -> *const Prob {
+fn get_sub_mv_ref_prob(left: u32, above: u32) -> *const Prob {
     let lez = (left == 0) as usize;
     let aez = (above == 0) as usize;
     let lea = (left == above) as usize;

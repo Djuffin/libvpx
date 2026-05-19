@@ -125,34 +125,34 @@ unsafe fn vp8_loop_filter_simple_bh(y_ptr: *mut u8, y_stride: i32, blimit: *cons
 // `lf_init_lut` — static helper (vp8/common/vp8_loopfilter.c:17).
 // ---------------------------------------------------------------------------
 
-unsafe fn lf_init_lut(lfi: *mut LoopFilterInfoN) {
+fn lf_init_lut(lfi: &mut LoopFilterInfoN) {
     for filt_lvl in 0..=MAX_LOOP_FILTER as usize {
         if filt_lvl >= 40 {
-            (*lfi).hev_thr_lut[FrameType::Key as usize][filt_lvl] = 2;
-            (*lfi).hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 3;
+            lfi.hev_thr_lut[FrameType::Key as usize][filt_lvl] = 2;
+            lfi.hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 3;
         } else if filt_lvl >= 20 {
-            (*lfi).hev_thr_lut[FrameType::Key as usize][filt_lvl] = 1;
-            (*lfi).hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 2;
+            lfi.hev_thr_lut[FrameType::Key as usize][filt_lvl] = 1;
+            lfi.hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 2;
         } else if filt_lvl >= 15 {
-            (*lfi).hev_thr_lut[FrameType::Key as usize][filt_lvl] = 1;
-            (*lfi).hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 1;
+            lfi.hev_thr_lut[FrameType::Key as usize][filt_lvl] = 1;
+            lfi.hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 1;
         } else {
-            (*lfi).hev_thr_lut[FrameType::Key as usize][filt_lvl] = 0;
-            (*lfi).hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 0;
+            lfi.hev_thr_lut[FrameType::Key as usize][filt_lvl] = 0;
+            lfi.hev_thr_lut[FrameType::Inter as usize][filt_lvl] = 0;
         }
     }
 
-    (*lfi).mode_lf_lut[MbPredictionMode::DcPred as usize] = 1;
-    (*lfi).mode_lf_lut[MbPredictionMode::VPred as usize] = 1;
-    (*lfi).mode_lf_lut[MbPredictionMode::HPred as usize] = 1;
-    (*lfi).mode_lf_lut[MbPredictionMode::TmPred as usize] = 1;
-    (*lfi).mode_lf_lut[MbPredictionMode::BPred as usize] = 0;
+    lfi.mode_lf_lut[MbPredictionMode::DcPred as usize] = 1;
+    lfi.mode_lf_lut[MbPredictionMode::VPred as usize] = 1;
+    lfi.mode_lf_lut[MbPredictionMode::HPred as usize] = 1;
+    lfi.mode_lf_lut[MbPredictionMode::TmPred as usize] = 1;
+    lfi.mode_lf_lut[MbPredictionMode::BPred as usize] = 0;
 
-    (*lfi).mode_lf_lut[MbPredictionMode::ZeroMv as usize] = 1;
-    (*lfi).mode_lf_lut[MbPredictionMode::NearestMv as usize] = 2;
-    (*lfi).mode_lf_lut[MbPredictionMode::NearMv as usize] = 2;
-    (*lfi).mode_lf_lut[MbPredictionMode::NewMv as usize] = 2;
-    (*lfi).mode_lf_lut[MbPredictionMode::SplitMv as usize] = 3;
+    lfi.mode_lf_lut[MbPredictionMode::ZeroMv as usize] = 1;
+    lfi.mode_lf_lut[MbPredictionMode::NearestMv as usize] = 2;
+    lfi.mode_lf_lut[MbPredictionMode::NearMv as usize] = 2;
+    lfi.mode_lf_lut[MbPredictionMode::NewMv as usize] = 2;
+    lfi.mode_lf_lut[MbPredictionMode::SplitMv as usize] = 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +164,7 @@ unsafe fn lf_init_lut(lfi: *mut LoopFilterInfoN) {
 /// For each possible value of `filter_level` (0..=63), fills out the
 /// three per-strength byte vectors (`lim`, `blim`, `mblim`) in `lfi`
 /// using the current sharpness level. See RFC 6386 §15.4.
-pub unsafe fn vp8_loop_filter_update_sharpness(lfi: *mut LoopFilterInfoN, sharpness_lvl: i32) {
+pub fn vp8_loop_filter_update_sharpness(lfi: &mut LoopFilterInfoN, sharpness_lvl: i32) {
     /* For each possible value for the loop filter fill out limits */
     for i in 0..=MAX_LOOP_FILTER as usize {
         let filt_lvl: i32 = i as i32;
@@ -181,9 +181,9 @@ pub unsafe fn vp8_loop_filter_update_sharpness(lfi: *mut LoopFilterInfoN, sharpn
             block_inside_limit = 1;
         }
 
-        (*lfi).lim[i].fill(block_inside_limit as u8);
-        (*lfi).blim[i].fill((2 * filt_lvl + block_inside_limit) as u8);
-        (*lfi).mblim[i].fill((2 * (filt_lvl + 2) + block_inside_limit) as u8);
+        lfi.lim[i].fill(block_inside_limit as u8);
+        lfi.blim[i].fill((2 * filt_lvl + block_inside_limit) as u8);
+        lfi.mblim[i].fill((2 * (filt_lvl + 2) + block_inside_limit) as u8);
     }
 }
 
@@ -193,18 +193,19 @@ pub unsafe fn vp8_loop_filter_update_sharpness(lfi: *mut LoopFilterInfoN, sharpn
 /// dependent threshold tables, the mode/hev-threshold LUTs, and the
 /// four broadcast `hev_thr` vectors.
 pub unsafe fn vp8_loop_filter_init(cm: *mut Vp8Common) {
-    let lfi: *mut LoopFilterInfoN = &mut (*cm).lf_info;
+    let sharpness_level = (*cm).sharpness_level;
+    (*cm).last_sharpness_level = sharpness_level;
+    let lfi: &mut LoopFilterInfoN = &mut (*cm).lf_info;
 
     /* init limits for given sharpness*/
-    vp8_loop_filter_update_sharpness(lfi, (*cm).sharpness_level);
-    (*cm).last_sharpness_level = (*cm).sharpness_level;
+    vp8_loop_filter_update_sharpness(lfi, sharpness_level);
 
     /* init LUT for lvl  and hev thr picking */
     lf_init_lut(lfi);
 
     /* init hev threshold const vectors */
     for i in 0..4usize {
-        (*lfi).hev_thr[i].fill(i as u8);
+        lfi.hev_thr[i].fill(i as u8);
     }
 }
 
@@ -217,12 +218,16 @@ pub unsafe fn vp8_loop_filter_frame_init(
     mbd: *mut Macroblockd,
     default_filt_lvl: i32,
 ) {
-    let lfi: *mut LoopFilterInfoN = &mut (*cm).lf_info;
+    let sharpness_level = (*cm).sharpness_level;
+    let sharpness_changed = (*cm).last_sharpness_level != sharpness_level;
+    if sharpness_changed {
+        (*cm).last_sharpness_level = sharpness_level;
+    }
+    let lfi: &mut LoopFilterInfoN = &mut (*cm).lf_info;
 
     /* update limits if sharpness has changed */
-    if (*cm).last_sharpness_level != (*cm).sharpness_level {
-        vp8_loop_filter_update_sharpness(lfi, (*cm).sharpness_level);
-        (*cm).last_sharpness_level = (*cm).sharpness_level;
+    if sharpness_changed {
+        vp8_loop_filter_update_sharpness(lfi, sharpness_level);
     }
 
     for seg in 0..MAX_MB_SEGMENTS as usize {
@@ -245,7 +250,7 @@ pub unsafe fn vp8_loop_filter_frame_init(
             /* we could get rid of this if we assume that deltas are set to
              * zero when not in use; encoder always uses deltas
              */
-            for row in (*lfi).lvl[seg].iter_mut() {
+            for row in lfi.lvl[seg].iter_mut() {
                 row.fill(lvl_seg as u8);
             }
             continue;
@@ -263,11 +268,11 @@ pub unsafe fn vp8_loop_filter_frame_init(
         /* clamp */
         lvl_mode = lvl_mode.clamp(0, 63);
 
-        (*lfi).lvl[seg][intra_ref][0] = lvl_mode as u8;
+        lfi.lvl[seg][intra_ref][0] = lvl_mode as u8;
 
         /* mode = 1: all the rest of Intra modes — clamp */
         lvl_mode = lvl_ref.clamp(0, 63);
-        (*lfi).lvl[seg][intra_ref][1] = lvl_mode as u8;
+        lfi.lvl[seg][intra_ref][1] = lvl_mode as u8;
 
         /* LAST, GOLDEN, ALT */
         for r#ref in 1..MAX_REF_FRAMES as usize {
@@ -280,7 +285,7 @@ pub unsafe fn vp8_loop_filter_frame_init(
                 /* clamp */
                 lvl_mode = lvl_mode.clamp(0, 63);
 
-                (*lfi).lvl[seg][r#ref][mode] = lvl_mode as u8;
+                lfi.lvl[seg][r#ref][mode] = lvl_mode as u8;
             }
         }
     }
@@ -299,34 +304,35 @@ pub unsafe fn vp8_loop_filter_row_normal(
     mut u_ptr: *mut u8,
     mut v_ptr: *mut u8,
 ) {
-    let lfi_n: *mut LoopFilterInfoN = &mut (*cm).lf_info;
+    let frame_type: FrameType = (*cm).frame_type;
+    let mb_cols = (*cm).mb_cols;
+    let lfi_n: &LoopFilterInfoN = &(*cm).lf_info;
     let mut lfi = LoopFilterInfo {
         mblim: ptr::null(),
         blim: ptr::null(),
         lim: ptr::null(),
         hev_thr: ptr::null(),
     };
-    let frame_type: FrameType = (*cm).frame_type;
     let mi_row = (*cm).mi_row(mb_row);
 
-    for mb_col in 0..(*cm).mb_cols {
+    for mb_col in 0..mb_cols {
         let mi = &mi_row[mb_col as usize];
         let skip_lf: bool = mi.mbmi.mode != MbPredictionMode::BPred
             && mi.mbmi.mode != MbPredictionMode::SplitMv
             && mi.mbmi.mb_skip_coeff;
 
-        let mode_index = (*lfi_n).mode_lf_lut[mi.mbmi.mode as usize] as usize;
+        let mode_index = lfi_n.mode_lf_lut[mi.mbmi.mode as usize] as usize;
         let seg = mi.mbmi.segment_id as usize;
         let ref_frame = mi.mbmi.ref_frame as usize;
 
-        let filter_level = (*lfi_n).lvl[seg][ref_frame][mode_index] as usize;
+        let filter_level = lfi_n.lvl[seg][ref_frame][mode_index] as usize;
 
         if filter_level != 0 {
-            let hev_index = (*lfi_n).hev_thr_lut[frame_type as usize][filter_level] as usize;
-            lfi.mblim = (*lfi_n).mblim[filter_level].as_ptr();
-            lfi.blim = (*lfi_n).blim[filter_level].as_ptr();
-            lfi.lim = (*lfi_n).lim[filter_level].as_ptr();
-            lfi.hev_thr = (*lfi_n).hev_thr[hev_index].as_ptr();
+            let hev_index = lfi_n.hev_thr_lut[frame_type as usize][filter_level] as usize;
+            lfi.mblim = lfi_n.mblim[filter_level].as_ptr();
+            lfi.blim = lfi_n.blim[filter_level].as_ptr();
+            lfi.lim = lfi_n.lim[filter_level].as_ptr();
+            lfi.hev_thr = lfi_n.hev_thr[hev_index].as_ptr();
 
             if mb_col > 0 {
                 vp8_loop_filter_mbv(y_ptr, u_ptr, v_ptr, post_ystride, post_uvstride, &mut lfi);
@@ -361,27 +367,28 @@ pub unsafe fn vp8_loop_filter_row_simple(
     post_ystride: i32,
     mut y_ptr: *mut u8,
 ) {
-    let lfi_n: *mut LoopFilterInfoN = &mut (*cm).lf_info;
+    let mb_cols = (*cm).mb_cols;
+    let lfi_n: &LoopFilterInfoN = &(*cm).lf_info;
     let mi_row = (*cm).mi_row(mb_row);
 
-    for mb_col in 0..(*cm).mb_cols {
+    for mb_col in 0..mb_cols {
         let mi = &mi_row[mb_col as usize];
         let skip_lf: bool = mi.mbmi.mode != MbPredictionMode::BPred
             && mi.mbmi.mode != MbPredictionMode::SplitMv
             && mi.mbmi.mb_skip_coeff;
 
-        let mode_index = (*lfi_n).mode_lf_lut[mi.mbmi.mode as usize] as usize;
+        let mode_index = lfi_n.mode_lf_lut[mi.mbmi.mode as usize] as usize;
         let seg = mi.mbmi.segment_id as usize;
         let ref_frame = mi.mbmi.ref_frame as usize;
 
-        let filter_level = (*lfi_n).lvl[seg][ref_frame][mode_index] as usize;
+        let filter_level = lfi_n.lvl[seg][ref_frame][mode_index] as usize;
 
         if filter_level != 0 {
             if mb_col > 0 {
                 vp8_loop_filter_simple_mbv(
                     y_ptr,
                     post_ystride,
-                    (*lfi_n).mblim[filter_level].as_ptr(),
+                    lfi_n.mblim[filter_level].as_ptr(),
                 );
             }
 
@@ -389,7 +396,7 @@ pub unsafe fn vp8_loop_filter_row_simple(
                 vp8_loop_filter_simple_bv(
                     y_ptr,
                     post_ystride,
-                    (*lfi_n).blim[filter_level].as_ptr(),
+                    lfi_n.blim[filter_level].as_ptr(),
                 );
             }
 
@@ -398,7 +405,7 @@ pub unsafe fn vp8_loop_filter_row_simple(
                 vp8_loop_filter_simple_mbh(
                     y_ptr,
                     post_ystride,
-                    (*lfi_n).mblim[filter_level].as_ptr(),
+                    lfi_n.mblim[filter_level].as_ptr(),
                 );
             }
 
@@ -406,7 +413,7 @@ pub unsafe fn vp8_loop_filter_row_simple(
                 vp8_loop_filter_simple_bh(
                     y_ptr,
                     post_ystride,
-                    (*lfi_n).blim[filter_level].as_ptr(),
+                    lfi_n.blim[filter_level].as_ptr(),
                 );
             }
         }

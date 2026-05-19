@@ -48,94 +48,85 @@ const sinpi8sqrt2: i32 = 35468;
 
 pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
     input: *mut i16,
-    mut pred_ptr: *mut u8,
+    pred_ptr: *mut u8,
     pred_stride: i32,
-    mut dst_ptr: *mut u8,
+    dst_ptr: *mut u8,
     dst_stride: i32,
 ) {
-    let mut a1: i32;
-    let mut b1: i32;
-    let mut c1: i32;
-    let mut d1: i32;
-    let mut output: [i16; 16] = [0; 16];
-    let mut ip: *mut i16 = input;
-    let mut op: *mut i16 = output.as_mut_ptr();
-    let mut temp1: i32;
-    let mut temp2: i32;
-    let shortpitch: i32 = 4;
+    // Build a bounded view of the input coefficients (fixed 16 shorts).
+    // We materialize the predictor into a local 4x4 buffer before
+    // touching `dst` because callers commonly pass the same buffer as
+    // both `pred_ptr` and `dst_ptr` (in-place IDCT-add); constructing
+    // overlapping `&[u8]` and `&mut [u8]` slices over the same memory
+    // would violate Rust's aliasing rules.
+    let input: &[i16; 16] = &*(input as *const [i16; 16]);
 
-    let mut i: i32 = 0;
-    while i < 4 {
-        a1 = (*ip.offset(0) as i32) + (*ip.offset(8) as i32);
-        b1 = (*ip.offset(0) as i32) - (*ip.offset(8) as i32);
-
-        temp1 = ((*ip.offset(4) as i32) * sinpi8sqrt2) >> 16;
-        temp2 = (*ip.offset(12) as i32) + (((*ip.offset(12) as i32) * cospi8sqrt2minus1) >> 16);
-        c1 = temp1 - temp2;
-
-        temp1 = (*ip.offset(4) as i32) + (((*ip.offset(4) as i32) * cospi8sqrt2minus1) >> 16);
-        temp2 = ((*ip.offset(12) as i32) * sinpi8sqrt2) >> 16;
-        d1 = temp1 + temp2;
-
-        *op.offset((shortpitch * 0) as isize) = (a1 + d1) as i16;
-        *op.offset((shortpitch * 3) as isize) = (a1 - d1) as i16;
-
-        *op.offset((shortpitch * 1) as isize) = (b1 + c1) as i16;
-        *op.offset((shortpitch * 2) as isize) = (b1 - c1) as i16;
-
-        ip = ip.offset(1);
-        op = op.offset(1);
-        i += 1;
-    }
-
-    ip = output.as_mut_ptr();
-    op = output.as_mut_ptr();
-
-    for _ in 0..4 {
-        a1 = (*ip.offset(0) as i32) + (*ip.offset(2) as i32);
-        b1 = (*ip.offset(0) as i32) - (*ip.offset(2) as i32);
-
-        temp1 = ((*ip.offset(1) as i32) * sinpi8sqrt2) >> 16;
-        temp2 = (*ip.offset(3) as i32) + (((*ip.offset(3) as i32) * cospi8sqrt2minus1) >> 16);
-        c1 = temp1 - temp2;
-
-        temp1 = (*ip.offset(1) as i32) + (((*ip.offset(1) as i32) * cospi8sqrt2minus1) >> 16);
-        temp2 = ((*ip.offset(3) as i32) * sinpi8sqrt2) >> 16;
-        d1 = temp1 + temp2;
-
-        *op.offset(0) = ((a1 + d1 + 4) >> 3) as i16;
-        *op.offset(3) = ((a1 - d1 + 4) >> 3) as i16;
-
-        *op.offset(1) = ((b1 + c1 + 4) >> 3) as i16;
-        *op.offset(2) = ((b1 - c1 + 4) >> 3) as i16;
-
-        ip = ip.offset(shortpitch as isize);
-        op = op.offset(shortpitch as isize);
-    }
-
-    let mut ip: *mut i16 = output.as_mut_ptr();
-    let mut r: i32 = 0;
-    while r < 4 {
-        let mut c: i32 = 0;
-        while c < 4 {
-            let mut a: i32 =
-                (*ip.offset(c as isize) as i32) + (*pred_ptr.offset(c as isize) as i32);
-
-            if a < 0 {
-                a = 0;
-            }
-
-            if a > 255 {
-                a = 255;
-            }
-
-            *dst_ptr.offset(c as isize) = a as u8;
-            c += 1;
+    let mut pred: [u8; 16] = [0; 16];
+    for r in 0..4 {
+        let row = pred_ptr.offset((r as isize) * (pred_stride as isize));
+        for c in 0..4 {
+            pred[r * 4 + c] = *row.offset(c as isize);
         }
-        ip = ip.offset(4);
-        dst_ptr = dst_ptr.offset(dst_stride as isize);
-        pred_ptr = pred_ptr.offset(pred_stride as isize);
-        r += 1;
+    }
+
+    let mut output: [i16; 16] = [0; 16];
+
+    // Column pass: input[col + 4*row] -> output[col + 4*row].
+    for col in 0..4 {
+        let i0 = input[col] as i32;
+        let i4 = input[col + 4] as i32;
+        let i8_ = input[col + 8] as i32;
+        let i12 = input[col + 12] as i32;
+
+        let a1 = i0 + i8_;
+        let b1 = i0 - i8_;
+
+        let temp1 = (i4 * sinpi8sqrt2) >> 16;
+        let temp2 = i12 + ((i12 * cospi8sqrt2minus1) >> 16);
+        let c1 = temp1 - temp2;
+
+        let temp1 = i4 + ((i4 * cospi8sqrt2minus1) >> 16);
+        let temp2 = (i12 * sinpi8sqrt2) >> 16;
+        let d1 = temp1 + temp2;
+
+        output[col] = (a1 + d1) as i16;
+        output[col + 12] = (a1 - d1) as i16;
+        output[col + 4] = (b1 + c1) as i16;
+        output[col + 8] = (b1 - c1) as i16;
+    }
+
+    // Row pass: in-place on `output`.
+    for row in 0..4 {
+        let base = row * 4;
+        let r0 = output[base] as i32;
+        let r1 = output[base + 1] as i32;
+        let r2 = output[base + 2] as i32;
+        let r3 = output[base + 3] as i32;
+
+        let a1 = r0 + r2;
+        let b1 = r0 - r2;
+
+        let temp1 = (r1 * sinpi8sqrt2) >> 16;
+        let temp2 = r3 + ((r3 * cospi8sqrt2minus1) >> 16);
+        let c1 = temp1 - temp2;
+
+        let temp1 = r1 + ((r1 * cospi8sqrt2minus1) >> 16);
+        let temp2 = (r3 * sinpi8sqrt2) >> 16;
+        let d1 = temp1 + temp2;
+
+        output[base] = ((a1 + d1 + 4) >> 3) as i16;
+        output[base + 3] = ((a1 - d1 + 4) >> 3) as i16;
+        output[base + 1] = ((b1 + c1 + 4) >> 3) as i16;
+        output[base + 2] = ((b1 - c1 + 4) >> 3) as i16;
+    }
+
+    // Clip-and-add into `dst` from the saved predictor.
+    for r in 0..4 {
+        let row = dst_ptr.offset((r as isize) * (dst_stride as isize));
+        for c in 0..4 {
+            let a = output[r * 4 + c] as i32 + pred[r * 4 + c] as i32;
+            *row.offset(c as isize) = a.clamp(0, 255) as u8;
+        }
     }
 }
 
@@ -149,34 +140,27 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
 
 pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
     input_dc: i16,
-    mut pred_ptr: *mut u8,
+    pred_ptr: *mut u8,
     pred_stride: i32,
-    mut dst_ptr: *mut u8,
+    dst_ptr: *mut u8,
     dst_stride: i32,
 ) {
     let a1: i32 = ((input_dc as i32) + 4) >> 3;
 
-    let mut r: i32 = 0;
-    while r < 4 {
-        let mut c: i32 = 0;
-        while c < 4 {
-            let mut a: i32 = a1 + (*pred_ptr.offset(c as isize) as i32);
-
-            if a < 0 {
-                a = 0;
-            }
-
-            if a > 255 {
-                a = 255;
-            }
-
-            *dst_ptr.offset(c as isize) = a as u8;
-            c += 1;
+    // Same aliasing concern as `vp8_short_idct4x4llm_c`: callers may
+    // pass `pred_ptr == dst_ptr`. Read each predictor row into a local
+    // before writing the corresponding `dst` row.
+    for r in 0..4 {
+        let pred_row = pred_ptr.offset((r as isize) * (pred_stride as isize));
+        let dst_row = dst_ptr.offset((r as isize) * (dst_stride as isize));
+        let mut row: [u8; 4] = [0; 4];
+        for c in 0..4 {
+            row[c] = *pred_row.offset(c as isize);
         }
-
-        dst_ptr = dst_ptr.offset(dst_stride as isize);
-        pred_ptr = pred_ptr.offset(pred_stride as isize);
-        r += 1;
+        for c in 0..4 {
+            let a = a1 + row[c] as i32;
+            *dst_row.offset(c as isize) = a.clamp(0, 255) as u8;
+        }
     }
 }
 
@@ -189,55 +173,55 @@ pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
 /// residual block (`mb_dqcoeff[i * 16]`).
 
 pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *mut i16) {
+    // `input` is a fixed 16-short block; snapshot it into a local
+    // [i16; 16] up front and operate purely on safe arrays.
+    let input: &[i16; 16] = &*(input as *const [i16; 16]);
     let mut output: [i16; 16] = [0; 16];
-    let mut a1: i32;
-    let mut b1: i32;
-    let mut c1: i32;
-    let mut d1: i32;
-    let mut a2: i32;
-    let mut b2: i32;
-    let mut c2: i32;
-    let mut d2: i32;
-    let mut ip: *mut i16 = input;
-    let mut op: *mut i16 = output.as_mut_ptr();
 
-    let mut i: i32 = 0;
-    while i < 4 {
-        a1 = (*ip.offset(0) as i32) + (*ip.offset(12) as i32);
-        b1 = (*ip.offset(4) as i32) + (*ip.offset(8) as i32);
-        c1 = (*ip.offset(4) as i32) - (*ip.offset(8) as i32);
-        d1 = (*ip.offset(0) as i32) - (*ip.offset(12) as i32);
+    // Column pass.
+    for col in 0..4 {
+        let i0 = input[col] as i32;
+        let i4 = input[col + 4] as i32;
+        let i8_ = input[col + 8] as i32;
+        let i12 = input[col + 12] as i32;
 
-        *op.offset(0) = (a1 + b1) as i16;
-        *op.offset(4) = (c1 + d1) as i16;
-        *op.offset(8) = (a1 - b1) as i16;
-        *op.offset(12) = (d1 - c1) as i16;
-        ip = ip.offset(1);
-        op = op.offset(1);
-        i += 1;
+        let a1 = i0 + i12;
+        let b1 = i4 + i8_;
+        let c1 = i4 - i8_;
+        let d1 = i0 - i12;
+
+        output[col] = (a1 + b1) as i16;
+        output[col + 4] = (c1 + d1) as i16;
+        output[col + 8] = (a1 - b1) as i16;
+        output[col + 12] = (d1 - c1) as i16;
     }
 
-    ip = output.as_mut_ptr();
-    op = output.as_mut_ptr();
-    for _ in 0..4 {
-        a1 = (*ip.offset(0) as i32) + (*ip.offset(3) as i32);
-        b1 = (*ip.offset(1) as i32) + (*ip.offset(2) as i32);
-        c1 = (*ip.offset(1) as i32) - (*ip.offset(2) as i32);
-        d1 = (*ip.offset(0) as i32) - (*ip.offset(3) as i32);
+    // Row pass, in-place.
+    for row in 0..4 {
+        let base = row * 4;
+        let r0 = output[base] as i32;
+        let r1 = output[base + 1] as i32;
+        let r2 = output[base + 2] as i32;
+        let r3 = output[base + 3] as i32;
 
-        a2 = a1 + b1;
-        b2 = c1 + d1;
-        c2 = a1 - b1;
-        d2 = d1 - c1;
+        let a1 = r0 + r3;
+        let b1 = r1 + r2;
+        let c1 = r1 - r2;
+        let d1 = r0 - r3;
 
-        *op.offset(0) = ((a2 + 3) >> 3) as i16;
-        *op.offset(1) = ((b2 + 3) >> 3) as i16;
-        *op.offset(2) = ((c2 + 3) >> 3) as i16;
-        *op.offset(3) = ((d2 + 3) >> 3) as i16;
+        let a2 = a1 + b1;
+        let b2 = c1 + d1;
+        let c2 = a1 - b1;
+        let d2 = d1 - c1;
 
-        ip = ip.offset(4);
-        op = op.offset(4);
+        output[base] = ((a2 + 3) >> 3) as i16;
+        output[base + 1] = ((b2 + 3) >> 3) as i16;
+        output[base + 2] = ((c2 + 3) >> 3) as i16;
+        output[base + 3] = ((d2 + 3) >> 3) as i16;
     }
+
+    // Scatter the 16 recovered DCs into the DC slot of each Y residual
+    // block (stride 16 shorts).
     for i in 0..16 {
         *mb_dqcoeff.offset((i * 16) as isize) = output[i as usize];
     }
@@ -251,7 +235,7 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *
 /// non-zero; every Y block gets the same recovered DC.
 
 pub unsafe extern "C" fn vp8_short_inv_walsh4x4_1_c(input: *mut i16, mb_dqcoeff: *mut i16) {
-    let a1: i32 = ((*input.offset(0) as i32) + 3) >> 3;
+    let a1: i32 = ((*input as i32) + 3) >> 3;
 
     for i in 0..16 {
         *mb_dqcoeff.offset((i * 16) as isize) = a1 as i16;

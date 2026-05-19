@@ -89,6 +89,10 @@ pub unsafe fn vpx_codec_dec_init_ver(
         Ok(mut dec) => {
             let priv_ptr = dec.as_ptr();
             if let Some(c) = cfg {
+                // SAFETY: `priv_ptr` was just produced by `as_ptr()` on
+                // a live `Vp8Decoder` we still own and have unique
+                // access to; no aliases exist yet (ctx.priv_/trait_obj
+                // are assigned below).
                 (*priv_ptr).cfg = *c;
             }
             // priv_ is a non-null sentinel for initialized-state

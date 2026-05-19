@@ -705,7 +705,7 @@ impl Vp8Common {
     pub fn mi_base_ptr(&mut self) -> *mut ModeInfo {
         let stride = self.mode_info_stride as usize;
         match self.mip.as_deref_mut() {
-            Some(slab) => unsafe { slab.as_mut_ptr().add(stride + 1) },
+            Some(slab) => slab[stride + 1..].as_mut_ptr(),
             None => core::ptr::null_mut(),
         }
     }

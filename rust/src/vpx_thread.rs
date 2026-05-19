@@ -105,9 +105,15 @@ unsafe fn change_state(_worker: &mut VPxWorker, _new_status: VPxWorkerStatus) {
 /// Zero the struct and set `status_` to `NOT_OK`. After this call the
 /// worker is safe to pass to `end()` even if `reset()` is never called.
 unsafe fn init(worker: &mut VPxWorker) {
-    // memset(worker, 0, sizeof(*worker)).
-    ptr::write_bytes(worker as *mut VPxWorker, 0u8, 1);
+    // C: memset(worker, 0, sizeof(*worker)). Field-wise zeroing is
+    // equivalent for this `#[repr(C)]` struct and avoids `write_bytes`.
+    worker.impl_ = ptr::null_mut();
     worker.status_ = VPX_WORKER_STATUS_NOT_OK;
+    worker.thread_name = ptr::null();
+    worker.hook = None;
+    worker.data1 = ptr::null_mut();
+    worker.data2 = ptr::null_mut();
+    worker.had_error = 0;
 }
 
 /// Wait for the worker to finish; return `!had_error`. Nothing to wait

@@ -91,8 +91,9 @@ pub unsafe fn vp8dx_bool_decoder_fill(br: *mut BoolDecoder<'_>) {
     // keep a usize cursor into `buffer` rather than a raw pointer so the
     // optional decrypt path can swap the source out for a stack buffer
     // without aliasing the borrowed slice.
-    let buffer_ptr = (*br).buffer.as_ptr();
-    let buffer_end = buffer_ptr.add((&raw const (*br).buffer).read().len());
+    let buffer_slice: &[u8] = (&raw const (*br).buffer).read();
+    let buffer_ptr = buffer_slice.as_ptr();
+    let buffer_end = buffer_ptr.add(buffer_slice.len());
     let mut bufptr: *const u8 = buffer_ptr.add((*br).pos);
 
     let mut value: BdValue = (*br).value;
@@ -108,6 +109,10 @@ pub unsafe fn vp8dx_bool_decoder_fill(br: *mut BoolDecoder<'_>) {
     if let Some(cb) = (*br).decrypt.as_mut() {
         // VPXMIN(sizeof(decrypted), bytes_left)
         let n: usize = decrypted.len().min(bytes_left);
+        // `bufptr` still points inside `(*br).buffer` at this point, so we
+        // can express the source as a safe subslice. We can't use
+        // `(*br).buffer` directly while `(*br).decrypt` is mutably
+        // borrowed, so use the previously-computed raw pointer.
         let src_slice = core::slice::from_raw_parts(bufptr, n);
         cb(src_slice, &mut decrypted[..n]);
         bufptr = decrypted.as_ptr();

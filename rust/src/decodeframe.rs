@@ -806,7 +806,10 @@ unsafe fn read_partition_size(pbi: *mut Vp8dComp<'static>, cx_size_in: *const u8
 // ---------------------------------------------------------------------------
 
 /// `read_is_valid` (vp8/decoder/decodeframe.c:673). Static helper.
-unsafe fn read_is_valid(start: *const u8, len: usize, end: *const u8) -> c_int {
+///
+/// Body performs only pointer comparisons / address arithmetic (no
+/// dereferences), so it is safe to call from safe contexts.
+fn read_is_valid(start: *const u8, len: usize, end: *const u8) -> c_int {
     let valid = len != 0 && end > start && len <= (end as usize).wrapping_sub(start as usize);
     valid as c_int
 }

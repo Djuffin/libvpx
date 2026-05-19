@@ -31,7 +31,7 @@ use crate::types::{BModeInfo, Blockd, Macroblockd, MbPredictionMode, ModeInfo, M
 /// matter — only that it is a bijection on `(row, col)` pairs — so use
 /// the same packing as `entropymode::mv_as_int`.
 #[inline]
-unsafe fn bmi_as_int(b: *const BModeInfo) -> u32 {
+fn bmi_as_int(b: &BModeInfo) -> u32 {
     match *b {
         BModeInfo::Mv(m) => ((m.col as u16 as u32) << 16) | (m.row as u16 as u32),
         BModeInfo::Intra(_) => 0,
@@ -43,40 +43,27 @@ unsafe fn bmi_as_int(b: *const BModeInfo) -> u32 {
 /// caller only touches `bmi.mv` when the parent MB is in SPLITMV (i.e.
 /// the variant is `Mv`), which mirrors the C invariant.
 #[inline]
-unsafe fn bmi_mv_mut(b: *mut BModeInfo) -> *mut Mv {
-    match &mut *b {
-        BModeInfo::Mv(m) => m as *mut Mv,
-        BModeInfo::Intra(_) => {
-            // The C union doesn't distinguish; in practice the SPLITMV
-            // path always installs an `Mv` variant before reading. Coerce
-            // by overwriting with a zero MV and re-borrowing.
-            *b = BModeInfo::Mv(Mv { row: 0, col: 0 });
-            if let BModeInfo::Mv(m) = &mut *b {
-                m as *mut Mv
-            } else {
-                unreachable!()
-            }
-        }
+fn bmi_mv_mut(b: &mut BModeInfo) -> &mut Mv {
+    if let BModeInfo::Intra(_) = b {
+        // The C union doesn't distinguish; in practice the SPLITMV
+        // path always installs an `Mv` variant before reading. Coerce
+        // by overwriting with a zero MV and re-borrowing.
+        *b = BModeInfo::Mv(Mv { row: 0, col: 0 });
+    }
+    match b {
+        BModeInfo::Mv(m) => m,
+        BModeInfo::Intra(_) => unreachable!(),
     }
 }
 
 /// Read the `Mv` payload (zero if the variant is `Intra`, matching the
 /// implicit zero-init the C union has on a fresh `BLOCKD`).
 #[inline]
-unsafe fn bmi_mv(b: *const BModeInfo) -> Mv {
+fn bmi_mv(b: &BModeInfo) -> Mv {
     match *b {
         BModeInfo::Mv(m) => m,
         BModeInfo::Intra(_) => Mv { row: 0, col: 0 },
     }
-}
-
-/// Copy an `int_mv` from src to dst (equivalent to
-/// `dst->bmi.mv.as_int = src->bmi.mv.as_int`). Preserves the `Mv`
-/// variant tag.
-#[inline]
-unsafe fn bmi_copy_int(dst: *mut BModeInfo, src: *const BModeInfo) {
-    let m = bmi_mv(src);
-    *dst = BModeInfo::Mv(m);
 }
 
 // ===========================================================================
@@ -266,7 +253,7 @@ unsafe fn build_inter_predictors_b(
 /// `clamp_mv_to_umv_border` — luma MV clamp.
 ///
 /// Source: `vp8/common/reconinter.c:257`.
-unsafe fn clamp_mv_to_umv_border(mv: *mut Mv, xd: *const Macroblockd) {
+unsafe fn clamp_mv_to_umv_border(mv: &mut Mv, xd: *const Macroblockd) {
     /* If the MV points so far into the UMV border that no visible pixels
      * are used for reconstruction, the subpel part of the MV can be
      * discarded and the MV limited to 16 pixels with equivalent results.
@@ -276,16 +263,16 @@ unsafe fn clamp_mv_to_umv_border(mv: *mut Mv, xd: *const Macroblockd) {
      * filtering. The bottom and right edges use 16 pixels plus 2 pixels
      * left of the central pixel when filtering.
      */
-    if ((*mv).col as i32) < ((*xd).mb_to_left_edge - (19 << 3)) {
-        (*mv).col = ((*xd).mb_to_left_edge - (16 << 3)) as i16;
-    } else if ((*mv).col as i32) > (*xd).mb_to_right_edge + (18 << 3) {
-        (*mv).col = ((*xd).mb_to_right_edge + (16 << 3)) as i16;
+    if (mv.col as i32) < ((*xd).mb_to_left_edge - (19 << 3)) {
+        mv.col = ((*xd).mb_to_left_edge - (16 << 3)) as i16;
+    } else if (mv.col as i32) > (*xd).mb_to_right_edge + (18 << 3) {
+        mv.col = ((*xd).mb_to_right_edge + (16 << 3)) as i16;
     }
 
-    if ((*mv).row as i32) < ((*xd).mb_to_top_edge - (19 << 3)) {
-        (*mv).row = ((*xd).mb_to_top_edge - (16 << 3)) as i16;
-    } else if ((*mv).row as i32) > (*xd).mb_to_bottom_edge + (18 << 3) {
-        (*mv).row = ((*xd).mb_to_bottom_edge + (16 << 3)) as i16;
+    if (mv.row as i32) < ((*xd).mb_to_top_edge - (19 << 3)) {
+        mv.row = ((*xd).mb_to_top_edge - (16 << 3)) as i16;
+    } else if (mv.row as i32) > (*xd).mb_to_bottom_edge + (18 << 3) {
+        mv.row = ((*xd).mb_to_bottom_edge + (16 << 3)) as i16;
     }
 }
 
@@ -293,27 +280,27 @@ unsafe fn clamp_mv_to_umv_border(mv: *mut Mv, xd: *const Macroblockd) {
 /// already-derived chroma MV; thresholds still expressed in luma units).
 ///
 /// Source: `vp8/common/reconinter.c:281`.
-unsafe fn clamp_uvmv_to_umv_border(mv: *mut Mv, xd: *const Macroblockd) {
-    (*mv).col = if 2 * ((*mv).col as i32) < ((*xd).mb_to_left_edge - (19 << 3)) {
+unsafe fn clamp_uvmv_to_umv_border(mv: &mut Mv, xd: *const Macroblockd) {
+    mv.col = if 2 * (mv.col as i32) < ((*xd).mb_to_left_edge - (19 << 3)) {
         (((*xd).mb_to_left_edge - (16 << 3)) >> 1) as i16
     } else {
-        (*mv).col
+        mv.col
     };
-    (*mv).col = if 2 * ((*mv).col as i32) > (*xd).mb_to_right_edge + (18 << 3) {
+    mv.col = if 2 * (mv.col as i32) > (*xd).mb_to_right_edge + (18 << 3) {
         (((*xd).mb_to_right_edge + (16 << 3)) >> 1) as i16
     } else {
-        (*mv).col
+        mv.col
     };
 
-    (*mv).row = if 2 * ((*mv).row as i32) < ((*xd).mb_to_top_edge - (19 << 3)) {
+    mv.row = if 2 * (mv.row as i32) < ((*xd).mb_to_top_edge - (19 << 3)) {
         (((*xd).mb_to_top_edge - (16 << 3)) >> 1) as i16
     } else {
-        (*mv).row
+        mv.row
     };
-    (*mv).row = if 2 * ((*mv).row as i32) > (*xd).mb_to_bottom_edge + (18 << 3) {
+    mv.row = if 2 * (mv.row as i32) > (*xd).mb_to_bottom_edge + (18 << 3) {
         (((*xd).mb_to_bottom_edge + (16 << 3)) >> 1) as i16
     } else {
-        (*mv).row
+        mv.row
     };
 }
 
@@ -349,7 +336,7 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
     _16x16mv = mi.mbmi.mv;
 
     if mi.mbmi.need_to_clamp_mvs {
-        clamp_mv_to_umv_border(&mut _16x16mv as *mut Mv, x);
+        clamp_mv_to_umv_border(&mut _16x16mv, x);
     }
 
     ptr = ptr_base

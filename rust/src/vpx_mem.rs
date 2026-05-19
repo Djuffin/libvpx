@@ -99,10 +99,16 @@ fn check_size_argument_overflow(nmemb: u64, size: u64) -> bool {
 
 /// `get_malloc_address_location` — return the address of the stash slot
 /// (one `ADDRESS_STORAGE_SIZE`-sized step before `mem`).
+///
+/// Pure address arithmetic — no memory is read or written here, so this
+/// is a safe `fn`. `wrapping_offset` sidesteps the provenance/overflow
+/// preconditions of `offset`; the resulting pointer is only ever
+/// dereferenced by the (unsafe) callers, who hold the real invariant
+/// that `mem` came from `vpx_memalign`.
 #[inline]
-unsafe fn get_malloc_address_location(mem: *mut c_void) -> *mut size_t {
+fn get_malloc_address_location(mem: *mut c_void) -> *mut size_t {
     // Two-word header: `[orig_ptr, orig_size]`. Step back two `usize`s.
-    (mem as *mut size_t).offset(-2)
+    (mem as *mut size_t).wrapping_offset(-2)
 }
 
 /// `get_aligned_malloc_size` — total bytes to request from the

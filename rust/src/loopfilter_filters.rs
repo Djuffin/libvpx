@@ -91,15 +91,14 @@ fn vp8_hevmask(thresh: Uc, p1: Uc, p0: Uc, q0: Uc, q1: Uc) -> i8 {
 
 /// `vp8_filter` — 4-tap inner filter. `loopfilter_filters.c:45`.
 ///
-/// # Safety
-/// `op1`, `op0`, `oq0`, `oq1` must point to four adjacent pixels across
-/// the edge in scan order.
+/// Reads the four pixels straddling the edge (`p1`, `p0`, `q0`, `q1`)
+/// and returns their filtered replacements.
 #[inline]
-unsafe fn vp8_filter(mask: i8, hev: Uc, op1: *mut u8, op0: *mut u8, oq0: *mut u8, oq1: *mut u8) {
-    let ps1: i8 = ((*op1) ^ 0x80) as i8;
-    let ps0: i8 = ((*op0) ^ 0x80) as i8;
-    let qs0: i8 = ((*oq0) ^ 0x80) as i8;
-    let qs1: i8 = ((*oq1) ^ 0x80) as i8;
+fn vp8_filter(mask: i8, hev: Uc, p1_in: u8, p0_in: u8, q0_in: u8, q1_in: u8) -> (u8, u8, u8, u8) {
+    let ps1: i8 = (p1_in ^ 0x80) as i8;
+    let ps0: i8 = (p0_in ^ 0x80) as i8;
+    let qs0: i8 = (q0_in ^ 0x80) as i8;
+    let qs1: i8 = (q1_in ^ 0x80) as i8;
 
     /* add outer taps if we have high edge variance */
     let mut filter_value: i8 = vp8_signed_char_clamp(ps1 as i32 - qs1 as i32);
@@ -118,9 +117,9 @@ unsafe fn vp8_filter(mask: i8, hev: Uc, op1: *mut u8, op0: *mut u8, oq0: *mut u8
     Filter1 >>= 3;
     Filter2 >>= 3;
     let mut u: i8 = vp8_signed_char_clamp(qs0 as i32 - Filter1 as i32);
-    *oq0 = (u as u8) ^ 0x80;
+    let oq0 = (u as u8) ^ 0x80;
     u = vp8_signed_char_clamp(ps0 as i32 + Filter2 as i32);
-    *op0 = (u as u8) ^ 0x80;
+    let op0 = (u as u8) ^ 0x80;
     filter_value = Filter1;
 
     /* outer tap adjustments */
@@ -129,9 +128,10 @@ unsafe fn vp8_filter(mask: i8, hev: Uc, op1: *mut u8, op0: *mut u8, oq0: *mut u8
     filter_value &= !(hev as i8);
 
     u = vp8_signed_char_clamp(qs1 as i32 - filter_value as i32);
-    *oq1 = (u as u8) ^ 0x80;
+    let oq1 = (u as u8) ^ 0x80;
     u = vp8_signed_char_clamp(ps1 as i32 + filter_value as i32);
-    *op1 = (u as u8) ^ 0x80;
+    let op1 = (u as u8) ^ 0x80;
+    (op1, op0, oq0, oq1)
 }
 
 /// `loop_filter_horizontal_edge_c`. `loopfilter_filters.c:90`.
@@ -174,14 +174,14 @@ unsafe fn loop_filter_horizontal_edge_c(
             *s.offset(1 * p as isize),
         ) as i32;
 
-        vp8_filter(
-            mask,
-            hev as u8,
-            s.offset(-2 * p as isize),
-            s.offset(-1 * p as isize),
-            s,
-            s.offset(1 * p as isize),
-        );
+        let pm2 = s.offset(-2 * p as isize);
+        let pm1 = s.offset(-1 * p as isize);
+        let pp1 = s.offset(1 * p as isize);
+        let (np1, np0, nq0, nq1) = vp8_filter(mask, hev as u8, *pm2, *pm1, *s, *pp1);
+        *pm2 = np1;
+        *pm1 = np0;
+        *s = nq0;
+        *pp1 = nq1;
 
         s = s.add(1);
         i += 1;
@@ -228,7 +228,14 @@ unsafe fn loop_filter_vertical_edge_c(
             *s.offset(1),
         ) as i32;
 
-        vp8_filter(mask, hev as u8, s.offset(-2), s.offset(-1), s, s.offset(1));
+        let pm2 = s.offset(-2);
+        let pm1 = s.offset(-1);
+        let pp1 = s.offset(1);
+        let (np1, np0, nq0, nq1) = vp8_filter(mask, hev as u8, *pm2, *pm1, *s, *pp1);
+        *pm2 = np1;
+        *pm1 = np0;
+        *s = nq0;
+        *pp1 = nq1;
 
         s = s.offset(p as isize);
         i += 1;
@@ -245,30 +252,30 @@ unsafe fn loop_filter_vertical_edge_c(
 /// `vp8_mbfilter` — 7-pixel macroblock-edge filter.
 /// `loopfilter_filters.c:138`.
 ///
-/// # Safety
-/// All six output pointers must be adjacent pixels in scan order.
+/// Reads the six pixels straddling the macroblock edge and returns their
+/// filtered replacements in scan order (`p2`, `p1`, `p0`, `q0`, `q1`, `q2`).
 #[inline]
-unsafe fn vp8_mbfilter(
+fn vp8_mbfilter(
     mask: i8,
     hev: Uc,
-    op2: *mut u8,
-    op1: *mut u8,
-    op0: *mut u8,
-    oq0: *mut u8,
-    oq1: *mut u8,
-    oq2: *mut u8,
-) {
+    p2_in: u8,
+    p1_in: u8,
+    p0_in: u8,
+    q0_in: u8,
+    q1_in: u8,
+    q2_in: u8,
+) -> (u8, u8, u8, u8, u8, u8) {
     let mut s: i8;
     let mut u: i8;
     let mut filter_value: i8;
     let mut Filter1: i8;
     let mut Filter2: i8;
-    let ps2: i8 = ((*op2) ^ 0x80) as i8;
-    let ps1: i8 = ((*op1) ^ 0x80) as i8;
-    let mut ps0: i8 = ((*op0) ^ 0x80) as i8;
-    let mut qs0: i8 = ((*oq0) ^ 0x80) as i8;
-    let qs1: i8 = ((*oq1) ^ 0x80) as i8;
-    let qs2: i8 = ((*oq2) ^ 0x80) as i8;
+    let ps2: i8 = (p2_in ^ 0x80) as i8;
+    let ps1: i8 = (p1_in ^ 0x80) as i8;
+    let mut ps0: i8 = (p0_in ^ 0x80) as i8;
+    let mut qs0: i8 = (q0_in ^ 0x80) as i8;
+    let qs1: i8 = (q1_in ^ 0x80) as i8;
+    let qs2: i8 = (q2_in ^ 0x80) as i8;
 
     /* add outer taps if we have high edge variance */
     filter_value = vp8_signed_char_clamp(ps1 as i32 - qs1 as i32);
@@ -293,23 +300,24 @@ unsafe fn vp8_mbfilter(
     /* roughly 3/7th difference across boundary */
     u = vp8_signed_char_clamp((63 + Filter2 as i32 * 27) >> 7);
     s = vp8_signed_char_clamp(qs0 as i32 - u as i32);
-    *oq0 = (s as u8) ^ 0x80;
+    let oq0 = (s as u8) ^ 0x80;
     s = vp8_signed_char_clamp(ps0 as i32 + u as i32);
-    *op0 = (s as u8) ^ 0x80;
+    let op0 = (s as u8) ^ 0x80;
 
     /* roughly 2/7th difference across boundary */
     u = vp8_signed_char_clamp((63 + Filter2 as i32 * 18) >> 7);
     s = vp8_signed_char_clamp(qs1 as i32 - u as i32);
-    *oq1 = (s as u8) ^ 0x80;
+    let oq1 = (s as u8) ^ 0x80;
     s = vp8_signed_char_clamp(ps1 as i32 + u as i32);
-    *op1 = (s as u8) ^ 0x80;
+    let op1 = (s as u8) ^ 0x80;
 
     /* roughly 1/7th difference across boundary */
     u = vp8_signed_char_clamp((63 + Filter2 as i32 * 9) >> 7);
     s = vp8_signed_char_clamp(qs2 as i32 - u as i32);
-    *oq2 = (s as u8) ^ 0x80;
+    let oq2 = (s as u8) ^ 0x80;
     s = vp8_signed_char_clamp(ps2 as i32 + u as i32);
-    *op2 = (s as u8) ^ 0x80;
+    let op2 = (s as u8) ^ 0x80;
+    (op2, op1, op0, oq0, oq1, oq2)
 }
 
 /// `mbloop_filter_horizontal_edge_c`. `loopfilter_filters.c:191`.
@@ -349,16 +357,19 @@ unsafe fn mbloop_filter_horizontal_edge_c(
             *s.offset(1 * p as isize),
         );
 
-        vp8_mbfilter(
-            mask,
-            hev as u8,
-            s.offset(-3 * p as isize),
-            s.offset(-2 * p as isize),
-            s.offset(-1 * p as isize),
-            s,
-            s.offset(1 * p as isize),
-            s.offset(2 * p as isize),
-        );
+        let pm3 = s.offset(-3 * p as isize);
+        let pm2 = s.offset(-2 * p as isize);
+        let pm1 = s.offset(-1 * p as isize);
+        let pp1 = s.offset(1 * p as isize);
+        let pp2 = s.offset(2 * p as isize);
+        let (np2, np1, np0, nq0, nq1, nq2) =
+            vp8_mbfilter(mask, hev as u8, *pm3, *pm2, *pm1, *s, *pp1, *pp2);
+        *pm3 = np2;
+        *pm2 = np1;
+        *pm1 = np0;
+        *s = nq0;
+        *pp1 = nq1;
+        *pp2 = nq2;
 
         s = s.add(1);
         i += 1;
@@ -405,16 +416,19 @@ unsafe fn mbloop_filter_vertical_edge_c(
             *s.offset(1),
         );
 
-        vp8_mbfilter(
-            mask,
-            hev as u8,
-            s.offset(-3),
-            s.offset(-2),
-            s.offset(-1),
-            s,
-            s.offset(1),
-            s.offset(2),
-        );
+        let pm3 = s.offset(-3);
+        let pm2 = s.offset(-2);
+        let pm1 = s.offset(-1);
+        let pp1 = s.offset(1);
+        let pp2 = s.offset(2);
+        let (np2, np1, np0, nq0, nq1, nq2) =
+            vp8_mbfilter(mask, hev as u8, *pm3, *pm2, *pm1, *s, *pp1, *pp2);
+        *pm3 = np2;
+        *pm2 = np1;
+        *pm1 = np0;
+        *s = nq0;
+        *pp1 = nq1;
+        *pp2 = nq2;
 
         s = s.offset(p as isize);
         i += 1;
@@ -447,18 +461,18 @@ fn vp8_simple_filter_mask(blimit: Uc, p1: Uc, p0: Uc, q0: Uc, q1: Uc) -> i8 {
 
 /// `vp8_simple_filter`. `loopfilter_filters.c:248`.
 ///
-/// # Safety
-/// `op1`, `op0`, `oq0`, `oq1` must point to four adjacent pixels across
-/// the edge in scan order.
+/// Reads the four pixels straddling the edge and returns the two filtered
+/// inner pixels (`p0_new`, `q0_new`). The outer two (`p1`, `q1`) are
+/// unchanged by this kernel.
 #[inline]
-unsafe fn vp8_simple_filter(mask: i8, op1: *mut u8, op0: *mut u8, oq0: *mut u8, oq1: *mut u8) {
+fn vp8_simple_filter(mask: i8, p1_in: u8, p0_in: u8, q0_in: u8, q1_in: u8) -> (u8, u8) {
     let mut filter_value: i8;
     let mut Filter1: i8;
     let mut Filter2: i8;
-    let p1: i8 = ((*op1) ^ 0x80) as i8;
-    let p0: i8 = ((*op0) ^ 0x80) as i8;
-    let q0: i8 = ((*oq0) ^ 0x80) as i8;
-    let q1: i8 = ((*oq1) ^ 0x80) as i8;
+    let p1: i8 = (p1_in ^ 0x80) as i8;
+    let p0: i8 = (p0_in ^ 0x80) as i8;
+    let q0: i8 = (q0_in ^ 0x80) as i8;
+    let q1: i8 = (q1_in ^ 0x80) as i8;
     let mut u: i8;
 
     filter_value = vp8_signed_char_clamp(p1 as i32 - q1 as i32);
@@ -469,12 +483,13 @@ unsafe fn vp8_simple_filter(mask: i8, op1: *mut u8, op0: *mut u8, oq0: *mut u8, 
     Filter1 = vp8_signed_char_clamp(filter_value as i32 + 4);
     Filter1 >>= 3;
     u = vp8_signed_char_clamp(q0 as i32 - Filter1 as i32);
-    *oq0 = (u as u8) ^ 0x80;
+    let oq0 = (u as u8) ^ 0x80;
 
     Filter2 = vp8_signed_char_clamp(filter_value as i32 + 3);
     Filter2 >>= 3;
     u = vp8_signed_char_clamp(p0 as i32 + Filter2 as i32);
-    *op0 = (u as u8) ^ 0x80;
+    let op0 = (u as u8) ^ 0x80;
+    (op0, oq0)
 }
 
 // ===========================================================================
@@ -503,13 +518,16 @@ pub unsafe fn vp8_loop_filter_simple_horizontal_edge_c(
             *y_ptr.offset(0 * y_stride as isize),
             *y_ptr.offset(1 * y_stride as isize),
         );
-        vp8_simple_filter(
+        let pm1 = y_ptr.offset(-1 * y_stride as isize);
+        let (np0, nq0) = vp8_simple_filter(
             mask,
-            y_ptr.offset(-2 * y_stride as isize),
-            y_ptr.offset(-1 * y_stride as isize),
-            y_ptr,
-            y_ptr.offset(1 * y_stride as isize),
+            *y_ptr.offset(-2 * y_stride as isize),
+            *pm1,
+            *y_ptr,
+            *y_ptr.offset(1 * y_stride as isize),
         );
+        *pm1 = np0;
+        *y_ptr = nq0;
         y_ptr = y_ptr.add(1);
         i += 1;
         if i >= 16 {
@@ -540,13 +558,11 @@ pub unsafe fn vp8_loop_filter_simple_vertical_edge_c(
             *y_ptr.offset(0),
             *y_ptr.offset(1),
         );
-        vp8_simple_filter(
-            mask,
-            y_ptr.offset(-2),
-            y_ptr.offset(-1),
-            y_ptr,
-            y_ptr.offset(1),
-        );
+        let pm1 = y_ptr.offset(-1);
+        let (np0, nq0) =
+            vp8_simple_filter(mask, *y_ptr.offset(-2), *pm1, *y_ptr, *y_ptr.offset(1));
+        *pm1 = np0;
+        *y_ptr = nq0;
         y_ptr = y_ptr.offset(y_stride as isize);
         i += 1;
         if i >= 16 {

@@ -66,23 +66,21 @@ use crate::vpx_scale_rtcd::vp8_yv12_copy_frame;
 /// `static void initialize_dec(void)` — `vp8/decoder/onyxd_if.c:48`.
 ///
 /// Process-wide one-shot init. Invoked through `once()` from
-/// [`create_decompressor`]; the `volatile` guard is defensive — the
-/// real serialization happens in `once()`.
+/// [`create_decompressor`]. The C source has a `volatile int init_done`
+/// guard that is defensive — the real serialization happens in
+/// `once()`, so we drop the dead inner check. Remains `unsafe fn` to
+/// satisfy `once()`'s `unsafe fn` signature and because
+/// `vp8_init_intra_predictors` is itself `unsafe`.
 unsafe fn initialize_dec() {
-    static mut INIT_DONE: i32 = 0;
-
-    if INIT_DONE == 0 {
-        vpx_dsp_rtcd();
-        vp8_init_intra_predictors();
-        INIT_DONE = 1;
-    }
+    vpx_dsp_rtcd();
+    vp8_init_intra_predictors();
 }
 
 /// `static void remove_decompressor(VP8D_COMP *)` — `vp8/decoder/onyxd_if.c:58`.
 /// `static struct VP8D_COMP *create_decompressor(VP8D_CONFIG *)` —
 /// `vp8/decoder/onyxd_if.c:66`. Returns `None` if initialization fails;
 /// the half-initialized instance is torn down before return.
-unsafe fn create_decompressor(oxcf: &Vp8dConfig) -> Option<Box<Vp8dComp<'static>>> {
+fn create_decompressor(oxcf: &Vp8dConfig) -> Option<Box<Vp8dComp<'static>>> {
     // Allocate the outer shell zero-initialised on the heap. The C
     // source uses `vpx_memalign(32, sizeof(VP8D_COMP)) + memset(0, ...)`;
     // `Box::new_zeroed` is the same byte pattern. The function-pointer
@@ -90,11 +88,21 @@ unsafe fn create_decompressor(oxcf: &Vp8dConfig) -> Option<Box<Vp8dComp<'static>
     // thus zero-init is technically UB until they are written in
     // `init_frame`; this matches the literal-transliteration policy
     // the rest of the port follows.
+    //
+    // SAFETY of `assume_init`: every field of `Vp8dComp` is either
+    // `Copy`/POD or `Option<…>` whose all-zero bit pattern is the
+    // `None` discriminant — except for the non-nullable subpixel-
+    // predict function pointers on `Macroblockd`, which are written
+    // before first use by `init_frame`. We mirror the C source's
+    // policy here.
     let mut pbi: Box<Vp8dComp<'static>> =
-        Box::<Vp8dComp<'static>>::new_zeroed().assume_init();
+        unsafe { Box::<Vp8dComp<'static>>::new_zeroed().assume_init() };
     let pbi_ptr: *mut Vp8dComp<'static> = &mut *pbi;
 
-    match create_decompressor_inner(pbi_ptr, oxcf) {
+    // SAFETY: `pbi_ptr` is a valid, exclusive pointer to a freshly
+    // zero-initialised `Vp8dComp` (the `Box` is uniquely owned and
+    // not aliased before this call returns).
+    match unsafe { create_decompressor_inner(pbi_ptr, oxcf) } {
         Ok(()) => Some(pbi),
         Err(_) => {
             vp8_remove_common(&mut pbi.common);
@@ -458,17 +466,16 @@ pub fn vp8dx_references_buffer(oci: &Vp8Common, ref_frame: i32) -> i32 {
 
 /// `vp8_create_decoder_instances` — `vp8/decoder/onyxd_if.c:424`.
 ///
-/// `create_decompressor` stays `unsafe` (it constructs a `Vp8dComp`
-/// whose non-nullable function-pointer fields are zero-initialised
-/// until `init_frame` writes them — UB by letter of spec). The
-/// boundary here is safe because the only caller side-effect on
-/// success is `fb.pbi = Some(box)`, which is a plain field write.
+/// `create_decompressor` is a safe wrapper that encapsulates the
+/// `assume_init` / raw-pointer dance internally; the boundary here is
+/// safe because the only caller side-effect on success is
+/// `fb.pbi = Some(box)`, which is a plain field write.
 pub fn vp8_create_decoder_instances(
     fb: &mut FrameBuffers<'static>,
     oxcf: &Vp8dConfig,
 ) -> i32 {
     // decoder instance for single thread mode
-    match unsafe { create_decompressor(oxcf) } {
+    match create_decompressor(oxcf) {
         Some(b) => {
             fb.pbi = Some(b);
             // CONFIG_MULTITHREAD branch omitted on this build.
