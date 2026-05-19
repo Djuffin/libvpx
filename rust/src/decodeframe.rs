@@ -131,11 +131,8 @@ pub unsafe fn vp8cx_init_de_quantizer(pbi: *mut Vp8dComp<'static>) {
 /// remaining `unsafe` deref is `mb.mode_info_context`, which points
 /// into `common.mip` and is therefore an alias we can't express as a
 /// safe reborrow until the MI grid itself is converted.
-pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd) {
-    // SAFETY: `mode_info_context` is a kernel-internal cursor into
-    // `common.mip`; the deref is sound by the same invariant that the
-    // rest of the kernel relies on.
-    let segment_id = unsafe { (*mb.mode_info_context).mbmi.segment_id as usize };
+pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd, mi: &ModeInfo) {
+    let segment_id = mi.mbmi.segment_id as usize;
 
     /* Decide whether to use the default or alternate baseline Q value. */
     let qi: usize = (if mb.segmentation_enabled != 0 {
@@ -172,30 +169,32 @@ pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd) {
 unsafe fn decode_macroblock(
     pbi: *mut Vp8dComp<'static>,
     xd: *mut Macroblockd,
+    mi: &mut ModeInfo,
     mb_col: c_int,
     bc: *mut Vp8Reader<'static>,
 ) {
     let mode: MbPredictionMode;
 
-    if (*(*xd).mode_info_context).mbmi.mb_skip_coeff {
-        vp8_reset_mb_tokens_context(pbi, xd, mb_col);
+    if mi.mbmi.mb_skip_coeff {
+        vp8_reset_mb_tokens_context(pbi, mi, mb_col);
     } else if vp8dx_bool_error(bc) == 0 {
-        let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd, mb_col, bc);
+        let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd, mi, mb_col, bc);
 
         /* Special case:  Force the loopfilter to skip when eobtotal is zero */
-        (*(*xd).mode_info_context).mbmi.mb_skip_coeff = eobtotal == 0;
+        mi.mbmi.mb_skip_coeff = eobtotal == 0;
     }
 
-    mode = (*(*xd).mode_info_context).mbmi.mode;
+    mode = mi.mbmi.mode;
 
     if (*xd).segmentation_enabled != 0 {
-        vp8_mb_init_dequantizer(&(*pbi).common, &mut *xd);
+        vp8_mb_init_dequantizer(&(*pbi).common, &mut *xd, mi);
     }
 
     /* do prediction */
-    if (*(*xd).mode_info_context).mbmi.ref_frame == MvReferenceFrame::Intra {
+    if mi.mbmi.ref_frame == MvReferenceFrame::Intra {
         vp8_build_intra_predictors_mbuv_s(
             xd,
+            mi,
             (*xd).recon_above[1],
             (*xd).recon_above[2],
             (*xd).recon_left[1],
@@ -209,6 +208,7 @@ unsafe fn decode_macroblock(
         if mode != B_PRED {
             vp8_build_intra_predictors_mby_s(
                 xd,
+                mi,
                 (*xd).recon_above[0],
                 (*xd).recon_left[0],
                 (*xd).recon_left_stride[0],
@@ -220,7 +220,7 @@ unsafe fn decode_macroblock(
             let dst_stride: c_int = (*xd).dst.y_stride;
 
             /* clear out residual eob info */
-            if (*(*xd).mode_info_context).mbmi.mb_skip_coeff {
+            if mi.mbmi.mb_skip_coeff {
                 ptr::write_bytes((*xd).eobs.as_mut_ptr(), 0, 25);
             }
 
@@ -233,7 +233,7 @@ unsafe fn decode_macroblock(
                 // sub-block slot. In C this is `bmi[i].as_mode` — a plain
                 // `B_PREDICTION_MODE`.
                 let b_mode_val: crate::types::BPredictionMode =
-                    match (*(*xd).mode_info_context).bmi[i as usize] {
+                    match mi.bmi[i as usize] {
                         crate::types::BModeInfo::Intra(m) => m,
                         // SPLITMV path stores an Mv here; in B_PRED context this
                         // branch should be unreachable, but mirror C's behaviour
@@ -279,10 +279,10 @@ unsafe fn decode_macroblock(
             }
         }
     } else {
-        vp8_build_inter_predictors_mb(xd);
+        vp8_build_inter_predictors_mb(xd, mi);
     }
 
-    if !(*(*xd).mode_info_context).mbmi.mb_skip_coeff {
+    if !mi.mbmi.mb_skip_coeff {
         /* dequantization and idct */
         if mode != B_PRED {
             let mut DQC: *mut i16 = (*xd).dequant_y1.as_mut_ptr();
@@ -565,7 +565,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
     let pc: *mut Vp8Common = &mut (*pbi).common;
     let xd: *mut Macroblockd = &mut (*pbi).mb;
 
-    let mut lf_mic: *mut ModeInfo = (*xd).mode_info_context;
 
     let mut ibc: c_int = 0;
     let num_part: c_int = 1 << ((*pc).multi_token_partition as c_int);
@@ -677,6 +676,11 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             (*xd).dst.uv_stride,
         );
 
+        // Hoist the per-row slice once so the inner loop is a single
+        // `slice[col]` index (multiply-by-stride done up front, not
+        // per-MB).
+        let mi_row: &mut [ModeInfo] = (*pc).mi_row_mut(mb_row);
+
         mb_col = 0;
         while mb_col < (*pc).mb_cols {
             /* Distance of Mb to the various image edges. */
@@ -687,8 +691,9 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             (*xd).dst.u_buffer = dst_buffer[1].offset(recon_uvoffset as isize);
             (*xd).dst.v_buffer = dst_buffer[2].offset(recon_uvoffset as isize);
 
-            if (*(*xd).mode_info_context).mbmi.ref_frame as u8 >= LAST_FRAME as u8 {
-                let ref_idx = (*(*xd).mode_info_context).mbmi.ref_frame as usize;
+            let mi: &mut ModeInfo = &mut mi_row[mb_col as usize];
+            if mi.mbmi.ref_frame as u8 >= LAST_FRAME as u8 {
+                let ref_idx = mi.mbmi.ref_frame as usize;
                 (*xd).pre.y_buffer = ref_buffer[ref_idx][0].offset(recon_yoffset as isize);
                 (*xd).pre.u_buffer = ref_buffer[ref_idx][1].offset(recon_uvoffset as isize);
                 (*xd).pre.v_buffer = ref_buffer[ref_idx][2].offset(recon_uvoffset as isize);
@@ -700,9 +705,9 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             }
 
             /* propagate errors from reference frames */
-            (*xd).corrupted |= ref_fb_corrupted[(*(*xd).mode_info_context).mbmi.ref_frame as usize];
+            (*xd).corrupted |= ref_fb_corrupted[mi.mbmi.ref_frame as usize];
 
-            decode_macroblock(pbi, xd, mb_col, bc);
+            decode_macroblock(pbi, xd, mi, mb_col, bc);
 
             (*xd).left_available = true;
 
@@ -719,8 +724,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             recon_yoffset += 16;
             recon_uvoffset += 8;
 
-            (*xd).mode_info_context = (*xd).mode_info_context.add(1); /* next mb */
-
             mb_col += 1;
         }
 
@@ -732,7 +735,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             (*xd).dst.v_buffer.add(8),
         );
 
-        (*xd).mode_info_context = (*xd).mode_info_context.add(1); /* skip prediction column */
         (*xd).up_available = true;
 
         if (*pc).filter_level != 0 {
@@ -740,7 +742,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
                 if (*pc).filter_type == NORMAL_LOOPFILTER {
                     vp8_loop_filter_row_normal(
                         pc,
-                        lf_mic,
                         mb_row - 1,
                         recon_y_stride,
                         recon_uv_stride,
@@ -749,7 +750,7 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
                         lf_dst[2],
                     );
                 } else {
-                    vp8_loop_filter_row_simple(pc, lf_mic, mb_row - 1, recon_y_stride, lf_dst[0]);
+                    vp8_loop_filter_row_simple(pc, mb_row - 1, recon_y_stride, lf_dst[0]);
                 }
                 if mb_row > 1 {
                     yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
@@ -762,8 +763,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
                 lf_dst[0] = lf_dst[0].offset((recon_y_stride * 16) as isize);
                 lf_dst[1] = lf_dst[1].offset((recon_uv_stride * 8) as isize);
                 lf_dst[2] = lf_dst[2].offset((recon_uv_stride * 8) as isize);
-                lf_mic = lf_mic.offset((*pc).mb_cols as isize);
-                lf_mic = lf_mic.offset(1); /* Skip border mb */
             }
         } else {
             if mb_row > 0 {
@@ -781,7 +780,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
         if (*pc).filter_type == NORMAL_LOOPFILTER {
             vp8_loop_filter_row_normal(
                 pc,
-                lf_mic,
                 mb_row - 1,
                 recon_y_stride,
                 recon_uv_stride,
@@ -790,7 +788,7 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
                 lf_dst[2],
             );
         } else {
-            vp8_loop_filter_row_simple(pc, lf_mic, mb_row - 1, recon_y_stride, lf_dst[0]);
+            vp8_loop_filter_row_simple(pc, mb_row - 1, recon_y_stride, lf_dst[0]);
         }
 
         yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
@@ -1050,9 +1048,8 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
         // decoded_key_frame/ec_enabled/ec_active toggle is also off.
     }
 
-    (*xd).mode_info_context = (*pc).mi_base_ptr();
     (*xd).frame_type = (*pc).frame_type;
-    (*(*xd).mode_info_context).mbmi.mode = DC_PRED;
+    (*pc).mi_mut(0, 0).mbmi.mode = DC_PRED;
     (*xd).mode_info_stride = (*pc).mode_info_stride;
     (*xd).corrupted = 0; /* init without corruption */
 
@@ -1324,7 +1321,9 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
         }
 
         /* MB level dequantizer setup */
-        vp8_mb_init_dequantizer(&(*pbi).common, &mut (*pbi).mb);
+        let pc_ref = &(*pbi).common;
+        let mi = pc_ref.mi(0, 0);
+        vp8_mb_init_dequantizer(pc_ref, &mut (*pbi).mb, mi);
     }
 
     /* Determine if GF/ARF buffers should be updated and how. */

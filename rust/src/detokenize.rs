@@ -15,7 +15,7 @@
 use crate::tables::Prob;
 use crate::types::{
     BD_VALUE_BITS, BdValue, BoolDecoder, EntropyContext, EntropyContextPlanes, FrameContext,
-    Macroblockd, Vp8dComp,
+    Macroblockd, ModeInfo, Vp8dComp,
 };
 
 // ===========================================================================
@@ -207,7 +207,7 @@ unsafe fn GetCoeffs(
 /// preserve whatever Y2 context the previous MB left there.
 pub unsafe fn vp8_reset_mb_tokens_context(
     dx: *mut Vp8dComp<'static>,
-    x: *mut Macroblockd,
+    mi: &ModeInfo,
     mb_col: i32,
 ) {
     let a_ctx: *mut EntropyContext = &mut (*dx).common.above_context.as_deref_mut().unwrap()
@@ -218,7 +218,7 @@ pub unsafe fn vp8_reset_mb_tokens_context(
     core::ptr::write_bytes(l_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
 
     /* Clear entropy contexts for Y2 blocks */
-    if !(*(*x).mode_info_context).mbmi.is_4x4 {
+    if !mi.mbmi.is_4x4 {
         *a_ctx.offset(8) = 0;
         *l_ctx.offset(8) = 0;
     }
@@ -237,6 +237,7 @@ pub unsafe fn vp8_reset_mb_tokens_context(
 pub unsafe fn vp8_decode_mb_tokens(
     dx: *mut Vp8dComp<'static>,
     x: *mut Macroblockd,
+    mi: &ModeInfo,
     mb_col: i32,
     bc: *mut BoolDecoder<'static>,
 ) -> i32 {
@@ -257,7 +258,7 @@ pub unsafe fn vp8_decode_mb_tokens(
 
     let mut qcoeff_ptr: *mut i16 = (*x).qcoeff.as_mut_ptr();
 
-    if !(*(*x).mode_info_context).mbmi.is_4x4 {
+    if !mi.mbmi.is_4x4 {
         a = a_ctx.offset(8);
         l = l_ctx.offset(8);
 

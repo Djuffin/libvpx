@@ -476,7 +476,6 @@ pub struct Macroblockd {
     /// Destination (current frame) descriptor.
     pub dst: Yv12BufferConfig,
 
-    pub mode_info_context: *mut ModeInfo,
     pub mode_info_stride: i32,
 
     pub frame_type: FrameType,
@@ -713,6 +712,58 @@ impl Vp8Common {
             Some(slab) => unsafe { slab.as_mut_ptr().add(stride + 1) },
             None => core::ptr::null_mut(),
         }
+    }
+
+    /// Linear index of cell `(row, col)` inside the MI slab. Both
+    /// arguments may be `-1` (top/left padding); the slab is sized
+    /// `(mb_cols+1)*(mb_rows+1)` for exactly this purpose, so the
+    /// padding cells are real (zero-initialised) entries.
+    #[inline]
+    fn mi_linear_index(&self, row: i32, col: i32) -> usize {
+        let stride = self.mode_info_stride as usize;
+        ((row + 1) as usize) * stride + ((col + 1) as usize)
+    }
+
+    /// Shared reference to the `(row, col)` cell.
+    #[inline]
+    pub fn mi(&self, row: i32, col: i32) -> &ModeInfo {
+        let idx = self.mi_linear_index(row, col);
+        &self.mip.as_deref().expect("MI grid not allocated")[idx]
+    }
+
+    /// Unique reference to the `(row, col)` cell.
+    #[inline]
+    pub fn mi_mut(&mut self, row: i32, col: i32) -> &mut ModeInfo {
+        let idx = self.mi_linear_index(row, col);
+        &mut self.mip.as_deref_mut().expect("MI grid not allocated")[idx]
+    }
+
+    /// Shared references to the neighbour cells. Always valid (the
+    /// padding row+column at the top and left make `(-1, c)` /
+    /// `(r, -1)` / `(-1, -1)` real entries).
+    #[inline] pub fn mi_left(&self, row: i32, col: i32) -> &ModeInfo { self.mi(row, col - 1) }
+    #[inline] pub fn mi_above(&self, row: i32, col: i32) -> &ModeInfo { self.mi(row - 1, col) }
+    #[inline] pub fn mi_above_left(&self, row: i32, col: i32) -> &ModeInfo {
+        self.mi(row - 1, col - 1)
+    }
+
+    /// `mb_cols`-long slice covering the visible MBs of `row`.
+    /// Hoists the multiply out of per-MB hot loops.
+    #[inline]
+    pub fn mi_row_mut(&mut self, row: i32) -> &mut [ModeInfo] {
+        let stride = self.mode_info_stride as usize;
+        let start = ((row + 1) as usize) * stride + 1;
+        let mb_cols = self.mb_cols as usize;
+        &mut self.mip.as_deref_mut().expect("MI grid not allocated")[start..start + mb_cols]
+    }
+
+    /// Shared variant of [`Vp8Common::mi_row_mut`].
+    #[inline]
+    pub fn mi_row(&self, row: i32) -> &[ModeInfo] {
+        let stride = self.mode_info_stride as usize;
+        let start = ((row + 1) as usize) * stride + 1;
+        let mb_cols = self.mb_cols as usize;
+        &self.mip.as_deref().expect("MI grid not allocated")[start..start + mb_cols]
     }
 }
 

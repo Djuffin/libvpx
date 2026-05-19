@@ -12,7 +12,7 @@
 
 #![allow(non_upper_case_globals)]
 
-use crate::types::{Macroblockd, MbPredictionMode};
+use crate::types::{Macroblockd, MbPredictionMode, ModeInfo};
 
 // ---------------------------------------------------------------------------
 // extern dependencies (translated in other modules)
@@ -98,13 +98,14 @@ unsafe fn vp8_init_intra_predictors_internal() {
 /// `x->left_available` / `x->up_available` and `x->mode_info_context`.
 pub unsafe fn vp8_build_intra_predictors_mby_s(
     x: *mut Macroblockd,
+    mi: &ModeInfo,
     yabove_row: *mut u8,
     yleft: *mut u8,
     left_stride: i32,
     ypred_ptr: *mut u8,
     y_stride: i32,
 ) {
-    let mode: MbPredictionMode = (*(*x).mode_info_context).mbmi.mode;
+    let mode: MbPredictionMode = mi.mbmi.mode;
     // DECLARE_ALIGNED(16, uint8_t, yleft_col[16])
     #[repr(align(16))]
     struct Aligned16([u8; 16]);
@@ -131,6 +132,7 @@ pub unsafe fn vp8_build_intra_predictors_mby_s(
 /// per RFC 6386 §13.4.
 pub unsafe fn vp8_build_intra_predictors_mbuv_s(
     x: *mut Macroblockd,
+    mi: &ModeInfo,
     uabove_row: *mut u8,
     vabove_row: *mut u8,
     uleft: *mut u8,
@@ -140,7 +142,7 @@ pub unsafe fn vp8_build_intra_predictors_mbuv_s(
     vpred_ptr: *mut u8,
     pred_stride: i32,
 ) {
-    let uvmode: MbPredictionMode = (*(*x).mode_info_context).mbmi.uv_mode;
+    let uvmode: MbPredictionMode = mi.mbmi.uv_mode;
     // The C source uses `#if HAVE_VSX` to reserve 16 bytes on PowerPC
     // VSX builds (which load full 128-bit vectors). We unconditionally
     // reserve 16 bytes — minor stack overhead, no UB on any backend.

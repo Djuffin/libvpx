@@ -10,7 +10,7 @@
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
 
-use crate::types::{BModeInfo, Blockd, Macroblockd, MbPredictionMode, Mv, SubpixFn};
+use crate::types::{BModeInfo, Blockd, Macroblockd, MbPredictionMode, ModeInfo, Mv, SubpixFn};
 
 // ===========================================================================
 // External dependencies (sub-pel filter kernels — defined in `filter.c`
@@ -372,6 +372,7 @@ unsafe fn clamp_uvmv_to_umv_border(mv: *mut Mv, xd: *const Macroblockd) {
 /// Source: `vp8/common/reconinter.c:297`.
 pub unsafe fn vp8_build_inter16x16_predictors_mb(
     x: *mut Macroblockd,
+    mi: &ModeInfo,
     dst_y: *mut u8,
     dst_u: *mut u8,
     dst_v: *mut u8,
@@ -390,9 +391,9 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
     let ptr_base: *mut u8 = (*x).pre.y_buffer;
     let mut pre_stride: i32 = (*x).pre.y_stride;
 
-    _16x16mv = (*(*x).mode_info_context).mbmi.mv;
+    _16x16mv = mi.mbmi.mv;
 
-    if (*(*x).mode_info_context).mbmi.need_to_clamp_mvs {
+    if mi.mbmi.need_to_clamp_mvs {
         clamp_mv_to_umv_border(&mut _16x16mv as *mut Mv, x);
     }
 
@@ -474,19 +475,19 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
 /// SPLITMV macroblock into the destination YV12.
 ///
 /// Source: `vp8/common/reconinter.c:359`.
-unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
+unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd, mi: &ModeInfo) {
     let mut base_dst: *mut u8 = (*x).dst.y_buffer;
     let mut base_pre: *mut u8 = (*x).pre.y_buffer;
 
-    if (*(*x).mode_info_context).mbmi.partitioning < 3 {
+    if mi.mbmi.partitioning < 3 {
         let mut b: *mut Blockd;
         let dst_stride: i32 = (*x).dst.y_stride;
 
-        (*x).block[0].bmi = (*(*x).mode_info_context).bmi[0];
-        (*x).block[2].bmi = (*(*x).mode_info_context).bmi[2];
-        (*x).block[8].bmi = (*(*x).mode_info_context).bmi[8];
-        (*x).block[10].bmi = (*(*x).mode_info_context).bmi[10];
-        if (*(*x).mode_info_context).mbmi.need_to_clamp_mvs {
+        (*x).block[0].bmi = mi.bmi[0];
+        (*x).block[2].bmi = mi.bmi[2];
+        (*x).block[8].bmi = mi.bmi[8];
+        (*x).block[10].bmi = mi.bmi[10];
+        if mi.mbmi.need_to_clamp_mvs {
             clamp_mv_to_umv_border(bmi_mv_mut(&mut (*x).block[0].bmi), x);
             clamp_mv_to_umv_border(bmi_mv_mut(&mut (*x).block[2].bmi), x);
             clamp_mv_to_umv_border(bmi_mv_mut(&mut (*x).block[8].bmi), x);
@@ -535,9 +536,9 @@ unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
             let d1: *mut Blockd = &mut (*x).block[(i + 1) as usize] as *mut Blockd;
             let dst_stride: i32 = (*x).dst.y_stride;
 
-            (*x).block[(i + 0) as usize].bmi = (*(*x).mode_info_context).bmi[(i + 0) as usize];
-            (*x).block[(i + 1) as usize].bmi = (*(*x).mode_info_context).bmi[(i + 1) as usize];
-            if (*(*x).mode_info_context).mbmi.need_to_clamp_mvs {
+            (*x).block[(i + 0) as usize].bmi = mi.bmi[(i + 0) as usize];
+            (*x).block[(i + 1) as usize].bmi = mi.bmi[(i + 1) as usize];
+            if mi.mbmi.need_to_clamp_mvs {
                 clamp_mv_to_umv_border(bmi_mv_mut(&mut (*x).block[(i + 0) as usize].bmi), x);
                 clamp_mv_to_umv_border(bmi_mv_mut(&mut (*x).block[(i + 1) as usize].bmi), x);
             }
@@ -653,7 +654,7 @@ unsafe fn build_inter4x4_predictors_mb(x: *mut Macroblockd) {
 /// averaging and full-pixel-mode quantisation.
 ///
 /// Source: `vp8/common/reconinter.c:456`.
-unsafe fn build_4x4uvmvs(x: *mut Macroblockd) {
+unsafe fn build_4x4uvmvs(x: *mut Macroblockd, mi: &ModeInfo) {
     for i in 0..2i32 {
         for j in 0..2i32 {
             let yoffset: i32 = i * 8 + j * 2;
@@ -663,19 +664,19 @@ unsafe fn build_4x4uvmvs(x: *mut Macroblockd) {
             let mut temp: i32;
 
             // `mode_info_context->bmi[k].mv.as_mv.row` -> via bmi_mv helper.
-            temp = bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 0) as usize]).row as i32
-                + bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 1) as usize]).row as i32
-                + bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 4) as usize]).row as i32
-                + bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 5) as usize]).row as i32;
+            temp = bmi_mv(&mi.bmi[(yoffset + 0) as usize]).row as i32
+                + bmi_mv(&mi.bmi[(yoffset + 1) as usize]).row as i32
+                + bmi_mv(&mi.bmi[(yoffset + 4) as usize]).row as i32
+                + bmi_mv(&mi.bmi[(yoffset + 5) as usize]).row as i32;
 
             temp += 4 + ((temp >> (core::mem::size_of::<i32>() as i32 * 8 - 1)) * 8);
 
             let new_row = ((temp / 8) & (*x).fullpixel_mask) as i16;
 
-            temp = bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 0) as usize]).col as i32
-                + bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 1) as usize]).col as i32
-                + bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 4) as usize]).col as i32
-                + bmi_mv(&(*(*x).mode_info_context).bmi[(yoffset + 5) as usize]).col as i32;
+            temp = bmi_mv(&mi.bmi[(yoffset + 0) as usize]).col as i32
+                + bmi_mv(&mi.bmi[(yoffset + 1) as usize]).col as i32
+                + bmi_mv(&mi.bmi[(yoffset + 4) as usize]).col as i32
+                + bmi_mv(&mi.bmi[(yoffset + 5) as usize]).col as i32;
 
             temp += 4 + ((temp >> (core::mem::size_of::<i32>() as i32 * 8 - 1)) * 8);
 
@@ -686,7 +687,7 @@ unsafe fn build_4x4uvmvs(x: *mut Macroblockd) {
                 col: new_col,
             });
 
-            if (*(*x).mode_info_context).mbmi.need_to_clamp_mvs {
+            if mi.mbmi.need_to_clamp_mvs {
                 clamp_uvmv_to_umv_border(bmi_mv_mut(&mut (*x).block[uoffset as usize].bmi), x);
             }
 
@@ -700,10 +701,11 @@ unsafe fn build_4x4uvmvs(x: *mut Macroblockd) {
 /// per inter macroblock from `decodeframe.c`.
 ///
 /// Source: `vp8/common/reconinter.c:494`.
-pub unsafe fn vp8_build_inter_predictors_mb(xd: *mut Macroblockd) {
-    if (*(*xd).mode_info_context).mbmi.mode != MbPredictionMode::SplitMv {
+pub unsafe fn vp8_build_inter_predictors_mb(xd: *mut Macroblockd, mi: &ModeInfo) {
+    if mi.mbmi.mode != MbPredictionMode::SplitMv {
         vp8_build_inter16x16_predictors_mb(
             xd,
+            mi,
             (*xd).dst.y_buffer,
             (*xd).dst.u_buffer,
             (*xd).dst.v_buffer,
@@ -711,7 +713,7 @@ pub unsafe fn vp8_build_inter_predictors_mb(xd: *mut Macroblockd) {
             (*xd).dst.uv_stride,
         );
     } else {
-        build_4x4uvmvs(xd);
-        build_inter4x4_predictors_mb(xd);
+        build_4x4uvmvs(xd, mi);
+        build_inter4x4_predictors_mb(xd, mi);
     }
 }

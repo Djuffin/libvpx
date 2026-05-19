@@ -20,7 +20,7 @@ use core::ptr;
 
 use crate::types::{
     FrameType, INTRA_FRAME, LoopFilterInfo, LoopFilterInfoN, MAX_LOOP_FILTER, MAX_MB_SEGMENTS,
-    MAX_REF_FRAMES, Macroblockd, MbPredictionMode, ModeInfo, Vp8Common,
+    MAX_REF_FRAMES, Macroblockd, MbPredictionMode, Vp8Common,
 };
 
 // ---------------------------------------------------------------------------
@@ -292,7 +292,6 @@ pub unsafe fn vp8_loop_filter_frame_init(
 /// (`vp8/decoder/threading.c`). One MB-row's worth of edge dispatches.
 pub unsafe fn vp8_loop_filter_row_normal(
     cm: *mut Vp8Common,
-    mut mode_info_context: *mut ModeInfo,
     mb_row: i32,
     post_ystride: i32,
     post_uvstride: i32,
@@ -308,15 +307,17 @@ pub unsafe fn vp8_loop_filter_row_normal(
         hev_thr: ptr::null(),
     };
     let frame_type: FrameType = (*cm).frame_type;
+    let mi_row = (*cm).mi_row(mb_row);
 
     for mb_col in 0..(*cm).mb_cols {
-        let skip_lf: bool = (*mode_info_context).mbmi.mode != MbPredictionMode::BPred
-            && (*mode_info_context).mbmi.mode != MbPredictionMode::SplitMv
-            && (*mode_info_context).mbmi.mb_skip_coeff;
+        let mi = &mi_row[mb_col as usize];
+        let skip_lf: bool = mi.mbmi.mode != MbPredictionMode::BPred
+            && mi.mbmi.mode != MbPredictionMode::SplitMv
+            && mi.mbmi.mb_skip_coeff;
 
-        let mode_index = (*lfi_n).mode_lf_lut[(*mode_info_context).mbmi.mode as usize] as usize;
-        let seg = (*mode_info_context).mbmi.segment_id as usize;
-        let ref_frame = (*mode_info_context).mbmi.ref_frame as usize;
+        let mode_index = (*lfi_n).mode_lf_lut[mi.mbmi.mode as usize] as usize;
+        let seg = mi.mbmi.segment_id as usize;
+        let ref_frame = mi.mbmi.ref_frame as usize;
 
         let filter_level = (*lfi_n).lvl[seg][ref_frame][mode_index] as usize;
 
@@ -348,8 +349,6 @@ pub unsafe fn vp8_loop_filter_row_normal(
         y_ptr = y_ptr.offset(16);
         u_ptr = u_ptr.offset(8);
         v_ptr = v_ptr.offset(8);
-
-        mode_info_context = mode_info_context.offset(1); /* step to next MB */
     }
 }
 
@@ -358,21 +357,22 @@ pub unsafe fn vp8_loop_filter_row_normal(
 /// Row-granular simple-filter walker — luma-only, no `hev_thr`.
 pub unsafe fn vp8_loop_filter_row_simple(
     cm: *mut Vp8Common,
-    mut mode_info_context: *mut ModeInfo,
     mb_row: i32,
     post_ystride: i32,
     mut y_ptr: *mut u8,
 ) {
     let lfi_n: *mut LoopFilterInfoN = &mut (*cm).lf_info;
+    let mi_row = (*cm).mi_row(mb_row);
 
     for mb_col in 0..(*cm).mb_cols {
-        let skip_lf: bool = (*mode_info_context).mbmi.mode != MbPredictionMode::BPred
-            && (*mode_info_context).mbmi.mode != MbPredictionMode::SplitMv
-            && (*mode_info_context).mbmi.mb_skip_coeff;
+        let mi = &mi_row[mb_col as usize];
+        let skip_lf: bool = mi.mbmi.mode != MbPredictionMode::BPred
+            && mi.mbmi.mode != MbPredictionMode::SplitMv
+            && mi.mbmi.mb_skip_coeff;
 
-        let mode_index = (*lfi_n).mode_lf_lut[(*mode_info_context).mbmi.mode as usize] as usize;
-        let seg = (*mode_info_context).mbmi.segment_id as usize;
-        let ref_frame = (*mode_info_context).mbmi.ref_frame as usize;
+        let mode_index = (*lfi_n).mode_lf_lut[mi.mbmi.mode as usize] as usize;
+        let seg = mi.mbmi.segment_id as usize;
+        let ref_frame = mi.mbmi.ref_frame as usize;
 
         let filter_level = (*lfi_n).lvl[seg][ref_frame][mode_index] as usize;
 
@@ -412,7 +412,5 @@ pub unsafe fn vp8_loop_filter_row_simple(
         }
 
         y_ptr = y_ptr.offset(16);
-
-        mode_info_context = mode_info_context.offset(1); /* step to next MB */
     }
 }
