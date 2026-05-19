@@ -490,8 +490,6 @@ pub struct Macroblockd {
     pub recon_left: [*mut u8; 3],
     pub recon_left_stride: [i32; 2],
 
-    pub above_context: *mut EntropyContextPlanes,
-
     pub segmentation_enabled: u8,
     pub update_mb_segmentation_map: u8,
     pub update_mb_segmentation_data: u8,

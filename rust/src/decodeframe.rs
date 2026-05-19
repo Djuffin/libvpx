@@ -174,13 +174,13 @@ pub unsafe fn vp8_mb_init_dequantizer(pbi: *mut Vp8dComp<'static>, xd: *mut Macr
 // ---------------------------------------------------------------------------
 
 /// `decode_macroblock` (vp8/decoder/decodeframe.c:94). Static helper.
-unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, _mb_idx: c_uint) {
+unsafe fn decode_macroblock(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd, mb_col: c_int) {
     let mode: MbPredictionMode;
 
     if (*(*xd).mode_info_context).mbmi.mb_skip_coeff {
-        vp8_reset_mb_tokens_context(pbi, xd);
+        vp8_reset_mb_tokens_context(pbi, xd, mb_col);
     } else if vp8dx_bool_error((*xd).current_bc as *mut Vp8Reader<'static>) == 0 {
-        let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd);
+        let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd, mb_col);
 
         /* Special case:  Force the loopfilter to skip when eobtotal is zero */
         (*(*xd).mode_info_context).mbmi.mb_skip_coeff = eobtotal == 0;
@@ -574,7 +574,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
     let mut recon_uvoffset: c_int;
     let mut mb_row: c_int;
     let mut mb_col: c_int;
-    let mut mb_idx: c_int = 0;
 
     let yv12_fb_new: *mut Yv12BufferConfig =
         &mut (*pbi).common.yv12_fb[(*pbi).dec_fb_ref_idx[INTRA_FRAME] as usize];
@@ -640,7 +639,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
         recon_uvoffset = mb_row * recon_uv_stride * 8;
 
         /* reset contexts */
-        (*xd).above_context = (*pc).above_context.as_deref_mut().unwrap().as_mut_ptr();
         ptr::write_bytes(
             &mut (*pc).left_context as *mut _ as *mut u8,
             0,
@@ -700,9 +698,8 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             /* propagate errors from reference frames */
             (*xd).corrupted |= ref_fb_corrupted[(*(*xd).mode_info_context).mbmi.ref_frame as usize];
 
-            decode_macroblock(pbi, xd, mb_idx as c_uint);
+            decode_macroblock(pbi, xd, mb_col);
 
-            mb_idx += 1;
             (*xd).left_available = true;
 
             /* check if the boolean decoder has suffered an error */
@@ -719,7 +716,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             recon_uvoffset += 8;
 
             (*xd).mode_info_context = (*xd).mode_info_context.add(1); /* next mb */
-            (*xd).above_context = (*xd).above_context.add(1);
 
             mb_col += 1;
         }

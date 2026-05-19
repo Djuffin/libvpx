@@ -205,8 +205,13 @@ unsafe fn GetCoeffs(
 /// and left contexts. The 9th byte (Y2) is only cleared when the MB
 /// uses the second-order transform (`!is_4x4`); B_PRED MBs intentionally
 /// preserve whatever Y2 context the previous MB left there.
-pub unsafe fn vp8_reset_mb_tokens_context(dx: *mut Vp8dComp<'static>, x: *mut Macroblockd) {
-    let a_ctx: *mut EntropyContext = (*x).above_context as *mut EntropyContext;
+pub unsafe fn vp8_reset_mb_tokens_context(
+    dx: *mut Vp8dComp<'static>,
+    x: *mut Macroblockd,
+    mb_col: i32,
+) {
+    let a_ctx: *mut EntropyContext = &mut (*dx).common.above_context.as_deref_mut().unwrap()
+        [mb_col as usize] as *mut _ as *mut EntropyContext;
     let l_ctx: *mut EntropyContext = &mut (*dx).common.left_context as *mut _ as *mut EntropyContext;
 
     core::ptr::write_bytes(a_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
@@ -229,7 +234,11 @@ pub unsafe fn vp8_reset_mb_tokens_context(dx: *mut Vp8dComp<'static>, x: *mut Ma
 /// then 16 Y, then 8 UV), threading entropy contexts and the
 /// per-block `eobs` array. Returns `eobtotal` — the sum of every
 /// block's eob, with the Y2 adjustment described in the doc.
-pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macroblockd) -> i32 {
+pub unsafe fn vp8_decode_mb_tokens(
+    dx: *mut Vp8dComp<'static>,
+    x: *mut Macroblockd,
+    mb_col: i32,
+) -> i32 {
     let bc: *mut BoolDecoder<'static> = (*x).current_bc as *mut BoolDecoder<'static>;
     let fc = &(*dx).common.fc as *const FrameContext;
     let eobs: *mut i8 = (*x).eobs.as_mut_ptr();
@@ -238,7 +247,8 @@ pub unsafe fn vp8_decode_mb_tokens(dx: *mut Vp8dComp<'static>, x: *mut Macrobloc
     let mut eobtotal: i32 = 0;
 
     let mut coef_probs: ProbaArray;
-    let mut a_ctx: *mut EntropyContext = (*x).above_context as *mut EntropyContext;
+    let mut a_ctx: *mut EntropyContext = &mut (*dx).common.above_context.as_deref_mut().unwrap()
+        [mb_col as usize] as *mut _ as *mut EntropyContext;
     let mut l_ctx: *mut EntropyContext =
         &mut (*dx).common.left_context as *mut _ as *mut EntropyContext;
     let mut a: *mut EntropyContext;
