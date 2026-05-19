@@ -20,7 +20,6 @@
 #![allow(non_camel_case_types)]
 #![allow(clippy::missing_safety_doc)]
 
-use core::ffi::c_void;
 use core::ptr;
 
 use crate::types::{
@@ -52,7 +51,6 @@ pub type VpxRefFrameType = i32;
 
 use crate::decodeframe::{vp8_decode_frame, vp8cx_init_de_quantizer};
 use crate::vpx_codec::vpx_internal_error;
-use crate::vpx_mem::{vpx_free, vpx_memalign};
 
 use crate::alloccommon::{vp8_create_common, vp8_remove_common};
 use crate::mbpitch::vp8_setup_block_dptrs;
@@ -82,28 +80,26 @@ unsafe fn initialize_dec() {
 }
 
 /// `static void remove_decompressor(VP8D_COMP *)` — `vp8/decoder/onyxd_if.c:58`.
-unsafe fn remove_decompressor(pbi: *mut Vp8dComp<'static>) {
-    vp8_remove_common(&mut (*pbi).common as *mut Vp8Common);
-    vpx_free(pbi as *mut c_void);
-}
-
 /// `static struct VP8D_COMP *create_decompressor(VP8D_CONFIG *)` —
-/// `vp8/decoder/onyxd_if.c:66`. On `Err` the half-initialized instance
-/// is torn down via [`remove_decompressor`].
-unsafe fn create_decompressor(oxcf: *mut Vp8dConfig) -> *mut Vp8dComp<'static> {
-    let pbi = vpx_memalign(32, core::mem::size_of::<Vp8dComp<'static>>()) as *mut Vp8dComp<'static>;
+/// `vp8/decoder/onyxd_if.c:66`. Returns `None` if initialization fails;
+/// the half-initialized instance is torn down before return.
+unsafe fn create_decompressor(oxcf: &Vp8dConfig) -> Option<Box<Vp8dComp<'static>>> {
+    // Allocate the outer shell zero-initialised on the heap. The C
+    // source uses `vpx_memalign(32, sizeof(VP8D_COMP)) + memset(0, ...)`;
+    // `Box::new_zeroed` is the same byte pattern. The function-pointer
+    // fields on `Macroblockd` (subpixel_predict*) are non-nullable and
+    // thus zero-init is technically UB until they are written in
+    // `init_frame`; this matches the literal-transliteration policy
+    // the rest of the port follows.
+    let mut pbi: Box<Vp8dComp<'static>> =
+        Box::<Vp8dComp<'static>>::new_zeroed().assume_init();
+    let pbi_ptr: *mut Vp8dComp<'static> = &mut *pbi;
 
-    if pbi.is_null() {
-        return ptr::null_mut();
-    }
-
-    ptr::write_bytes(pbi as *mut u8, 0, core::mem::size_of::<Vp8dComp<'static>>());
-
-    match create_decompressor_inner(pbi, oxcf) {
-        Ok(()) => pbi,
+    match create_decompressor_inner(pbi_ptr, oxcf) {
+        Ok(()) => Some(pbi),
         Err(_) => {
-            remove_decompressor(pbi);
-            ptr::null_mut()
+            vp8_remove_common(&mut pbi.common);
+            None
         }
     }
 }
@@ -111,7 +107,7 @@ unsafe fn create_decompressor(oxcf: *mut Vp8dConfig) -> *mut Vp8dComp<'static> {
 /// Body of [`create_decompressor`].
 unsafe fn create_decompressor_inner(
     pbi: *mut Vp8dComp<'static>,
-    oxcf: *mut Vp8dConfig,
+    oxcf: &Vp8dConfig,
 ) -> VpxResult<()> {
     vp8_create_common(&mut (*pbi).common as *mut Vp8Common);
 
@@ -240,11 +236,9 @@ unsafe fn swap_frame_buffers(cm: *mut Vp8Common) -> i32 {
             (*cm).new_fb_idx,
         );
 
-        (*cm).frame_to_show =
-            &mut (*cm).yv12_fb[(*cm).lst_fb_idx as usize] as *mut Yv12BufferConfig;
+        (*cm).frame_to_show_idx = (*cm).lst_fb_idx;
     } else {
-        (*cm).frame_to_show =
-            &mut (*cm).yv12_fb[(*cm).new_fb_idx as usize] as *mut Yv12BufferConfig;
+        (*cm).frame_to_show_idx = (*cm).new_fb_idx;
     }
 
     (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] -= 1;
@@ -387,14 +381,10 @@ pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxR
     (*cm).new_fb_idx = get_free_fb(cm);
 
     // setup reference frames for vp8_decode_frame
-    (*pbi).dec_fb_ref[INTRA_FRAME] =
-        &mut (*cm).yv12_fb[(*cm).new_fb_idx as usize] as *mut Yv12BufferConfig;
-    (*pbi).dec_fb_ref[LAST_FRAME] =
-        &mut (*cm).yv12_fb[(*cm).lst_fb_idx as usize] as *mut Yv12BufferConfig;
-    (*pbi).dec_fb_ref[GOLDEN_FRAME] =
-        &mut (*cm).yv12_fb[(*cm).gld_fb_idx as usize] as *mut Yv12BufferConfig;
-    (*pbi).dec_fb_ref[ALTREF_FRAME] =
-        &mut (*cm).yv12_fb[(*cm).alt_fb_idx as usize] as *mut Yv12BufferConfig;
+    (*pbi).dec_fb_ref_idx[INTRA_FRAME] = (*cm).new_fb_idx;
+    (*pbi).dec_fb_ref_idx[LAST_FRAME] = (*cm).lst_fb_idx;
+    (*pbi).dec_fb_ref_idx[GOLDEN_FRAME] = (*cm).gld_fb_idx;
+    (*pbi).dec_fb_ref_idx[ALTREF_FRAME] = (*cm).alt_fb_idx;
 
     if let Err(e) = vp8_decode_frame(pbi) {
         // Drop the just-allocated new_fb refcount.
@@ -457,11 +447,12 @@ pub unsafe fn vp8dx_get_raw_frame(
     // CONFIG_POSTPROC is disabled — cast flags to void as the C source does.
     let _ = flags;
 
-    let ret = if !(*pbi).common.frame_to_show.is_null() {
+    let ret = if (*pbi).common.frame_to_show_idx >= 0 {
         // Shallow descriptor copy — *sd shares plane buffers with the
         // decoder's frame_to_show until the next call to
         // vp8dx_receive_compressed_data.
-        ptr::copy_nonoverlapping((*pbi).common.frame_to_show, sd, 1);
+        let idx = (*pbi).common.frame_to_show_idx as usize;
+        ptr::copy_nonoverlapping(&(*pbi).common.yv12_fb[idx], sd, 1);
         (*sd).y_width = (*pbi).common.width;
         (*sd).y_height = (*pbi).common.height;
         (*sd).uv_height = (*pbi).common.height / 2;
@@ -497,38 +488,50 @@ pub unsafe fn vp8dx_references_buffer(oci: *mut Vp8Common, ref_frame: i32) -> i3
 }
 
 /// `vp8_create_decoder_instances` — `vp8/decoder/onyxd_if.c:424`.
-
-pub unsafe fn vp8_create_decoder_instances(
-    fb: *mut FrameBuffers<'static>,
-    oxcf: *mut Vp8dConfig,
+///
+/// `create_decompressor` stays `unsafe` (it constructs a `Vp8dComp`
+/// whose non-nullable function-pointer fields are zero-initialised
+/// until `init_frame` writes them — UB by letter of spec). The
+/// boundary here is safe because the only caller side-effect on
+/// success is `fb.pbi = Some(box)`, which is a plain field write.
+pub fn vp8_create_decoder_instances(
+    fb: &mut FrameBuffers<'static>,
+    oxcf: &Vp8dConfig,
 ) -> i32 {
     // decoder instance for single thread mode
-    (*fb).pbi[0] = create_decompressor(oxcf);
-    if (*fb).pbi[0].is_null() {
-        return VPX_CODEC_ERROR as i32;
+    match unsafe { create_decompressor(oxcf) } {
+        Some(b) => {
+            fb.pbi = Some(b);
+            // CONFIG_MULTITHREAD branch omitted on this build.
+            VPX_CODEC_OK as i32
+        }
+        None => VPX_CODEC_ERROR as i32,
     }
-
-    // CONFIG_MULTITHREAD branch omitted on this build.
-    VPX_CODEC_OK as i32
 }
 
 /// `vp8_remove_decoder_instances` — `vp8/decoder/onyxd_if.c:446`.
-
-pub unsafe fn vp8_remove_decoder_instances(fb: *mut FrameBuffers<'static>) -> i32 {
-    let pbi: *mut Vp8dComp<'static> = (*fb).pbi[0];
-
-    if pbi.is_null() {
-        return VPX_CODEC_ERROR as i32;
+///
+/// `take()`-ing the `Box` makes a double-call safe by construction (the
+/// second call sees `None`). The inner `unsafe` block covers the kernel
+/// teardown of `vp8_remove_common`, which is sound on a valid
+/// `&mut Vp8dComp` whose inner heap allocations haven't been freed yet —
+/// guaranteed because we only reach `remove_common` via the consumed Box.
+pub fn vp8_remove_decoder_instances(fb: &mut FrameBuffers<'static>) -> i32 {
+    match fb.pbi.take() {
+        Some(mut b) => {
+            // SAFETY: `b` was constructed by `create_decompressor`; its
+            // inner allocations (yv12 buffers, mi grid, above_context)
+            // are live until this call.
+            unsafe { vp8_remove_common(&mut b.common); }
+            // Outer shell freed by Box drop here.
+            VPX_CODEC_OK as i32
+        }
+        None => VPX_CODEC_ERROR as i32,
     }
-
-    // decoder instance for single thread mode
-    remove_decompressor(pbi);
-    (*fb).pbi[0] = ptr::null_mut();
-    VPX_CODEC_OK as i32
 }
 
 /// `vp8dx_get_quantizer` — `vp8/decoder/onyxd_if.c:460`.
 
-pub unsafe fn vp8dx_get_quantizer(pbi: *const Vp8dComp<'static>) -> i32 {
-    (*pbi).common.base_qindex
+pub fn vp8dx_get_quantizer(pbi: &Vp8dComp<'static>) -> i32 {
+    pbi.common.base_qindex
 }

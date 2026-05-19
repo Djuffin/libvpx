@@ -16,7 +16,7 @@ use crate::onyxd_if::{
     vp8dx_get_reference, vp8dx_set_reference,
 };
 use crate::types::{
-    DecryptCb, DecryptCbMut, FragmentData, FrameBuffers, MAX_PARTITIONS, VP8_BORDER_IN_PIXELS,
+    DecryptCb, DecryptCbMut, FragmentData, FrameBuffers, VP8_BORDER_IN_PIXELS, MAX_PARTITIONS,
     Vp8PpFlags, Vp8dComp, Vp8dConfig, VpxInternalErrorInfo, Yv12BufferConfig,
 };
 use crate::vpx_api::*;
@@ -379,7 +379,7 @@ pub unsafe fn vp8_decode(
         && (*ctx).si.h == 0
         && (*ctx).si.w == 0
     {
-        let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+        let pbi = (*ctx).yv12_frame_buffers.pbi_ptr();
         assert!(!pbi.is_null());
         let _ = vpx_internal_error::<()>(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
         return VPX_CODEC_CORRUPT_FRAME;
@@ -411,7 +411,7 @@ pub unsafe fn vp8_decode(
             (*ctx).postproc_cfg.noise_level = 0;
         }
 
-        let rc = vp8_create_decoder_instances(&mut (*ctx).yv12_frame_buffers, &mut oxcf);
+        let rc = vp8_create_decoder_instances(&mut (*ctx).yv12_frame_buffers, &oxcf);
         res = if rc == VPX_CODEC_OK as i32 {
             VPX_CODEC_OK
         } else {
@@ -433,12 +433,12 @@ pub unsafe fn vp8_decode(
     // failure) we take it back so subsequent SET_DECRYPTOR control
     // calls can update it on `ctx`.
     if (*ctx).decoder_init != 0 {
-        let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+        let pbi = (*ctx).yv12_frame_buffers.pbi_ptr();
         (*pbi).decrypt = (*ctx).decrypt.take();
     }
 
     if res == VPX_CODEC_OK {
-        let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+        let pbi = (*ctx).yv12_frame_buffers.pbi_ptr();
         let pc = &mut (*pbi).common as *mut crate::types::Vp8Common;
         if resolution_change != 0 {
             (*pc).width = (*ctx).si.w as i32;
@@ -470,7 +470,7 @@ pub unsafe fn vp8_decode(
 
     // Move cb back if it was migrated.
     if (*ctx).decoder_init != 0 {
-        let pbi = (*ctx).yv12_frame_buffers.pbi[0];
+        let pbi = (*ctx).yv12_frame_buffers.pbi_ptr();
         if !pbi.is_null() {
             (*ctx).decrypt = (*pbi).decrypt.take();
         }
@@ -533,7 +533,7 @@ pub unsafe fn vp8_get_frame(
 
     // iter acts as a flip flop, so an image is only returned on the first
     // call to get_frame.
-    if (*iter).is_null() && !(*ctx).yv12_frame_buffers.pbi[0].is_null() {
+    if (*iter).is_null() && (*ctx).yv12_frame_buffers.pbi.is_some() {
         let mut sd: Yv12BufferConfig = core::mem::zeroed();
         let mut flags: Vp8PpFlags = Vp8PpFlags::default();
 
@@ -543,7 +543,7 @@ pub unsafe fn vp8_get_frame(
             flags.noise_level = (*ctx).postproc_cfg.noise_level;
         }
 
-        if vp8dx_get_raw_frame((*ctx).yv12_frame_buffers.pbi[0], &mut sd, &mut flags) == 0 {
+        if vp8dx_get_raw_frame((*ctx).yv12_frame_buffers.pbi_ptr(), &mut sd, &mut flags) == 0 {
             yuvconfig2image(&mut (*ctx).img, &sd, (*ctx).user_priv);
 
             img = &mut (*ctx).img;
@@ -652,11 +652,9 @@ impl Vp8Decoder {
 impl Drop for Vp8Decoder {
     fn drop(&mut self) {
         // Release the YV12 frame buffer pool and the inner Vp8dComp
-        // instances (each one's own `vpx_calloc` allocation). The Box
-        // drop that follows reclaims the `Vp8AlgPriv` shell.
-        unsafe {
-            vp8_remove_decoder_instances(&mut self.priv_.yv12_frame_buffers);
-        }
+        // instance. The Box drop that follows reclaims the
+        // `Vp8AlgPriv` shell.
+        vp8_remove_decoder_instances(&mut self.priv_.yv12_frame_buffers);
     }
 }
 
@@ -698,25 +696,27 @@ impl Decoder for Vp8Decoder {
                 ControlCmd::SetReference(frame) => {
                     let mut sd: Yv12BufferConfig = core::mem::zeroed();
                     image2yuvconfig(&frame.img, &mut sd);
-                    if ctx.yv12_frame_buffers.pbi[0].is_null() {
+                    let pbi = ctx.yv12_frame_buffers.pbi_ptr();
+                    if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
-                    vp8dx_set_reference(ctx.yv12_frame_buffers.pbi[0], frame.frame_type, &mut sd)
+                    vp8dx_set_reference(pbi, frame.frame_type, &mut sd)
                 }
                 ControlCmd::CopyReference(frame) => {
                     let mut sd: Yv12BufferConfig = core::mem::zeroed();
                     image2yuvconfig(&frame.img, &mut sd);
-                    if ctx.yv12_frame_buffers.pbi[0].is_null() {
+                    let pbi = ctx.yv12_frame_buffers.pbi_ptr();
+                    if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
-                    vp8dx_get_reference(ctx.yv12_frame_buffers.pbi[0], frame.frame_type, &mut sd)
+                    vp8dx_get_reference(pbi, frame.frame_type, &mut sd)
                 }
                 ControlCmd::SetPostproc(_cfg) => {
                     // CONFIG_POSTPROC=0 in the minimal build.
                     Err(VPX_CODEC_INCAPABLE)
                 }
                 ControlCmd::GetLastRefUpdates(out) => {
-                    let pbi = ctx.yv12_frame_buffers.pbi[0];
+                    let pbi = ctx.yv12_frame_buffers.pbi_ptr();
                     if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
@@ -726,19 +726,19 @@ impl Decoder for Vp8Decoder {
                     Ok(())
                 }
                 ControlCmd::GetFrameCorrupted(out) => {
-                    let pbi = ctx.yv12_frame_buffers.pbi[0];
+                    let pbi = ctx.yv12_frame_buffers.pbi_ptr();
                     if pbi.is_null() {
                         return Err(VPX_CODEC_INVALID_PARAM);
                     }
-                    let frame = (*pbi).common.frame_to_show as *const Yv12BufferConfig;
-                    if frame.is_null() {
+                    let idx = (*pbi).common.frame_to_show_idx;
+                    if idx < 0 {
                         return Err(VPX_CODEC_ERROR);
                     }
-                    *out = (*frame).corrupted;
+                    *out = (*pbi).common.yv12_fb[idx as usize].corrupted;
                     Ok(())
                 }
                 ControlCmd::GetLastRefUsed(out) => {
-                    let pbi = ctx.yv12_frame_buffers.pbi[0];
+                    let pbi = ctx.yv12_frame_buffers.pbi_ptr();
                     if pbi.is_null() {
                         return Err(VPX_CODEC_CORRUPT_FRAME);
                     }
@@ -759,10 +759,10 @@ impl Decoder for Vp8Decoder {
                     Ok(())
                 }
                 ControlCmd::GetLastQuantizer(out) => {
-                    let pbi = ctx.yv12_frame_buffers.pbi[0];
-                    if pbi.is_null() {
-                        return Err(VPX_CODEC_CORRUPT_FRAME);
-                    }
+                    let pbi = match ctx.yv12_frame_buffers.pbi.as_deref() {
+                        Some(b) => b,
+                        None => return Err(VPX_CODEC_CORRUPT_FRAME),
+                    };
                     *out = vp8dx_get_quantizer(pbi);
                     Ok(())
                 }

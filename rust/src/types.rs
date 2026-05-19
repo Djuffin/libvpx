@@ -621,10 +621,10 @@ pub struct Vp8Common {
 
     pub clamp_type: ClampType,
 
-    /// Pointer to the slot in `yv12_fb` that should be returned to the
-    /// user as the current output frame. Updated by
-    /// `swap_frame_buffers` (`onyxd_if.c`).
-    pub frame_to_show: *mut Yv12BufferConfig,
+    /// Index of the slot in `yv12_fb` that should be returned to the
+    /// user as the current output frame, or `-1` when no frame is ready.
+    /// Updated by `swap_frame_buffers` (`onyxd_if.c`).
+    pub frame_to_show_idx: i32,
 
     /// 4-slot reference picture pool.
     pub yv12_fb: [Yv12BufferConfig; NUM_YV12_BUFFERS],
@@ -744,9 +744,11 @@ pub struct FragmentData {
 pub struct Vp8dComp<'a> {
     pub mb: Macroblockd,
 
-    /// References to the four DPB slots (each entry points into
-    /// `common.yv12_fb`).
-    pub dec_fb_ref: [*mut Yv12BufferConfig; NUM_YV12_BUFFERS],
+    /// Indices into `common.yv12_fb` for the four DPB slots, keyed by
+    /// `MvReferenceFrame` (INTRA=current/new, LAST, GOLDEN, ALTREF).
+    /// `-1` means "no slot bound" (not currently emitted, but allowed by
+    /// the type). Set per frame at `onyxd_if.rs:vp8dx_receive_compressed_data`.
+    pub dec_fb_ref_idx: [i32; NUM_YV12_BUFFERS],
 
     pub common: Vp8Common,
 
@@ -803,13 +805,26 @@ pub struct Vp8PpFlags {
     pub display_mv_flag: i32,
 }
 
-/// `MAX_FB_MT_DEC` (`vp8/decoder/onyxd_int.h:48`) — slots in the
-/// per-frame multithreaded decoder pool. Only slot 0 is touched in the
-/// single-threaded build.
-pub const MAX_FB_MT_DEC: usize = 32;
-
 /// `struct frame_buffers` (`vp8/decoder/onyxd_int.h:50-57`).
-#[repr(C)]
+///
+/// The C source carries a `pbi[MAX_FB_MT_DEC]` array (32 slots) for the
+/// frame-parallel multithread mode. The minimal `vp8_only` build only
+/// ever populates slot 0, so the Rust port collapses the array to a
+/// single owned slot. Reinstating frame-parallel MT later would require
+/// restoring the array (or using a `Vec`).
 pub struct FrameBuffers<'a> {
-    pub pbi: [*mut Vp8dComp<'a>; MAX_FB_MT_DEC],
+    pub pbi: Option<Box<Vp8dComp<'a>>>,
+}
+
+impl<'a> FrameBuffers<'a> {
+    /// Return the inner `Vp8dComp` as a raw mutable pointer for the
+    /// kernel call sites that still take `*mut Vp8dComp`. Returns null
+    /// when no decoder is bound.
+    #[inline]
+    pub fn pbi_ptr(&mut self) -> *mut Vp8dComp<'a> {
+        match self.pbi.as_deref_mut() {
+            Some(b) => b as *mut Vp8dComp<'a>,
+            None => core::ptr::null_mut(),
+        }
+    }
 }

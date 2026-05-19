@@ -6,6 +6,20 @@ Pointers used exclusively for pixel, coefficient, or bitstream access (such as `
 
 ---
 
+## 0. Completed refactors
+
+The following raw pointers have already been replaced. They are listed here so future readers see what is already done and which patterns are precedent.
+
+| Was | Now | Notes |
+|---|---|---|
+| `Vp8Common.frame_to_show: *mut Yv12BufferConfig` | `frame_to_show_idx: i32` (`-1` = none) | Plain index into `yv12_fb[]`. Explicit `-1` init in `vp8_create_common` because `vpx_calloc`'s zero would otherwise be a valid index. |
+| `Vp8dComp.dec_fb_ref: [*mut Yv12BufferConfig; 4]` | `dec_fb_ref_idx: [i32; 4]` | Indexed by `MvReferenceFrame` (INTRA/LAST/GOLDEN/ALTREF). Reads go `pc.yv12_fb[dec_fb_ref_idx[r] as usize]`. |
+| `FrameBuffers.pbi: [*mut Vp8dComp<'a>; 32]` | `pbi: Option<Box<Vp8dComp<'a>>>` | Single owned slot. Allocated via `Box::<T>::new_zeroed().assume_init()` (same byte pattern as the old `vpx_memalign + write_bytes(0)`; preserves the same UB-by-letter-of-spec for the non-nullable `SubpixFn` fields, which are overwritten in `init_frame`). Drop of the Box replaces the manual `vpx_free`. Kernel call sites use the `pbi_ptr()` helper to recover a raw pointer where still required. |
+
+All three were verified bit-exact against the libvpx C reference via the 62-vector conformance suite.
+
+---
+
 ## 1. Inside `Macroblockd` (Per-MB working state)
 
 ### `mode_info_context: *mut ModeInfo`
@@ -32,10 +46,6 @@ Pointers used exclusively for pixel, coefficient, or bitstream access (such as `
 
 ## 2. Inside `Vp8Common` (Per-sequence/frame state)
 
-### `frame_to_show: *mut Yv12BufferConfig`
-*   **Context:** Points to one of the slots in the `yv12_fb` array that represents the frame ready to be displayed.
-*   **Conversion Complexity: LOW.** This is a classic self-referential pointer. It can be easily converted to a `usize` index or an enum representing the slot index in the `yv12_fb` array. Accesses would just become `common.yv12_fb[common.frame_to_show_idx]`.
-
 ### `mip: *mut ModeInfo`, `mi: *mut ModeInfo`, `show_frame_mi: *mut ModeInfo`
 *   **Context:** `mip` points to the base heap allocation of the `ModeInfo` grid (which includes padding for top/left borders). `mi` is an offset view into `mip` pointing to the first visible macroblock (allowing negative indexing to hit the padding). `show_frame_mi` points to the grid for the frame currently being shown.
 *   **Conversion Complexity: HIGH.** The grid is allocated via `vpx_calloc` and aliased heavily. Replacing this requires changing the raw allocation to a `Vec<ModeInfo>` or `Box<[ModeInfo]>`. Because Rust slices do not support negative indexing, the concept of `mi` as an offset pointer would need to be replaced by a custom 2D grid abstraction that safely encapsulates the border padding and provides safe `get(row, col)` methods.
@@ -46,24 +56,10 @@ Pointers used exclusively for pixel, coefficient, or bitstream access (such as `
 
 ---
 
-## 3. Inside `Vp8dComp` (Top-level decoder instance)
-
-### `dec_fb_ref: [*mut Yv12BufferConfig; NUM_YV12_BUFFERS]`
-*   **Context:** An array of 4 pointers referencing the DPB slots, indexed by the `MvReferenceFrame` enum: `[INTRA, LAST, GOLDEN, ALTREF]` (`types.rs:175-178`, populated at `onyxd_if.rs:390-397`). Slot `[INTRA_FRAME]=0` aliases the buffer at `common.new_fb_idx` — i.e., the destination frame being written; the convention is "intra-coded MBs reference their own frame." Slots 1–3 are the conventional LAST / GOLDEN / ALTREF references.
-*   **Conversion Complexity: LOW.** Like `frame_to_show`, this is a self-referential array of pointers. It can be easily replaced with an array of indices `[usize; 4]` pointing to the corresponding slots in `common.yv12_fb`. Accesses would change from `(*pbi).dec_fb_ref[INTRA_FRAME]` to `(*pbi).common.yv12_fb[(*pbi).dec_fb_idx[INTRA_FRAME]]`. `Vp8Common` already keeps `new_fb_idx` / `lst_fb_idx` / `gld_fb_idx` / `alt_fb_idx` as `i32` indices alongside, so the index-based pattern is already established in the codebase.
-
----
-
-## 4. Inside `FrameBuffers` (Top-level pointer into `Vp8dComp`)
-
-### `pbi: [*mut Vp8dComp<'a>; MAX_FB_MT_DEC]`
-*   **Context:** The root pointer through which every public API entry point reaches the decoder. `Vp8AlgPriv` owns a `FrameBuffers<'a>`, and the API layer accesses the inner decoder as `(*ctx).yv12_frame_buffers.pbi[0]` (15+ sites in `vp8_dx_iface.rs`). `MAX_FB_MT_DEC = 32` slots exist to support the frame-parallel multi-thread mode; in the single-threaded `vp8_only` build, only slot 0 is non-null. Each non-null entry was allocated via `vpx_calloc` (so the allocator already matches the rest of the kernel data).
-*   **Conversion Complexity: LOW (single-thread) / HIGH (would-be MT).** For the current single-threaded build, `pbi` could collapse to `Option<Box<Vp8dComp<'a>>>` — the lifetime is exactly `Vp8AlgPriv<'a>`'s, and the allocation is heap-owned. The HIGH variant only appears if frame-parallel MT is reinstated, at which point the multi-slot pool needs cross-thread sharing semantics (the C source uses raw pointers + manual atomics for exactly this reason).
-
----
-
-## 5. Function Arguments Across the Kernel
+## 3. Function Arguments Across the Kernel
 
 ### `*mut Vp8dComp`, `*mut Macroblockd`, `*mut Vp8Common`, etc.
 *   **Context:** Almost every internal kernel function takes these structures as raw mutable pointers (e.g., `vp8_decode_frame(pbi: *mut Vp8dComp)`).
 *   **Conversion Complexity: VERY HIGH (in aggregate).** The C source heavily aliases these structures. It is extremely common for a function to be passed both `pbi` and `xd` (where `xd` is a pointer to `pbi.mb`). Rust's borrow checker strictly forbids aliasing mutable references (`&mut`). Converting these function signatures to use `&mut` would require a massive refactoring to "split borrows" — modifying functions to only accept the specific fields they need (e.g., passing `&mut pbi.mb` and `&mut pbi.common` separately) rather than passing the entire god-object context around.
+
+This refactor is the cross-cutting prerequisite for most of the §1 and §2 conversions: once functions stop taking `*mut Vp8dComp` and instead take disjoint `&mut` views, several of the "MEDIUM-HIGH" entries above drop to LOW because their access pattern can be expressed as a safe `&mut` against state that's no longer aliased.

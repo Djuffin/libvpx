@@ -54,7 +54,7 @@ pub unsafe fn vp8_de_alloc_frame_buffers(oci: *mut Vp8Common) {
     (*oci).mip = ptr::null_mut();
     (*oci).mi = ptr::null_mut();
     (*oci).show_frame_mi = ptr::null_mut();
-    (*oci).frame_to_show = ptr::null_mut();
+    (*oci).frame_to_show_idx = -1;
 }
 
 /// `vp8_alloc_frame_buffers` — (re)allocate every heap region attached to
@@ -207,6 +207,10 @@ pub unsafe fn vp8_create_common(oci: *mut Vp8Common) {
     /* Default disable buffer to buffer copying */
     (*oci).copy_buffer_to_gf = 0;
     (*oci).copy_buffer_to_arf = 0;
+
+    /* No frame ready until the first decode completes. zero-init of
+     * `vpx_calloc` would otherwise leave this at the valid index 0. */
+    (*oci).frame_to_show_idx = -1;
 }
 
 /// `vp8_remove_common` — instance teardown. Forwards to the frame-buffer

@@ -576,7 +576,8 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
     let mut mb_col: c_int;
     let mut mb_idx: c_int = 0;
 
-    let yv12_fb_new: *mut Yv12BufferConfig = (*pbi).dec_fb_ref[INTRA_FRAME];
+    let yv12_fb_new: *mut Yv12BufferConfig =
+        &mut (*pbi).common.yv12_fb[(*pbi).dec_fb_ref_idx[INTRA_FRAME] as usize];
 
     let recon_y_stride: c_int = (*yv12_fb_new).y_stride;
     let recon_uv_stride: c_int = (*yv12_fb_new).uv_stride;
@@ -592,7 +593,8 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
 
     i = 1;
     while i < MAX_REF_FRAMES as c_int {
-        let this_fb: *mut Yv12BufferConfig = (*pbi).dec_fb_ref[i as usize];
+        let this_fb: *mut Yv12BufferConfig =
+            &mut (*pbi).common.yv12_fb[(*pbi).dec_fb_ref_idx[i as usize] as usize];
 
         ref_buffer[i as usize][0] = (*this_fb).y_buffer;
         ref_buffer[i as usize][1] = (*this_fb).u_buffer;
@@ -1083,7 +1085,8 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     let mut corrupt_tokens: c_int = 0;
     let prev_independent_partitions: c_int = (*pbi).independent_partitions;
 
-    let yv12_fb_new: *mut Yv12BufferConfig = (*pbi).dec_fb_ref[INTRA_FRAME];
+    let yv12_fb_new: *mut Yv12BufferConfig =
+        &mut (*pbi).common.yv12_fb[(*pbi).dec_fb_ref_idx[INTRA_FRAME] as usize];
 
     /* start with no corruption of current frame */
     (*xd).corrupted = 0;
