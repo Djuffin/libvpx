@@ -482,12 +482,6 @@ pub struct Macroblockd {
     pub up_available: bool,
     pub left_available: bool,
 
-    /// Per-plane (Y, U, V) above-row reconstruction edge pointers.
-    pub recon_above: [*mut u8; 3],
-    /// Per-plane left-column reconstruction edge pointers.
-    pub recon_left: [*mut u8; 3],
-    pub recon_left_stride: [i32; 2],
-
     pub segmentation_enabled: u8,
     pub update_mb_segmentation_map: u8,
     pub update_mb_segmentation_data: u8,

@@ -183,14 +183,16 @@ unsafe fn decode_macroblock(
 
     /* do prediction */
     if mi.mbmi.ref_frame == MvReferenceFrame::Intra {
+        let y_stride: isize = (*xd).dst.y_stride as isize;
+        let uv_stride: isize = (*xd).dst.uv_stride as isize;
         vp8_build_intra_predictors_mbuv_s(
             xd,
             mi,
-            (*xd).recon_above[1],
-            (*xd).recon_above[2],
-            (*xd).recon_left[1],
-            (*xd).recon_left[2],
-            (*xd).recon_left_stride[1],
+            (*xd).dst.u_buffer.offset(-uv_stride), // uabove_row
+            (*xd).dst.v_buffer.offset(-uv_stride), // vabove_row
+            (*xd).dst.u_buffer.offset(-1),         // uleft
+            (*xd).dst.v_buffer.offset(-1),         // vleft
+            (*xd).dst.uv_stride,                   // left_stride
             (*xd).dst.u_buffer,
             (*xd).dst.v_buffer,
             (*xd).dst.uv_stride,
@@ -200,9 +202,9 @@ unsafe fn decode_macroblock(
             vp8_build_intra_predictors_mby_s(
                 xd,
                 mi,
-                (*xd).recon_above[0],
-                (*xd).recon_left[0],
-                (*xd).recon_left_stride[0],
+                (*xd).dst.y_buffer.offset(-y_stride), // yabove_row
+                (*xd).dst.y_buffer.offset(-1),        // yleft
+                (*xd).dst.y_stride,                   // left_stride
                 (*xd).dst.y_buffer,
                 (*xd).dst.y_stride,
             );
@@ -215,7 +217,7 @@ unsafe fn decode_macroblock(
                 ptr::write_bytes((*xd).eobs.as_mut_ptr(), 0, 25);
             }
 
-            intra_prediction_down_copy(xd, (*xd).recon_above[0].add(16));
+            intra_prediction_down_copy(xd, (*xd).dst.y_buffer.offset(-y_stride).add(16));
 
             for i in 0..16 {
                 let b: *mut Blockd = &mut (*xd).block[i as usize];
@@ -644,27 +646,19 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
         (*xd).mb_to_top_edge = -((mb_row * 16) << 3);
         (*xd).mb_to_bottom_edge = ((*pc).mb_rows - 1 - mb_row) * 16 << 3;
 
-        (*xd).recon_above[0] = dst_buffer[0].offset(recon_yoffset as isize);
-        (*xd).recon_above[1] = dst_buffer[1].offset(recon_uvoffset as isize);
-        (*xd).recon_above[2] = dst_buffer[2].offset(recon_uvoffset as isize);
-
-        (*xd).recon_left[0] = (*xd).recon_above[0].offset(-1);
-        (*xd).recon_left[1] = (*xd).recon_above[1].offset(-1);
-        (*xd).recon_left[2] = (*xd).recon_above[2].offset(-1);
-
-        (*xd).recon_above[0] = (*xd).recon_above[0].offset(-((*xd).dst.y_stride as isize));
-        (*xd).recon_above[1] = (*xd).recon_above[1].offset(-((*xd).dst.uv_stride as isize));
-        (*xd).recon_above[2] = (*xd).recon_above[2].offset(-((*xd).dst.uv_stride as isize));
-
-        (*xd).recon_left_stride[0] = (*xd).dst.y_stride;
-        (*xd).recon_left_stride[1] = (*xd).dst.uv_stride;
-
+        // Compute the left-column pointers for the upcoming row's first
+        // MB. (`recon_above` / `recon_left` are no longer cached on
+        // `xd`; the intra-predictor call sites derive them on demand
+        // from `xd.dst.{y,u,v}_buffer` at the point of use.)
+        let y_row_base = dst_buffer[0].offset(recon_yoffset as isize);
+        let u_row_base = dst_buffer[1].offset(recon_uvoffset as isize);
+        let v_row_base = dst_buffer[2].offset(recon_uvoffset as isize);
         setup_intra_recon_left(
-            (*xd).recon_left[0],
-            (*xd).recon_left[1],
-            (*xd).recon_left[2],
-            (*xd).dst.y_stride,
-            (*xd).dst.uv_stride,
+            y_row_base.offset(-1),
+            u_row_base.offset(-1),
+            v_row_base.offset(-1),
+            recon_y_stride,
+            recon_uv_stride,
         );
 
         // Hoist the per-row slice once so the inner loop is a single
@@ -704,13 +698,6 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
 
             /* check if the boolean decoder has suffered an error */
             (*xd).corrupted |= vp8dx_bool_error(bc);
-
-            (*xd).recon_above[0] = (*xd).recon_above[0].add(16);
-            (*xd).recon_above[1] = (*xd).recon_above[1].add(8);
-            (*xd).recon_above[2] = (*xd).recon_above[2].add(8);
-            (*xd).recon_left[0] = (*xd).recon_left[0].add(16);
-            (*xd).recon_left[1] = (*xd).recon_left[1].add(8);
-            (*xd).recon_left[2] = (*xd).recon_left[2].add(8);
 
             recon_yoffset += 16;
             recon_uvoffset += 8;
