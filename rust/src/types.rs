@@ -692,24 +692,6 @@ pub struct Vp8Common {
 }
 
 impl Vp8Common {
-    /// Raw pointer to the first visible MB slot in the MI grid —
-    /// equivalent to the former `mi: *mut ModeInfo` field, derived as
-    /// `mip.as_mut_ptr().add(stride + 1)`. Returns null when the grid
-    /// hasn't been allocated yet.
-    ///
-    /// The returned pointer supports the kernel's negative-offset
-    /// neighbour reads (`mi.offset(-1)`, `mi.offset(-stride)`,
-    /// `mi.offset(-stride - 1)`) because the corresponding entries
-    /// live in the top-row / left-column padding of the underlying
-    /// allocation.
-    pub fn mi_base_ptr(&mut self) -> *mut ModeInfo {
-        let stride = self.mode_info_stride as usize;
-        match self.mip.as_deref_mut() {
-            Some(slab) => slab[stride + 1..].as_mut_ptr(),
-            None => core::ptr::null_mut(),
-        }
-    }
-
     /// Linear index of cell `(row, col)` inside the MI slab. Both
     /// arguments may be `-1` (top/left padding); the slab is sized
     /// `(mb_cols+1)*(mb_rows+1)` for exactly this purpose, so the

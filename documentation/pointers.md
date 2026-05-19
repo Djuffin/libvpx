@@ -64,6 +64,22 @@ Phase 1 of the §1 split-borrow refactor: convert leaf kernel functions taking `
 
 Caller pattern at `decode_macroblock` boundaries: `&*xd` / `&mut *xd` to bridge from the still-raw `xd: *mut Macroblockd` to the new safe signatures. The bridge is zero-cost and uses the established pattern from earlier refactors.
 
+### Split-borrow refactor — Phase 2a + 2b (decodemv.rs leaf helpers)
+
+5 more leaf functions in `decodemv.rs` converted to safe signatures. Phase 2b finally exercises the `Vp8Common::mi_above`/`mi_left` accessors that were created during the MI-grid removal but unused in the kernel hot path until now.
+
+| Function | Before | After |
+|---|---|---|
+| `mv_bias` | `unsafe fn(_: i32, _: MvReferenceFrame, mvp: *mut Mv, ref_frame_sign_bias: *const i32)` | `fn(_: i32, _: MvReferenceFrame, mvp: &mut Mv, ref_frame_sign_bias: &[i32; MAX_REF_FRAMES])` — body fully safe |
+| `vp8_clamp_mv2` | `unsafe fn(mv: *mut Mv, xd: *const Macroblockd)` | `fn(mv: &mut Mv, l: i32, r: i32, t: i32, bot: i32)` — body fully safe; 3 call sites unrolled `xd` into the 4 edges |
+| `vp8_check_mv_bounds` | `unsafe fn(mv: *const Mv, ...)` | `fn(mv: &Mv, ...)` — body fully safe |
+| `above_block_mode` | `unsafe fn(cur_mb: *const ModeInfo, b, mi_stride)` | `fn(pc: &Vp8Common, mb_row, mb_col, mi: &ModeInfo, b)` — uses `pc.mi_above(mb_row, mb_col)` for the neighbor read; body fully safe |
+| `left_block_mode` | `unsafe fn(cur_mb: *const ModeInfo, b)` | `fn(pc: &Vp8Common, mb_row, mb_col, mi: &ModeInfo, b)` — uses `pc.mi_left(mb_row, mb_col)`; body fully safe |
+
+The neighbor-accessor migration cascaded `(mb_row, mb_col)` through `read_kf_modes` and `decode_mb_mode_mvs` so the values reach `above_block_mode`/`left_block_mode`. `vp8_decode_mode_mvs`'s previously-unused `_mb_row`/`_mb_col` loop variables are now live.
+
+**Bench delta vs. baseline**: 480p **−1.20% improvement** (p<0.01), 720p **−1.12% improvement** (p<0.01). Both benches are now ~1% faster than baseline. The neighbor-accessor migration (`pc.mi_above` / `mi_left`) compiles to faster code than the C-style negative-offset cursor it replaced — LLVM can prove `idx < slab.len()` from the `mb_row < mb_rows` / `mb_col < mb_cols` invariants, eliding the bounds check entirely. The earlier MI-grid regression has been fully recovered AND beaten.
+
 The kernel callers that still hold raw `*mut Vp8Common` cross into these safe APIs via `&mut *pc` at the call site — keeping the per-frame decoder loop raw-pointer-shaped while everything from `Vp8Common`-level alloc/teardown upward is type-checked.
 
 ---
