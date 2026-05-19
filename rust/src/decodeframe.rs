@@ -122,15 +122,6 @@ pub unsafe fn vp8cx_init_de_quantizer(pbi: *mut Vp8dComp<'static>) {
 // ---------------------------------------------------------------------------
 
 /// `vp8_mb_init_dequantizer` (vp8/decoder/decodeframe.c:57).
-///
-/// §3 split-borrow pilot: this function originally took
-/// `(pbi: *mut Vp8dComp, xd: *mut Macroblockd)`. It now takes disjoint
-/// references against the two fields that pointed at — `&Vp8Common`
-/// (read-only) for the dequant tables and base qindex, and
-/// `&mut Macroblockd` for the per-MB dequant arrays. The single
-/// remaining `unsafe` deref is `mb.mode_info_context`, which points
-/// into `common.mip` and is therefore an alias we can't express as a
-/// safe reborrow until the MI grid itself is converted.
 pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd, mi: &ModeInfo) {
     let segment_id = mi.mbmi.segment_id as usize;
 

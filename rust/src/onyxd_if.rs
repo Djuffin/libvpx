@@ -23,7 +23,7 @@
 use core::ptr;
 
 use crate::types::{
-    FragmentData, FrameBuffers, ModeInfo, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
+    FragmentData, FrameBuffers, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
     Vp8dComp, Vp8dConfig, VpxResult, Yv12BufferConfig,
 };
 
@@ -446,27 +446,14 @@ pub unsafe fn vp8dx_get_raw_frame(
 
 /// `vp8dx_references_buffer` — `vp8/decoder/onyxd_if.c:411`.
 ///
-/// Linear scan over the mode-info grid (`oci->mi`) checking whether any
-/// macroblock referenced `ref_frame`. The trailing `mi = mi.add(1)` past
-/// each row skips the sentinel column at `mode_info_stride - 1`.
-
-pub fn vp8dx_references_buffer(oci: &mut Vp8Common, ref_frame: i32) -> i32 {
-    let mb_rows = oci.mb_rows;
-    let mb_cols = oci.mb_cols;
-    let mut mi: *const ModeInfo = oci.mi_base_ptr() as *const ModeInfo;
-
-    // SAFETY: `mi` points into the Box-owned MI grid; the `(mb_rows *
-    // (mb_cols + 1))` strides we walk land inside the
-    // `(mb_cols+1)*(mb_rows+1)` slab.
-    unsafe {
-        for _ in 0..mb_rows {
-            for _ in 0..mb_cols {
-                if (*mi).mbmi.ref_frame as i32 == ref_frame {
-                    return 1;
-                }
-                mi = mi.add(1);
+/// Linear scan over the mode-info grid checking whether any macroblock
+/// referenced `ref_frame`.
+pub fn vp8dx_references_buffer(oci: &Vp8Common, ref_frame: i32) -> i32 {
+    for row in 0..oci.mb_rows {
+        for mi in oci.mi_row(row) {
+            if mi.mbmi.ref_frame as i32 == ref_frame {
+                return 1;
             }
-            mi = mi.add(1);
         }
     }
     0
