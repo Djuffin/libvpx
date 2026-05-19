@@ -640,7 +640,7 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
         recon_uvoffset = mb_row * recon_uv_stride * 8;
 
         /* reset contexts */
-        (*xd).above_context = (*pc).above_context;
+        (*xd).above_context = (*pc).above_context.as_deref_mut().unwrap().as_mut_ptr();
         ptr::write_bytes(
             &mut (*pc).left_context as *mut _ as *mut u8,
             0,
@@ -1414,7 +1414,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
     vp8_decode_mode_mvs(pbi);
 
     ptr::write_bytes(
-        (*pc).above_context as *mut u8,
+        (*pc).above_context.as_deref_mut().unwrap().as_mut_ptr() as *mut u8,
         0,
         core::mem::size_of::<EntropyContextPlanes>() * (*pc).mb_cols as usize,
     );

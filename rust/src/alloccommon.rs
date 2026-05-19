@@ -45,12 +45,11 @@ pub unsafe fn vp8_de_alloc_frame_buffers(oci: *mut Vp8Common) {
 
     // CONFIG_POSTPROC block omitted (minimal build).
 
-    vpx_free((*oci).above_context as *mut c_void);
+    (*oci).above_context = None;
     vpx_free((*oci).mip as *mut c_void);
 
     // CONFIG_ERROR_CONCEALMENT block omitted (minimal build).
 
-    (*oci).above_context = ptr::null_mut();
     (*oci).mip = ptr::null_mut();
     (*oci).mi = ptr::null_mut();
     (*oci).frame_to_show_idx = -1;
@@ -123,15 +122,9 @@ pub unsafe fn vp8_alloc_frame_buffers(oci: *mut Vp8Common, mut width: i32, mut h
     /* Allocation of previous mode info will be done in vp8_decode_frame()
      * as it is a decoder only data */
 
-    (*oci).above_context = vpx_calloc(
-        core::mem::size_of::<EntropyContextPlanes>() * (*oci).mb_cols as usize,
-        1,
-    ) as *mut EntropyContextPlanes;
-
-    if (*oci).above_context.is_null() {
-        vp8_de_alloc_frame_buffers(oci);
-        return 1;
-    }
+    (*oci).above_context = Some(
+        vec![EntropyContextPlanes::default(); (*oci).mb_cols as usize].into_boxed_slice(),
+    );
 
     // CONFIG_POSTPROC block omitted (minimal build).
 

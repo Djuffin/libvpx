@@ -684,8 +684,12 @@ pub struct Vp8Common {
     /// `[INTRA..ALTREF]` — flips the MV sign for backward predictions.
     pub ref_frame_sign_bias: [i32; MAX_REF_FRAMES],
 
-    /// Above-row entropy context (one slot per MB column).
-    pub above_context: *mut EntropyContextPlanes,
+    /// Above-row entropy context (one slot per MB column). Owned slice;
+    /// `Macroblockd.above_context` aliases into this allocation as a
+    /// raw cursor. `None` until the first `vp8_alloc_frame_buffers`
+    /// call. `Option<Box<[T]>>` is zero-niche so the zero-init shell
+    /// produced by `Box::<Vp8dComp>::new_zeroed` leaves this as `None`.
+    pub above_context: Option<Box<[EntropyContextPlanes]>>,
     /// Single rolling left-column context (one MB tall).
     pub left_context: EntropyContextPlanes,
 
