@@ -471,7 +471,7 @@ pub unsafe fn vp8dx_get_raw_frame(
 /// each row skips the sentinel column at `mode_info_stride - 1`.
 
 pub unsafe fn vp8dx_references_buffer(oci: *mut Vp8Common, ref_frame: i32) -> i32 {
-    let mut mi: *const ModeInfo = (*oci).mi as *const ModeInfo;
+    let mut mi: *const ModeInfo = (*oci).mi_base_ptr() as *const ModeInfo;
 
     for _ in 0..(*oci).mb_rows {
         for _ in 0..(*oci).mb_cols {

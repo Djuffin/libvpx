@@ -11,9 +11,6 @@
 
 #![allow(dead_code)]
 
-use core::ffi::c_void;
-use core::ptr;
-
 use crate::types::{
     ClampType, EntropyContextPlanes, LoopFilterType, ModeInfo, NUM_YV12_BUFFERS, TokenPartition,
     VP8_BORDER_IN_PIXELS, Vp8Common,
@@ -24,7 +21,6 @@ use crate::types::{
 // ---------------------------------------------------------------------------
 
 use crate::entropymode::{vp8_default_bmode_probs, vp8_init_mbmode_probs};
-use crate::vpx_mem::{vpx_calloc, vpx_free};
 use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buffer};
 
 // ---------------------------------------------------------------------------
@@ -36,10 +32,10 @@ use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buf
 ///
 /// Source: `vp8/common/alloccommon.c:22`.
 pub fn vp8_de_alloc_frame_buffers(oci: &mut Vp8Common) {
-    // SAFETY: `vp8_yv12_de_alloc_frame_buffer` and `vpx_free` accept
-    // null pointers; the embedded YV12 descriptors and `oci.mip` are
-    // either populated by `vp8_alloc_frame_buffers` or already nulled
-    // by a previous teardown.
+    // SAFETY: `vp8_yv12_de_alloc_frame_buffer` accepts a null buffer
+    // descriptor; the embedded YV12 slots are either populated by
+    // `vp8_alloc_frame_buffers` or already nulled by a previous
+    // teardown.
     unsafe {
         for i in 0..NUM_YV12_BUFFERS {
             vp8_yv12_de_alloc_frame_buffer(&mut oci.yv12_fb[i]);
@@ -49,16 +45,13 @@ pub fn vp8_de_alloc_frame_buffers(oci: &mut Vp8Common) {
         vp8_yv12_de_alloc_frame_buffer(&mut oci.temp_scale_frame);
 
         // CONFIG_POSTPROC block omitted (minimal build).
-
-        vpx_free(oci.mip as *mut c_void);
     }
 
     oci.above_context = None;
+    oci.mip = None;
 
     // CONFIG_ERROR_CONCEALMENT block omitted (minimal build).
 
-    oci.mip = ptr::null_mut();
-    oci.mi = ptr::null_mut();
     oci.frame_to_show_idx = -1;
 }
 
@@ -116,24 +109,13 @@ pub fn vp8_alloc_frame_buffers(oci: &mut Vp8Common, mut width: i32, mut height: 
     oci.mb_cols = width >> 4;
     oci.mbs = oci.mb_rows * oci.mb_cols;
     oci.mode_info_stride = oci.mb_cols + 1;
-    // SAFETY: `vpx_calloc` returns either a valid zero-initialised
-    // allocation of the requested size or null; we check below.
-    oci.mip = unsafe {
-        vpx_calloc(
-            ((oci.mb_cols + 1) * (oci.mb_rows + 1)) as usize,
-            core::mem::size_of::<ModeInfo>(),
-        ) as *mut ModeInfo
-    };
-
-    if oci.mip.is_null() {
-        vp8_de_alloc_frame_buffers(oci);
-        return 1;
-    }
-
-    // SAFETY: `mip` is non-null and points at a `(mb_cols+1)*(mb_rows+1)`
-    // grid of `ModeInfo`; offsetting by `stride + 1` lands inside the
-    // first visible MB slot.
-    oci.mi = unsafe { oci.mip.offset((oci.mode_info_stride + 1) as isize) };
+    // SAFETY: every field of `ModeInfo` has a valid zero bit pattern
+    // — the tagged enums (`MbPredictionMode`, `MvReferenceFrame`,
+    // `BModeInfo`) all have discriminant 0 corresponding to a real
+    // variant. Byte-identical to the previous `vpx_calloc(count,
+    // sizeof(ModeInfo))`.
+    let count = ((oci.mb_cols + 1) * (oci.mb_rows + 1)) as usize;
+    oci.mip = Some(unsafe { Box::<[ModeInfo]>::new_zeroed_slice(count).assume_init() });
 
     /* Allocation of previous mode info will be done in vp8_decode_frame()
      * as it is a decoder only data */

@@ -656,10 +656,11 @@ pub struct Vp8Common {
 
     /// MI-grid base allocation (with the one-row top and one-column
     /// left border). RFC 6386 §11.5 (neighbour-aware key-frame intra
-    /// prediction needs negative indices to be valid).
-    pub mip: *mut ModeInfo,
-    /// First visible MB slot inside `mip` (offset by `stride + 1`).
-    pub mi: *mut ModeInfo,
+    /// prediction needs negative indices to be valid). `None` until
+    /// `vp8_alloc_frame_buffers` runs. The "first visible MB" pointer
+    /// (formerly the `mi: *mut ModeInfo` field) is now derived on
+    /// demand via [`Vp8Common::mi_base_ptr`].
+    pub mip: Option<Box<[ModeInfo]>>,
 
     pub filter_type: LoopFilterType,
     pub lf_info: LoopFilterInfoN,
@@ -693,6 +694,26 @@ pub struct Vp8Common {
     pub current_video_frame: u32,
     pub version: i32,
     pub multi_token_partition: TokenPartition,
+}
+
+impl Vp8Common {
+    /// Raw pointer to the first visible MB slot in the MI grid —
+    /// equivalent to the former `mi: *mut ModeInfo` field, derived as
+    /// `mip.as_mut_ptr().add(stride + 1)`. Returns null when the grid
+    /// hasn't been allocated yet.
+    ///
+    /// The returned pointer supports the kernel's negative-offset
+    /// neighbour reads (`mi.offset(-1)`, `mi.offset(-stride)`,
+    /// `mi.offset(-stride - 1)`) because the corresponding entries
+    /// live in the top-row / left-column padding of the underlying
+    /// allocation.
+    pub fn mi_base_ptr(&mut self) -> *mut ModeInfo {
+        let stride = self.mode_info_stride as usize;
+        match self.mip.as_deref_mut() {
+            Some(slab) => unsafe { slab.as_mut_ptr().add(stride + 1) },
+            None => core::ptr::null_mut(),
+        }
+    }
 }
 
 // ===========================================================================

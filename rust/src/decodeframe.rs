@@ -23,7 +23,7 @@ use crate::tables::{
 use crate::types::{
     Blockd, ClampType, EntropyContextPlanes, FrameType, LoopFilterType, MAX_MB_SEGMENTS,
     MAX_MODE_LF_DELTAS, MAX_REF_FRAMES, MAX_REF_LF_DELTAS, MB_FEATURE_TREE_PROBS, MB_LVL_MAX,
-    Macroblockd, MbLevelFeature, MbModeInfo, MbPredictionMode, ModeInfo, MvReferenceFrame,
+    Macroblockd, MbLevelFeature, MbPredictionMode, ModeInfo, MvReferenceFrame,
     TokenPartition, Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig,
 };
 
@@ -122,50 +122,45 @@ pub unsafe fn vp8cx_init_de_quantizer(pbi: *mut Vp8dComp<'static>) {
 // ---------------------------------------------------------------------------
 
 /// `vp8_mb_init_dequantizer` (vp8/decoder/decodeframe.c:57).
-pub unsafe fn vp8_mb_init_dequantizer(pbi: *mut Vp8dComp<'static>, xd: *mut Macroblockd) {
-    let mut i: c_int;
-    let mut QIndex: c_int;
-    let mbmi: *mut MbModeInfo = &mut (*(*xd).mode_info_context).mbmi;
-    let pc: *mut Vp8Common = &mut (*pbi).common;
+///
+/// §3 split-borrow pilot: this function originally took
+/// `(pbi: *mut Vp8dComp, xd: *mut Macroblockd)`. It now takes disjoint
+/// references against the two fields that pointed at — `&Vp8Common`
+/// (read-only) for the dequant tables and base qindex, and
+/// `&mut Macroblockd` for the per-MB dequant arrays. The single
+/// remaining `unsafe` deref is `mb.mode_info_context`, which points
+/// into `common.mip` and is therefore an alias we can't express as a
+/// safe reborrow until the MI grid itself is converted.
+pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd) {
+    // SAFETY: `mode_info_context` is a kernel-internal cursor into
+    // `common.mip`; the deref is sound by the same invariant that the
+    // rest of the kernel relies on.
+    let segment_id = unsafe { (*mb.mode_info_context).mbmi.segment_id as usize };
 
     /* Decide whether to use the default or alternate baseline Q value. */
-    if (*xd).segmentation_enabled != 0 {
-        /* Abs Value */
-        if (*xd).mb_segment_abs_delta == SEGMENT_ABSDATA {
-            QIndex = (*xd).segment_feature_data[MB_LVL_ALT_Q][(*mbmi).segment_id as usize] as c_int;
+    let qi: usize = (if mb.segmentation_enabled != 0 {
+        let q = if mb.mb_segment_abs_delta == SEGMENT_ABSDATA {
+            mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as c_int
         } else {
-            /* Delta Value */
-            QIndex = (*pc).base_qindex
-                + (*xd).segment_feature_data[MB_LVL_ALT_Q][(*mbmi).segment_id as usize] as c_int;
-        }
-
-        QIndex = if QIndex >= 0 {
-            if QIndex <= MAXQ as c_int {
-                QIndex
-            } else {
-                MAXQ as c_int
-            }
-        } else {
-            0
+            pc.base_qindex + mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as c_int
         };
+        q.clamp(0, MAXQ as c_int)
     } else {
-        QIndex = (*pc).base_qindex;
-    }
+        pc.base_qindex
+    }) as usize;
 
     /* Set up the macroblock dequant constants */
-    (*xd).dequant_y1_dc[0] = 1;
-    (*xd).dequant_y1[0] = (*pc).y1_dequant[QIndex as usize][0];
-    (*xd).dequant_y2[0] = (*pc).y2_dequant[QIndex as usize][0];
-    (*xd).dequant_uv[0] = (*pc).uv_dequant[QIndex as usize][0];
+    mb.dequant_y1_dc[0] = 1;
+    mb.dequant_y1[0] = pc.y1_dequant[qi][0];
+    mb.dequant_y2[0] = pc.y2_dequant[qi][0];
+    mb.dequant_uv[0] = pc.uv_dequant[qi][0];
 
-    i = 1;
-    while i < 16 {
-        let ac = (*pc).y1_dequant[QIndex as usize][1];
-        (*xd).dequant_y1_dc[i as usize] = ac;
-        (*xd).dequant_y1[i as usize] = ac;
-        (*xd).dequant_y2[i as usize] = (*pc).y2_dequant[QIndex as usize][1];
-        (*xd).dequant_uv[i as usize] = (*pc).uv_dequant[QIndex as usize][1];
-        i += 1;
+    for i in 1..16 {
+        let ac = pc.y1_dequant[qi][1];
+        mb.dequant_y1_dc[i] = ac;
+        mb.dequant_y1[i] = ac;
+        mb.dequant_y2[i] = pc.y2_dequant[qi][1];
+        mb.dequant_uv[i] = pc.uv_dequant[qi][1];
     }
 }
 
@@ -194,7 +189,7 @@ unsafe fn decode_macroblock(
     mode = (*(*xd).mode_info_context).mbmi.mode;
 
     if (*xd).segmentation_enabled != 0 {
-        vp8_mb_init_dequantizer(pbi, xd);
+        vp8_mb_init_dequantizer(&(*pbi).common, &mut *xd);
     }
 
     /* do prediction */
@@ -1055,7 +1050,7 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
         // decoded_key_frame/ec_enabled/ec_active toggle is also off.
     }
 
-    (*xd).mode_info_context = (*pc).mi;
+    (*xd).mode_info_context = (*pc).mi_base_ptr();
     (*xd).frame_type = (*pc).frame_type;
     (*(*xd).mode_info_context).mbmi.mode = DC_PRED;
     (*xd).mode_info_stride = (*pc).mode_info_stride;
@@ -1329,7 +1324,7 @@ pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
         }
 
         /* MB level dequantizer setup */
-        vp8_mb_init_dequantizer(pbi, &mut (*pbi).mb);
+        vp8_mb_init_dequantizer(&(*pbi).common, &mut (*pbi).mb);
     }
 
     /* Determine if GF/ARF buffers should be updated and how. */

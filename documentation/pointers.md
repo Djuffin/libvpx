@@ -20,6 +20,10 @@ The following raw pointers have already been replaced. They are listed here so f
 | `Vp8Common.above_context: *mut EntropyContextPlanes` | `Option<Box<[EntropyContextPlanes]>>` | `vpx_calloc(mb_cols * sizeof, 1)` → `vec![Default::default(); mb_cols].into_boxed_slice()`. `Option<Box<>>` zero-niche means the zero-initialised `Vp8dComp` shell produces `None` for the field automatically; alloccommon assigns `Some(box)` when frame dimensions are known. The explicit `vpx_free` call is replaced by `(*oci).above_context = None` (Box's Drop runs). OOM behaviour shifts from `is_null()` failure-path to Rust's allocator-abort. Bench delta vs. baseline: no measurable change (p > 0.05). |
 | `Macroblockd.above_context: *mut EntropyContextPlanes` (cursor) | (deleted) | The cursor was a state-free walker — its value was always `pc.above_context.as_mut_ptr().add(mb_col)`. The dead `mb_idx` counter variable in the row-decode loop (only fed to an unused `_mb_idx` parameter) was removed alongside. `decode_macroblock` now receives `mb_col` directly; `vp8_reset_mb_tokens_context` and `vp8_decode_mb_tokens` each gained a `mb_col: i32` arg and index into `(*dx).common.above_context.as_deref_mut().unwrap()[mb_col as usize]` at use sites. Bench delta vs. baseline: no measurable change (p ≈ 0.06, trending slightly faster — likely the elided per-MB pointer advance). |
 | `Macroblockd.current_bc: *mut c_void` | (deleted) | The field was a type-erased pointer to the per-row bool reader (one of `Vp8dComp.mbc[0..N-1]`). It is now computed as a local `bc: *mut Vp8Reader<'static>` at row-start in the outer decode loop and threaded as an explicit argument to `decode_macroblock` (gains `bc: *mut Vp8Reader<'static>`) and `vp8_decode_mb_tokens` (same). Three read sites (`decodeframe.rs` post-decode error check; `detokenize.rs` first line of the per-MB token driver) consume the param. The frame-init write at `decodeframe.rs:1313` was redundant with the per-row computation and was deleted. `Macroblockd` now carries **zero lifetime-bearing raw pointers**, removing the original motivation for the `*mut c_void` erasure. Bench delta vs. baseline: no measurable change (p > 0.9 on both vectors). |
+| `Vp8Common.mip: *mut ModeInfo` | `Option<Box<[ModeInfo]>>` | `vpx_calloc((mb_cols+1)*(mb_rows+1), sizeof)` → `Box::<[ModeInfo]>::new_zeroed_slice(count).assume_init()`. Byte-identical layout (every `ModeInfo` field has a valid zero bit pattern — `MbPredictionMode::DcPred=0`, `MvReferenceFrame::Intra=0`, `BModeInfo`'s `Intra` variant has discriminant 0 and `BPredictionMode::DcPred=0`). The Box's Drop replaces the manual `vpx_free` + null-pointer reset. Bench delta vs. baseline: 480p flat (p=0.61), 720p +0.5% at p=0.03 (marginal — at the noise floor for this bench; the helper fires ≤2 times per frame). |
+| `Vp8Common.mi: *mut ModeInfo` | (deleted) | The field was just `mip.offset(stride + 1)` — a convenience pointer at the first visible MB slot. Replaced by a method `Vp8Common::mi_base_ptr(&mut self) -> *mut ModeInfo` that computes the same value on demand. Three reader sites (`decodeframe.rs:1053` cursor init, `decodemv.rs:828` mode-decoding traversal start, `onyxd_if.rs:474` references-buffer scan) updated to call the helper. The negative-offset neighbour reads from `mode_info_context` still land in valid memory because the Box owns `(mb_cols+1)*(mb_rows+1)` entries. |
+
+**`Vp8Common` is now free of raw-pointer fields** — every slab allocation (`yv12_fb`, `above_context`, `mip`) is owned through safe Rust types. The kernel's per-MB cursor `Macroblockd.mode_info_context: *mut ModeInfo` still aliases into the Box-owned slab; removing that cursor (a 60-site refactor) is a separate undertaking.
 
 All were verified bit-exact against the libvpx C reference via the 62-vector conformance suite.
 
@@ -34,7 +38,8 @@ All were verified bit-exact against the libvpx C reference via the 62-vector con
 | `vp8_create_common` | `pub unsafe fn(_: *mut Vp8Common)` | `pub fn(_: &mut Vp8Common)` — body fully safe; `ptr::write_bytes(...)` zeroing replaced with `.fill(0)` on the typed array |
 | `vp8_remove_common` | `pub unsafe fn(_: *mut Vp8Common)` | `pub fn(_: &mut Vp8Common)` — body fully safe (calls the now-safe `vp8_de_alloc_frame_buffers`) |
 | `vp8_de_alloc_frame_buffers` | `pub unsafe fn(_: *mut Vp8Common)` | `pub fn(_: &mut Vp8Common)` — body has one internal `unsafe` block around `vp8_yv12_de_alloc_frame_buffer` + `vpx_free` |
-| `vp8_alloc_frame_buffers` | `pub unsafe fn(_: *mut Vp8Common, ...)` | `pub fn(_: &mut Vp8Common, ...)` — three small internal `unsafe` blocks around `vp8_yv12_alloc_frame_buffer`, `vpx_calloc`, and `mip.offset(...)` |
+| `vp8_alloc_frame_buffers` | `pub unsafe fn(_: *mut Vp8Common, ...)` | `pub fn(_: &mut Vp8Common, ...)` — two small internal `unsafe` blocks around `vp8_yv12_alloc_frame_buffer` calls (the `vpx_calloc` and `mip.offset(...)` blocks went away when the MI grid became a `Box<[ModeInfo]>`) |
+| `vp8_mb_init_dequantizer` *(§3 split-borrow pilot)* | `pub unsafe fn(_: *mut Vp8dComp, _: *mut Macroblockd)` | `pub fn(_: &Vp8Common, _: &mut Macroblockd)` — body almost fully safe; one internal `unsafe { (*mb.mode_info_context).mbmi.segment_id }` line for the remaining MI-grid cursor deref. Caller pattern: `vp8_mb_init_dequantizer(&(*pbi).common, &mut *xd)`. Validates that per-function disjoint-borrow conversion works in this codebase. |
 
 The kernel callers that still hold raw `*mut Vp8Common` cross into these safe APIs via `&mut *pc` at the call site — keeping the per-frame decoder loop raw-pointer-shaped while everything from `Vp8Common`-level alloc/teardown upward is type-checked.
 
@@ -52,18 +57,20 @@ The kernel callers that still hold raw `*mut Vp8Common` cross into these safe AP
 
 ---
 
-## 2. Inside `Vp8Common` (Per-sequence/frame state)
-
-### `mip: *mut ModeInfo`, `mi: *mut ModeInfo`
-*   **Context:** `mip` points to the base heap allocation of the `ModeInfo` grid (which includes padding for top/left borders). `mi` is an offset view into `mip` pointing to the first visible macroblock (allowing negative indexing to hit the padding).
-*   **Conversion Complexity: HIGH.** The grid is allocated via `vpx_calloc` and aliased heavily. Replacing this requires changing the raw allocation to a `Vec<ModeInfo>` or `Box<[ModeInfo]>`. Because Rust slices do not support negative indexing, the concept of `mi` as an offset pointer would need to be replaced by a custom 2D grid abstraction that safely encapsulates the border padding and provides safe `get(row, col)` methods.
-
----
-
-## 3. Function Arguments Across the Kernel
+## 2. Function Arguments Across the Kernel
 
 ### `*mut Vp8dComp`, `*mut Macroblockd`, `*mut Vp8Common`, etc.
 *   **Context:** Almost every internal kernel function takes these structures as raw mutable pointers (e.g., `vp8_decode_frame(pbi: *mut Vp8dComp)`).
 *   **Conversion Complexity: VERY HIGH (in aggregate).** The C source heavily aliases these structures. It is extremely common for a function to be passed both `pbi` and `xd` (where `xd` is a pointer to `pbi.mb`). Rust's borrow checker strictly forbids aliasing mutable references (`&mut`). Converting these function signatures to use `&mut` would require a massive refactoring to "split borrows" — modifying functions to only accept the specific fields they need (e.g., passing `&mut pbi.mb` and `&mut pbi.common` separately) rather than passing the entire god-object context around.
 
-This refactor is the cross-cutting prerequisite for most of the §1 and §2 conversions: once functions stop taking `*mut Vp8dComp` and instead take disjoint `&mut` views, several of the "MEDIUM-HIGH" entries above drop to LOW because their access pattern can be expressed as a safe `&mut` against state that's no longer aliased.
+This refactor is the cross-cutting prerequisite for fully eliminating raw pointers from §1 (kernel cursors that alias into struct fields): once functions stop taking `*mut Vp8dComp` and instead take disjoint `&mut` views, the cursor-style raw pointers can be expressed as safe slice/index pairs against state that's no longer aliased.
+
+### §2 (pilot) — finding
+
+The original VERY HIGH rating was for the all-at-once cross-cutting conversion. A pilot conversion of `vp8_mb_init_dequantizer` (see §0's relaxation table) showed that **per-function conversion is LOW-MEDIUM** — a ~50-line diff, ~15 minutes, no perf regression, body became almost fully safe. The recalibrated assessment:
+
+- Per-function conversion: LOW-MEDIUM (mechanical, scope-bounded)
+- Full §2 conversion of all kernel functions: HIGH (many functions, each independently small — but a long tail)
+- Making functions like `decode_macroblock` *fully* safe (no `unsafe {}` blocks inside): gated on removing the `Macroblockd.mode_info_context` raw pointer from §1, since neighbor-deref through it is the load-bearing unsafe in the kernel body.
+
+The incremental leaf-up path (convert sub-calls one at a time, each independently shippable) is viable. The pilot also confirmed that calling these safe-signature functions from kernel code that still holds raw pointers works via the `(&(*pbi).common, &mut *xd)` reborrow pattern at the boundary.

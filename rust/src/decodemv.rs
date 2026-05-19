@@ -825,7 +825,7 @@ unsafe fn decode_mb_mode_mvs(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo) {
 ///
 /// Source: `vp8/decoder/decodemv.c:516`.
 pub unsafe fn vp8_decode_mode_mvs(pbi: *mut Vp8dComp<'_>) {
-    let mut mi: *mut ModeInfo = (*pbi).common.mi;
+    let mut mi: *mut ModeInfo = (*pbi).common.mi_base_ptr();
 
     mb_mode_mv_init(pbi);
 
