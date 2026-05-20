@@ -43,20 +43,9 @@ static kCat5: [u8; 6] = [180, 157, 141, 134, 130, 0];
 /// `kCat6` (`detokenize.c:43-44`) — DCT_VAL_CATEGORY6 extra-bit probabilities.
 static kCat6: [u8; 12] = [254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129, 0];
 
-/// `kCat3456[]` (`detokenize.c:45`) — pointer-indexed view of the four
-/// category tables. Indexed by `cat = 2*bit1 + bit0`. Wrapped in a
-/// `Sync` newtype because raw pointers are `!Sync` by default; the
-/// pointees are `'static` data, so this is sound.
-#[repr(transparent)]
-struct CatPtrs([*const u8; 4]);
-unsafe impl Sync for CatPtrs {}
-
-static kCat3456: CatPtrs = CatPtrs([
-    kCat3.as_ptr(),
-    kCat4.as_ptr(),
-    kCat5.as_ptr(),
-    kCat6.as_ptr(),
-]);
+/// `kCat3456[]` (`detokenize.c:45`) — view of the four category tables,
+/// indexed by `cat = 2*bit1 + bit0`. Each table ends in a `0` sentinel.
+static kCat3456: [&[u8]; 4] = [&kCat3, &kCat4, &kCat5, &kCat6];
 
 /// `kZigzag[16]` (`detokenize.c:46-47`) — inverse zig-zag table.
 static kZigzag: [u8; 16] = [0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15];
@@ -164,15 +153,15 @@ unsafe fn GetCoeffs(
                             v = vv;
                         }
                     } else {
-                        let mut tab: *const u8;
                         let bit1 = VP8GetBit(br, *p.offset(8) as i32);
                         let bit0 = VP8GetBit(br, *p.offset(9 + bit1 as isize) as i32);
                         let cat = (2 * bit1 + bit0) as usize;
                         let mut vv: i32 = 0;
-                        tab = kCat3456.0[cat];
-                        while *tab != 0 {
-                            vv += vv + VP8GetBit(br, *tab as i32);
-                            tab = tab.offset(1);
+                        for &t in kCat3456[cat] {
+                            if t == 0 {
+                                break;
+                            }
+                            vv += vv + VP8GetBit(br, t as i32);
                         }
                         vv += 3 + (8 << cat);
                         v = vv;
