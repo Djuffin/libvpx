@@ -112,9 +112,40 @@ The kernel callers that still hold raw `*mut Vp8Common` cross into these safe AP
 
 **Bench delta vs. baseline**: 480p **−1.87% improvement** (p<0.01), 720p **−1.87% improvement** (p<0.01). Phase 3 *speeds the decoder up* — likely from removing raw-pointer dereferences (which suppress aliasing-based optimizations) in the per-MB hot path and frame-header parsing.
 
+### Pixel-kernel safety push (predictors + IDCT)
+
+Pushed the `unsafe` *down into* the pixel kernels so callers don't wear it:
+
+| Function | Change |
+|---|---|
+| `vp8_build_intra_predictors_mby_s` / `_mbuv_s` | `unsafe fn` → `fn`; internal `unsafe` for the left-column gather + dispatch-table call. |
+| `vp8_intra4x4_predict` | `unsafe fn` → `fn`; internal `unsafe`. |
+| `vp8_build_inter_predictors_mb` | `unsafe fn` → `fn`; internal `unsafe` for the still-unsafe sub-dispatchers. |
+| `vp8_dequantize_b_c`, `vp8_dequant_idct_add_c`, `vp8_dequant_idct_add_y_block_c`, `vp8_dequant_idct_add_uv_block_c` | `unsafe fn` → `fn`; internal `unsafe`. |
+| `vp8_dc_only_idct_add_c`, `vp8_short_idct4x4llm_c`, `vp8_short_inv_walsh4x4_c`, `vp8_short_inv_walsh4x4_1_c` | `unsafe extern "C" fn` → `extern "C" fn` (RTCD-dispatch-compatible, dropped `unsafe`); internal `unsafe`. |
+
+`decode_macroblock` lost all five large `unsafe { }` blocks — the remaining scoped unsafe is just pixel-pointer offset arithmetic (`xd.dst.y_buffer.offset(...)`, `xd.qcoeff.as_mut_ptr().add(...)`). Kernel calls are now plain safe-fn calls. Conformance held; bench 480p −2.0%, 720p −1.7%.
+
+### Phase 4 — Bool-reader API
+
+| Function | Change |
+|---|---|
+| `vp8dx_decode_bool`, `vp8_decode_value` | `unsafe fn(*mut BoolDecoder)` → `fn(&mut BoolDecoder)`. **Fully safe** — no internal unsafe. |
+| `vp8_read` / `vp8_read_bit` / `vp8_read_literal` | `unsafe fn(*mut)` → `fn(&mut)`. Fully safe. |
+| `vp8_treed_read` | `fn(&mut BoolDecoder, *const TreeIndex, *const Prob)`; internal `unsafe` for the table walk. |
+| `vp8dx_bool_decoder_fill` | signature `fn(&mut BoolDecoder)`; internal `unsafe` for the byte-walk + decrypt detour. |
+| `vp8dx_start_decode` | signature `fn(&mut BoolDecoder, ...)`; internal `unsafe` for `from_raw_parts`. |
+| `VP8GetBit`, `GetSigned` | `unsafe fn(*mut)` → `fn(&mut)`. Fully safe (GetSigned operates on `br.range/value/count` directly). |
+| `GetCoeffs`, `vp8_decode_mb_tokens` | bool-reader arg `*mut` → `&mut BoolDecoder`; keep internal `unsafe` for coefficient/entropy-context pointer arithmetic. |
+
+Cascade cleanups: the three big bool-reader `unsafe { }` blocks in `vp8_decode_frame` (segmentation / loop-filter-deltas / refresh+coef-probs) became plain safe blocks, each scoped to a fresh `let bc = &mut pbi.mbc[8];` — field-disjoint from the `pbi.mb`/`pbi.common` writes they interleave with. `decodemv.rs` leaf readers (`read_bmode`/`read_ymode`/`read_mvcomponent`/`read_mv`/`read_mvcontexts`/`decode_split_mv`/`read_mb_features`) now take `&mut Vp8Reader`; the `bc as *mut _` coercion in `decode_macroblock` is gone.
+
+**Bench delta vs. baseline**: 480p **−1.7%**, 720p **−2.8%**. 125/125 conformance + idct/predict/decode-api suites pass.
+
 What's left of the original §1 raw-pointer surface:
-- **Bool-reader API** (`vp8dx_decode_bool`, `vp8_read`, `vp8_read_literal`, `GetCoeffs`) — still `unsafe fn` taking `*mut BoolDecoder`. The outer drivers call them inside scoped `unsafe { }` blocks. See Phase 4.
-- **FFI-shaped sub-calls within `vp8_decode_frame`** (`init_frame`, `vp8dx_start_decode`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vp8_loop_filter_*`) — still take `*mut Vp8dComp` / `*mut Vp8Common`. Each is called inside a scoped `unsafe { }`.
+- **FFI-shaped sub-calls** (`init_frame`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vp8_loop_filter_*`) — still take `*mut Vp8dComp` / `*mut Vp8Common`. Called inside scoped `unsafe { }`.
+- **`vp8dx_start_decode` lifetime escape hatch** — its `'a` unifies `BoolDecoder<'a>` with the decrypt-callback lifetime; the two callers route through a raw `*mut Vp8dComp` to dodge a borrow-checker false positive (documented at each site).
+- **`GetCoeffs` / `vp8_decode_mb_tokens` / `decodemv.rs` prob-pointer arithmetic** — `*const Prob` / `*mut EntropyContext` table walking stays in scoped `unsafe`; a follow-on pass could index these safely.
 - **Loop filter row callees / pixel kernels** — intentionally raw-ptr-shaped (pixel-side, doc-excluded).
 
 ---

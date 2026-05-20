@@ -60,7 +60,7 @@ use crate::treereader::{
 /// Slice-friendly wrapper around [`vp8_treed_read`] — most local call
 /// sites pass a static array reference.
 #[inline]
-unsafe fn vp8_treed_read(r: *mut Vp8Reader<'_>, t: &[TreeIndex], p: *const Prob) -> i32 {
+unsafe fn vp8_treed_read(r: &mut Vp8Reader<'_>, t: &[TreeIndex], p: *const Prob) -> i32 {
     vp8_treed_read_raw(r, t.as_ptr(), p)
 }
 
@@ -212,26 +212,26 @@ fn bmi_mv_as_int(bmi: BModeInfo) -> u32 {
 // ===========================================================================
 
 /// `read_bmode` (decodemv.c:18).
-unsafe fn read_bmode(bc: *mut Vp8Reader<'_>, p: *const Prob) -> BPredictionMode {
+unsafe fn read_bmode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> BPredictionMode {
     let i = vp8_treed_read(bc, &VP8_BMODE_TREE, p);
     // Maps to BPredictionMode::DcPred..HuPred (0..9).
     core::mem::transmute::<u8, BPredictionMode>(i as u8)
 }
 
 /// `read_ymode` (decodemv.c:24).
-unsafe fn read_ymode(bc: *mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
+unsafe fn read_ymode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
     let i = vp8_treed_read(bc, &VP8_YMODE_TREE, p);
     core::mem::transmute::<u8, MbPredictionMode>(i as u8)
 }
 
 /// `read_kf_ymode` (decodemv.c:30).
-unsafe fn read_kf_ymode(bc: *mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
+unsafe fn read_kf_ymode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
     let i = vp8_treed_read(bc, &VP8_KF_YMODE_TREE, p);
     core::mem::transmute::<u8, MbPredictionMode>(i as u8)
 }
 
 /// `read_uv_mode` (decodemv.c:36).
-unsafe fn read_uv_mode(bc: *mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
+unsafe fn read_uv_mode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
     let i = vp8_treed_read(bc, &VP8_UV_MODE_TREE, p);
     core::mem::transmute::<u8, MbPredictionMode>(i as u8)
 }
@@ -241,7 +241,7 @@ unsafe fn read_uv_mode(bc: *mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMo
 // ===========================================================================
 
 unsafe fn read_kf_modes(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: i32, mb_col: i32) {
-    let bc: *mut Vp8Reader = &mut (*pbi).mbc[8] as *mut _;
+    let bc = &mut (*pbi).mbc[8];
 
     (*mi).mbmi.ref_frame = MvReferenceFrame::Intra;
     (*mi).mbmi.mode = read_kf_ymode(bc, VP8_KF_YMODE_PROB.as_ptr());
@@ -265,7 +265,7 @@ unsafe fn read_kf_modes(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: i32, 
 // `read_mvcomponent` (decodemv.c:64).
 // ===========================================================================
 
-unsafe fn read_mvcomponent(r: *mut Vp8Reader<'_>, mvc: *const Prob) -> i32 {
+unsafe fn read_mvcomponent(r: &mut Vp8Reader<'_>, mvc: *const Prob) -> i32 {
     // The C code casts MV_CONTEXT* to vp8_prob* — `mvc` here is the
     // resulting flat probability array.
     let p: *const Prob = mvc;
@@ -301,7 +301,7 @@ unsafe fn read_mvcomponent(r: *mut Vp8Reader<'_>, mvc: *const Prob) -> i32 {
 // `read_mv` (decodemv.c:91).
 // ===========================================================================
 
-unsafe fn read_mv(r: *mut Vp8Reader<'_>, mv: *mut Mv, mvc: *const Prob) {
+unsafe fn read_mv(r: &mut Vp8Reader<'_>, mv: *mut Mv, mvc: *const Prob) {
     // `mvc` points at the row-component prob vector; `mvc + MVPcount`
     // is the col-component vector (the equivalent of `++mvc` over an
     // array of `MV_CONTEXT`).
@@ -313,7 +313,7 @@ unsafe fn read_mv(r: *mut Vp8Reader<'_>, mv: *mut Mv, mvc: *const Prob) {
 // `read_mvcontexts` (decodemv.c:96).
 // ===========================================================================
 
-unsafe fn read_mvcontexts(bc: *mut Vp8Reader<'_>, mvc: *mut Prob) {
+unsafe fn read_mvcontexts(bc: &mut Vp8Reader<'_>, mvc: *mut Prob) {
     // `mvc` is the flat probability array of the two MV_CONTEXT records
     // (length 2 * MVP_COUNT).
     for i in 0..2usize {
@@ -354,7 +354,7 @@ static MBSPLIT_FILL_OFFSET: [[u8; 16]; 4] = [
 // ===========================================================================
 
 unsafe fn mb_mode_mv_init(pbi: *mut Vp8dComp<'_>) {
-    let bc: *mut Vp8Reader = &mut (*pbi).mbc[8] as *mut _;
+    let bc = &mut (*pbi).mbc[8];
     let mvc: *mut Prob = (*pbi).common.fc.mvc.as_mut_ptr() as *mut Prob;
 
     // (CONFIG_ERROR_CONCEALMENT branch omitted — minimal build.)
@@ -422,7 +422,7 @@ fn get_sub_mv_ref_prob(left: u32, above: u32) -> *const Prob {
 // ===========================================================================
 
 unsafe fn decode_split_mv(
-    bc: *mut Vp8Reader<'_>,
+    bc: &mut Vp8Reader<'_>,
     mi: *mut ModeInfo,
     left_mb: *const ModeInfo,
     above_mb: *const ModeInfo,
@@ -545,7 +545,7 @@ unsafe fn decode_split_mv(
 // ===========================================================================
 
 unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut MbModeInfo) {
-    let bc: *mut Vp8Reader = &mut (*pbi).mbc[8] as *mut _;
+    let bc = &mut (*pbi).mbc[8];
 
     // ref_frame = (MV_REFERENCE_FRAME)vp8_read(bc, pbi->prob_intra);
     let rf = vp8_read(bc, (*pbi).prob_intra as i32);
@@ -791,19 +791,14 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
 // `read_mb_features` (decodemv.c:475).
 // ===========================================================================
 
-fn read_mb_features(r: *mut Vp8Reader<'_>, mi: &mut MbModeInfo, x: &Macroblockd) {
+fn read_mb_features(r: &mut Vp8Reader<'_>, mi: &mut MbModeInfo, x: &Macroblockd) {
     /* Is segmentation enabled */
     if x.segmentation_enabled != 0 && x.update_mb_segmentation_map != 0 {
         /* If so then read the segment id. */
-        // SAFETY: caller passed a valid `*mut Vp8Reader` (still raw at the
-        // dboolhuff API surface). `vp8_read` performs no aliasing-sensitive
-        // work on `r`'s siblings.
-        unsafe {
-            if vp8_read(r, x.mb_segment_tree_probs[0] as i32) != 0 {
-                mi.segment_id = (2 + vp8_read(r, x.mb_segment_tree_probs[2] as i32)) as u8;
-            } else {
-                mi.segment_id = vp8_read(r, x.mb_segment_tree_probs[1] as i32) as u8;
-            }
+        if vp8_read(r, x.mb_segment_tree_probs[0] as i32) != 0 {
+            mi.segment_id = (2 + vp8_read(r, x.mb_segment_tree_probs[2] as i32)) as u8;
+        } else {
+            mi.segment_id = vp8_read(r, x.mb_segment_tree_probs[1] as i32) as u8;
         }
     }
 }
@@ -819,7 +814,7 @@ unsafe fn decode_mb_mode_mvs(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: 
      */
     if (*pbi).mb.update_mb_segmentation_map != 0 {
         read_mb_features(
-            &mut (*pbi).mbc[8] as *mut _,
+            &mut (*pbi).mbc[8],
             &mut (*mi).mbmi,
             &(*pbi).mb,
         );
@@ -831,7 +826,7 @@ unsafe fn decode_mb_mode_mvs(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: 
      * else default to 0 */
     if (*pbi).common.mb_no_coeff_skip != 0 {
         (*mi).mbmi.mb_skip_coeff =
-            vp8_read(&mut (*pbi).mbc[8] as *mut _, (*pbi).prob_skip_false as i32) != 0;
+            vp8_read(&mut (*pbi).mbc[8], (*pbi).prob_skip_false as i32) != 0;
     } else {
         (*mi).mbmi.mb_skip_coeff = false;
     }

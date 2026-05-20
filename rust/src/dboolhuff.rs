@@ -42,8 +42,8 @@ const VP8_BD_VALUE_SIZE: i32 = BD_VALUE_BITS as i32;
 /// caller hands it in here and we install it before priming the buffer.
 /// Returns `0` on success, `1` if `source_sz != 0 && source.is_null()`
 /// (UBSan-clean equivalent of the C `if (source_sz && !source)` check).
-pub unsafe fn vp8dx_start_decode<'a>(
-    br: *mut BoolDecoder<'a>,
+pub fn vp8dx_start_decode<'a>(
+    br: &mut BoolDecoder<'a>,
     source: *const u8,
     source_sz: u32,
     decrypt_cb: Option<DecryptCbMut<'a>>,
@@ -56,18 +56,20 @@ pub unsafe fn vp8dx_start_decode<'a>(
     // and |source_sz| == 0. This and vp8dx_bool_decoder_fill() are essentially
     // no-ops in this case.
     // Work around a ubsan warning with a ternary to avoid adding 0 to null.
+    // SAFETY: caller guarantees `source` points to `source_sz` valid bytes
+    // that outlive `'a` (the partition buffer), unless source is null.
     let buffer: &'a [u8] = if source.is_null() {
         &[]
     } else {
-        core::slice::from_raw_parts(source, source_sz as usize)
+        unsafe { core::slice::from_raw_parts(source, source_sz as usize) }
     };
 
-    (*br).buffer = buffer;
-    (*br).pos = 0;
-    (*br).value = 0;
-    (*br).count = -8;
-    (*br).range = 255;
-    (*br).decrypt = decrypt_cb;
+    br.buffer = buffer;
+    br.pos = 0;
+    br.value = 0;
+    br.count = -8;
+    br.range = 255;
+    br.decrypt = decrypt_cb;
 
     // Populate the buffer.
     vp8dx_bool_decoder_fill(br);
@@ -86,58 +88,63 @@ pub unsafe fn vp8dx_start_decode<'a>(
 /// Called from [`vp8dx_decode_bool`] when `count` drops below zero. See
 /// the file-level doc and `documentation/vp8_files/dboolhuff.md` for the
 /// invariants.
-pub unsafe fn vp8dx_bool_decoder_fill(br: *mut BoolDecoder<'_>) {
+pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
     // Stand-in for `const unsigned char *bufptr = br->user_buffer;`. We
     // keep a usize cursor into `buffer` rather than a raw pointer so the
     // optional decrypt path can swap the source out for a stack buffer
     // without aliasing the borrowed slice.
-    let buffer_slice: &[u8] = (&raw const (*br).buffer).read();
-    let buffer_ptr = buffer_slice.as_ptr();
-    let buffer_end = buffer_ptr.add(buffer_slice.len());
-    let mut bufptr: *const u8 = buffer_ptr.add((*br).pos);
+    let buffer_ptr = br.buffer.as_ptr();
+    let buffer_len = br.buffer.len();
 
-    let mut value: BdValue = (*br).value;
-    let mut count: i32 = (*br).count;
+    let mut value: BdValue = br.value;
+    let mut count: i32 = br.count;
     let mut shift: i32 = VP8_BD_VALUE_SIZE - CHAR_BIT - (count + CHAR_BIT);
-    let bytes_left: usize = (buffer_end as usize).wrapping_sub(bufptr as usize);
-    let bits_left: usize = bytes_left * CHAR_BIT as usize;
-    let x: i32 = shift + CHAR_BIT - (bits_left as i32);
     let mut loop_end: i32 = 0;
     let mut decrypted: [u8; core::mem::size_of::<BdValue>() + 1] =
         [0; core::mem::size_of::<BdValue>() + 1];
 
-    if let Some(cb) = (*br).decrypt.as_mut() {
-        // VPXMIN(sizeof(decrypted), bytes_left)
-        let n: usize = decrypted.len().min(bytes_left);
-        // `bufptr` still points inside `(*br).buffer` at this point, so we
-        // can express the source as a safe subslice. We can't use
-        // `(*br).buffer` directly while `(*br).decrypt` is mutably
-        // borrowed, so use the previously-computed raw pointer.
-        let src_slice = core::slice::from_raw_parts(bufptr, n);
-        cb(src_slice, &mut decrypted[..n]);
-        bufptr = decrypted.as_ptr();
-    }
+    // SAFETY: the byte cursor `bufptr` walks `br.buffer[pos..]`; the
+    // optional decryptor reroutes it to a stack scratch buffer. All
+    // dereferences stay within `buffer_len - pos` bytes (or the
+    // decrypted scratch for `n` bytes). `buffer_end` is one-past-the-end,
+    // valid to form but never dereferenced.
+    unsafe {
+        let buffer_end = buffer_ptr.add(buffer_len);
+        let mut bufptr: *const u8 = buffer_ptr.add(br.pos);
 
-    if x >= 0 {
-        count += VP8_LOTS_OF_BITS;
-        loop_end = x;
-    }
+        let bytes_left: usize = (buffer_end as usize).wrapping_sub(bufptr as usize);
+        let bits_left: usize = bytes_left * CHAR_BIT as usize;
+        let x: i32 = shift + CHAR_BIT - (bits_left as i32);
 
-    if x < 0 || bits_left != 0 {
-        while shift >= loop_end {
-            count += CHAR_BIT;
-            value |= (*bufptr as BdValue) << shift;
-            bufptr = bufptr.add(1);
-            // Mirror `++br->user_buffer` — advance the real cursor even
-            // when the optional decryptor rerouted `bufptr` to the stack
-            // buffer.
-            (*br).pos += 1;
-            shift -= CHAR_BIT;
+        if let Some(cb) = br.decrypt.as_mut() {
+            // VPXMIN(sizeof(decrypted), bytes_left)
+            let n: usize = decrypted.len().min(bytes_left);
+            let src_slice = core::slice::from_raw_parts(bufptr, n);
+            cb(src_slice, &mut decrypted[..n]);
+            bufptr = decrypted.as_ptr();
+        }
+
+        if x >= 0 {
+            count += VP8_LOTS_OF_BITS;
+            loop_end = x;
+        }
+
+        if x < 0 || bits_left != 0 {
+            while shift >= loop_end {
+                count += CHAR_BIT;
+                value |= (*bufptr as BdValue) << shift;
+                bufptr = bufptr.add(1);
+                // Mirror `++br->user_buffer` — advance the real cursor even
+                // when the optional decryptor rerouted `bufptr` to the stack
+                // buffer.
+                br.pos += 1;
+                shift -= CHAR_BIT;
+            }
         }
     }
 
-    (*br).value = value;
-    (*br).count = count;
+    br.value = value;
+    br.count = count;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,24 +156,24 @@ pub unsafe fn vp8dx_bool_decoder_fill(br: *mut BoolDecoder<'_>) {
 /// `vp8dx_decode_bool` — decode one binary symbol at the given probability.
 ///
 /// Source: `vp8/decoder/dboolhuff.h:54`.
-pub unsafe fn vp8dx_decode_bool(br: *mut BoolDecoder<'_>, probability: i32) -> i32 {
+pub fn vp8dx_decode_bool(br: &mut BoolDecoder<'_>, probability: i32) -> i32 {
     let mut bit: u32 = 0;
 
-    let split: u32 = 1 + ((((*br).range - 1) * probability as u32) >> 8);
+    let split: u32 = 1 + (((br.range - 1) * probability as u32) >> 8);
 
-    if (*br).count < 0 {
+    if br.count < 0 {
         vp8dx_bool_decoder_fill(br);
     }
 
-    let mut value_local: BdValue = (*br).value;
-    let mut count: i32 = (*br).count;
+    let mut value_local: BdValue = br.value;
+    let mut count: i32 = br.count;
 
     let bigsplit: BdValue = (split as BdValue) << (VP8_BD_VALUE_SIZE - 8);
 
     let mut range: u32 = split;
 
     if value_local >= bigsplit {
-        range = (*br).range - split;
+        range = br.range - split;
         value_local -= bigsplit;
         bit = 1;
     }
@@ -176,9 +183,9 @@ pub unsafe fn vp8dx_decode_bool(br: *mut BoolDecoder<'_>, probability: i32) -> i
     value_local <<= shift;
     count -= shift as i32;
 
-    (*br).value = value_local;
-    (*br).count = count;
-    (*br).range = range;
+    br.value = value_local;
+    br.count = count;
+    br.range = range;
 
     bit as i32
 }
@@ -190,7 +197,7 @@ pub unsafe fn vp8dx_decode_bool(br: *mut BoolDecoder<'_>, probability: i32) -> i
 /// `vp8_decode_value` — read `bits` literal bits at probability 128.
 ///
 /// Source: `vp8/decoder/dboolhuff.h:93`.
-pub unsafe fn vp8_decode_value(br: *mut BoolDecoder<'_>, bits: i32) -> i32 {
+pub fn vp8_decode_value(br: &mut BoolDecoder<'_>, bits: i32) -> i32 {
     let mut z: i32 = 0;
     let mut bit: i32 = bits - 1;
     while bit >= 0 {

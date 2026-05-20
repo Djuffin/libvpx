@@ -75,7 +75,7 @@ type ProbaArray = *const [[Prob; NUM_PROBAS]; NUM_CTX];
 
 /// `VP8GetBit` (`detokenize.c:49`) — alias macro for `vp8dx_decode_bool`.
 #[inline(always)]
-unsafe fn VP8GetBit(br: *mut BoolDecoder<'static>, probability: i32) -> i32 {
+fn VP8GetBit(br: &mut BoolDecoder<'static>, probability: i32) -> i32 {
     vp8dx_decode_bool(br, probability)
 }
 
@@ -91,26 +91,26 @@ unsafe fn VP8GetBit(br: *mut BoolDecoder<'static>, probability: i32) -> i32 {
 /// With corrupt / fuzzed streams the calculation of `br->value` may
 /// overflow (b/148271109); we use `wrapping_*` to mirror the
 /// `VPX_NO_UNSIGNED_OVERFLOW_CHECK` attribute on the C source.
-unsafe fn GetSigned(br: *mut BoolDecoder<'static>, value_to_sign: i32) -> i32 {
-    let split: i32 = ((*br).range as i32 + 1) >> 1;
+fn GetSigned(br: &mut BoolDecoder<'static>, value_to_sign: i32) -> i32 {
+    let split: i32 = (br.range as i32 + 1) >> 1;
     let bigsplit: BdValue = (split as BdValue) << (BD_VALUE_BITS - 8);
     let v: i32;
 
-    if (*br).count < 0 {
+    if br.count < 0 {
         vp8dx_bool_decoder_fill(br);
     }
 
-    if (*br).value < bigsplit {
-        (*br).range = split as u32;
+    if br.value < bigsplit {
+        br.range = split as u32;
         v = value_to_sign;
     } else {
-        (*br).range = (*br).range - split as u32;
-        (*br).value = (*br).value.wrapping_sub(bigsplit);
+        br.range = br.range - split as u32;
+        br.value = br.value.wrapping_sub(bigsplit);
         v = -value_to_sign;
     }
-    (*br).range = (*br).range.wrapping_add((*br).range);
-    (*br).value = (*br).value.wrapping_add((*br).value);
-    (*br).count -= 1;
+    br.range = br.range.wrapping_add(br.range);
+    br.value = br.value.wrapping_add(br.value);
+    br.count -= 1;
 
     v
 }
@@ -124,7 +124,7 @@ unsafe fn GetSigned(br: *mut BoolDecoder<'static>, value_to_sign: i32) -> i32 {
 /// and returns the zig-zag position of the last non-zero coefficient
 /// plus one (0 if the block has no coefficients).
 unsafe fn GetCoeffs(
-    br: *mut BoolDecoder<'static>,
+    br: &mut BoolDecoder<'static>,
     prob: ProbaArray,
     ctx: i32,
     mut n: i32,
@@ -241,7 +241,7 @@ pub fn vp8_decode_mb_tokens(
     fc: &FrameContext,
     mb: &mut Macroblockd,
     mi: &ModeInfo,
-    bc: *mut BoolDecoder<'static>,
+    bc: &mut BoolDecoder<'static>,
 ) -> i32 {
     let eobs: *mut i8 = mb.eobs.as_mut_ptr();
 

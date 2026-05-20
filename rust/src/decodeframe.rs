@@ -182,7 +182,7 @@ fn decode_macroblock(
         vp8_reset_mb_tokens_context(above_slot, left_context, mi);
     } else if vp8dx_bool_error(bc) == 0 {
         let eobtotal: c_int =
-            vp8_decode_mb_tokens(above_slot, left_context, fc, xd, mi, bc as *mut _);
+            vp8_decode_mb_tokens(above_slot, left_context, fc, xd, mi, bc);
 
         /* Special case:  Force the loopfilter to skip when eobtotal is zero */
         mi.mbmi.mb_skip_coeff = eobtotal == 0;
@@ -348,7 +348,7 @@ fn decode_macroblock(
 // ---------------------------------------------------------------------------
 
 /// `get_delta_q` (vp8/decoder/decodeframe.c:235). Static helper.
-unsafe fn get_delta_q(bc: *mut Vp8Reader<'static>, prev: c_int, q_update: *mut c_int) -> c_int {
+fn get_delta_q(bc: &mut Vp8Reader<'static>, prev: c_int, q_update: &mut c_int) -> c_int {
     let mut ret_val: c_int = 0;
 
     if vp8_read_bit(bc) != 0 {
@@ -366,6 +366,7 @@ unsafe fn get_delta_q(bc: *mut Vp8Reader<'static>, prev: c_int, q_update: *mut c
 
     ret_val
 }
+
 
 // ---------------------------------------------------------------------------
 // yv12_extend_frame_top_c — decodeframe.c:255
@@ -941,15 +942,14 @@ unsafe fn setup_token_decoder(
     let first_fragment_end: *const u8 =
         (*pbi).fragments.ptrs[0].offset((*pbi).fragments.sizes[0] as isize);
 
-    let mbc8: *mut Vp8Reader<'static> = &mut (*pbi).mbc[8] as *mut Vp8Reader<'static>;
-    let multi_token_partition_val: c_int = vp8_read_literal(mbc8, 2);
+    let multi_token_partition_val: c_int = vp8_read_literal(&mut (*pbi).mbc[8], 2);
     let multi_token_partition: TokenPartition = match multi_token_partition_val & 0x3 {
         0 => TokenPartition::One,
         1 => TokenPartition::Two,
         2 => TokenPartition::Four,
         _ => TokenPartition::Eight,
     };
-    if vp8dx_bool_error(&*mbc8) == 0 {
+    if vp8dx_bool_error(&(*pbi).mbc[8]) == 0 {
         (*pbi).common.multi_token_partition = multi_token_partition;
     }
     num_token_partitions = 1u32 << ((*pbi).common.multi_token_partition as c_int);
@@ -1012,7 +1012,7 @@ unsafe fn setup_token_decoder(
     partition_idx = 1;
     while partition_idx < (*pbi).fragments.count {
         if vp8dx_start_decode(
-            bool_decoder,
+            &mut *bool_decoder,
             (*pbi).fragments.ptrs[partition_idx as usize],
             (*pbi).fragments.sizes[partition_idx as usize],
             (*pbi).decrypt.as_deref_mut(),
@@ -1115,14 +1115,12 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
 
 /// `vp8_decode_frame` (vp8/decoder/decodeframe.c:879). Public entry point.
 pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
-    let bc = &raw mut pbi.mbc[8];
     let mut data: *const u8 = pbi.fragments.ptrs[0];
     let data_sz: c_uint = pbi.fragments.sizes[0];
     // SAFETY: data_sz bytes are guaranteed valid past `data` by the caller.
     let data_end: *const u8 = unsafe { data.offset(data_sz as isize) };
     let first_partition_length_in_bytes: c_int;
 
-    let mb_feature_data_bits: *const i32 = VP8_MB_FEATURE_DATA_BITS.as_ptr();
     let mut corrupt_tokens: c_int = 0;
     let prev_independent_partitions: c_int = pbi.independent_partitions;
 
@@ -1245,16 +1243,22 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
     let data_remaining = ((data_end as isize) - (data as isize)) as c_uint;
     let start_rc = unsafe {
         let pbi_raw: *mut Vp8dComp<'static> = pbi;
-        vp8dx_start_decode(bc, data, data_remaining, (*pbi_raw).decrypt.as_deref_mut())
+        vp8dx_start_decode(
+            &mut (*pbi_raw).mbc[8],
+            data,
+            data_remaining,
+            (*pbi_raw).decrypt.as_deref_mut(),
+        )
     };
     if start_rc != 0 {
         return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR) };
     }
 
-    // SAFETY block: all the bool-reader-driven header parsing. Each
-    // vp8_read*(bc) is unsafe today but operates purely on the bool
-    // decoder backing buffer plus pbi fields we mutate directly.
-    unsafe {
+    // Bool-reader-driven header parsing. `bc` borrows pbi.mbc[8]; the
+    // writes target disjoint fields (pbi.mb / pbi.common), so they
+    // coexist under field-disjoint borrows.
+    {
+        let bc = &mut pbi.mbc[8];
         if pbi.common.frame_type == KEY_FRAME {
             let _ = vp8_read_bit(bc); // colorspace
             pbi.common.clamp_type = if vp8_read_bit(bc) == 0 {
@@ -1279,8 +1283,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
                 for i in 0..MB_LVL_MAX {
                     for j in 0..MAX_MB_SEGMENTS {
                         if vp8_read_bit(bc) != 0 {
-                            let v = vp8_read_literal(bc, *mb_feature_data_bits.offset(i as isize))
-                                as i8;
+                            let v = vp8_read_literal(bc, VP8_MB_FEATURE_DATA_BITS[i]) as i8;
                             pbi.mb.segment_feature_data[i][j] =
                                 if vp8_read_bit(bc) != 0 { -v } else { v };
                         } else {
@@ -1345,10 +1348,10 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
 
     /* Read the default quantizers. */
     {
-        // SAFETY: bool-reader literal reads + delta-Q deltas; both
-        // operate on the bool decoder and update pbi.common fields.
-        let q_update;
-        unsafe {
+        // bool-reader literal reads + delta-Q deltas; `bc` borrows
+        // pbi.mbc[8], updates target disjoint pbi.common fields.
+        let q_update = {
+            let bc = &mut pbi.mbc[8];
             pbi.common.base_qindex = vp8_read_literal(bc, 7);
             let mut q_upd: c_int = 0;
             pbi.common.y1dc_delta_q = get_delta_q(bc, pbi.common.y1dc_delta_q, &mut q_upd);
@@ -1356,8 +1359,8 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
             pbi.common.y2ac_delta_q = get_delta_q(bc, pbi.common.y2ac_delta_q, &mut q_upd);
             pbi.common.uvdc_delta_q = get_delta_q(bc, pbi.common.uvdc_delta_q, &mut q_upd);
             pbi.common.uvac_delta_q = get_delta_q(bc, pbi.common.uvac_delta_q, &mut q_upd);
-            q_update = q_upd;
-        }
+            q_upd
+        };
 
         if q_update != 0 {
             // SAFETY: vp8cx_init_de_quantizer takes *mut Vp8dComp.
@@ -1377,8 +1380,9 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         );
     }
 
-    // SAFETY: more bool-reader-driven header parsing.
-    unsafe {
+    // More bool-reader-driven header parsing; `bc` borrows pbi.mbc[8].
+    {
+        let bc = &mut pbi.mbc[8];
         /* Determine if GF/ARF buffers should be updated and how. */
         if pbi.common.frame_type != KEY_FRAME {
             pbi.common.refresh_golden_frame = vp8_read_bit(bc);
