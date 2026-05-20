@@ -854,14 +854,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
 // ---------------------------------------------------------------------------
 
 /// `read_partition_size` (vp8/decoder/decodeframe.c:663). Static helper.
-unsafe fn read_partition_size(pbi: *mut Vp8dComp<'static>, cx_size_in: *const u8) -> c_uint {
-    let mut temp: [u8; 3] = [0; 3];
-    let mut cx_size: *const u8 = cx_size_in;
-    if let Some(cb) = (*pbi).decrypt.as_mut() {
-        let src = core::slice::from_raw_parts(cx_size, 3);
-        cb(src, &mut temp);
-        cx_size = temp.as_ptr();
-    }
+unsafe fn read_partition_size(cx_size: *const u8) -> c_uint {
     (*cx_size.add(0) as c_uint)
         + ((*cx_size.add(1) as c_uint) << 8)
         + ((*cx_size.add(2) as c_uint) << 16)
@@ -905,7 +898,7 @@ unsafe fn read_available_partition_size(
     /* Calculate the length of this partition. */
     if i < num_part - 1 {
         if read_is_valid(partition_size_ptr, 3, first_fragment_end) != 0 {
-            partition_size = read_partition_size(pbi, partition_size_ptr);
+            partition_size = read_partition_size(partition_size_ptr);
         } else if (*pbi).ec_active != 0 {
             partition_size = bytes_left as c_uint;
         } else {
@@ -1015,7 +1008,6 @@ unsafe fn setup_token_decoder(
             &mut *bool_decoder,
             (*pbi).fragments.ptrs[partition_idx as usize],
             (*pbi).fragments.sizes[partition_idx as usize],
-            (*pbi).decrypt.as_deref_mut(),
         ) != 0
         {
             return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_MEM_ERROR);
@@ -1130,21 +1122,8 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         pbi.common.show_frame = 1;
         first_partition_length_in_bytes = 0;
     } else {
-        // Header byte parsing — raw byte reads from `data`, optionally
-        // decrypted into a scratch buffer first.
-        let mut clear_buffer: [u8; 10] = [0; 10];
-        // SAFETY: data[0..min(10, data_sz)] is readable; the decrypt
-        // callback returns into clear_buffer of the same length.
-        let clear: *const u8 = unsafe {
-            if let Some(cb) = pbi.decrypt.as_mut() {
-                let n = core::cmp::min(clear_buffer.len(), data_sz as usize);
-                let src = core::slice::from_raw_parts(data, n);
-                cb(src, &mut clear_buffer[..n]);
-                clear_buffer.as_ptr()
-            } else {
-                data
-            }
-        };
+        // Header byte parsing — raw byte reads from `data`.
+        let clear: *const u8 = data;
 
         // SAFETY: clear[0..3] guaranteed valid (we checked data_end-data >= 3).
         let (b0, b1, b2) = unsafe { (*clear.add(0), *clear.add(1), *clear.add(2)) };
@@ -1222,21 +1201,8 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
 
     init_frame(pbi);
 
-    // SAFETY: vp8dx_start_decode initializes the bool reader from `data`/`sz`.
-    // Routing the decrypt callback through a raw `*mut Vp8dComp` bypasses
-    // a borrow-checker false positive: the function's `'a` parameter would
-    // otherwise unify `bc`'s BoolDecoder<'static> with `pbi.decrypt`'s
-    // borrow lifetime, locking out later uses of pbi.
     let data_remaining = ((data_end as isize) - (data as isize)) as c_uint;
-    let start_rc = unsafe {
-        let pbi_raw: *mut Vp8dComp<'static> = pbi;
-        vp8dx_start_decode(
-            &mut (*pbi_raw).mbc[8],
-            data,
-            data_remaining,
-            (*pbi_raw).decrypt.as_deref_mut(),
-        )
-    };
+    let start_rc = vp8dx_start_decode(&mut pbi.mbc[8], data, data_remaining);
     if start_rc != 0 {
         return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR) };
     }

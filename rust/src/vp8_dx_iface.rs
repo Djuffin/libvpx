@@ -16,7 +16,7 @@ use crate::onyxd_if::{
     vp8dx_get_reference, vp8dx_set_reference,
 };
 use crate::types::{
-    DecryptCb, DecryptCbMut, FragmentData, FrameBuffers, VP8_BORDER_IN_PIXELS, MAX_PARTITIONS,
+    FragmentData, FrameBuffers, VP8_BORDER_IN_PIXELS, MAX_PARTITIONS,
     Vp8PpFlags, Vp8dComp, Vp8dConfig, VpxInternalErrorInfo, Yv12BufferConfig,
 };
 use crate::vpx_api::*;
@@ -96,11 +96,6 @@ pub struct Vp8AlgPriv<'a> {
     // CONFIG_MULTITHREAD-only `restart_threads` omitted in minimal build.
     pub postproc_cfg_set: i32,
     pub postproc_cfg: Vp8PostprocCfg,
-    /// Persistent decryption callback. Built once at
-    /// `VPXD_SET_DECRYPTOR` time. Each frame, `vp8_decode` moves the
-    /// box into the inner `Vp8dComp` for the duration of the decode,
-    /// then takes it back.
-    pub decrypt: Option<DecryptCb>,
     pub img: VpxImage,
     pub img_setup: i32,
     pub yv12_frame_buffers: FrameBuffers<'a>,
@@ -142,7 +137,6 @@ unsafe fn vp8_peek_si_internal(
     data: *const u8,
     data_sz: u32,
     si: *mut VpxCodecStreamInfo,
-    decrypt: Option<DecryptCbMut<'_>>,
 ) -> VpxCodecErr {
     let mut res: VpxCodecErr = VPX_CODEC_OK;
 
@@ -159,14 +153,7 @@ unsafe fn vp8_peek_si_internal(
         //  3 bytes:- sync code (0x9d, 0x01, 0x2a)
         //  4 bytes:- including image width and height in the lowest 14 bits
         //            of each 2-byte value.
-        let mut clear_buffer: [u8; 10] = [0; 10];
-        let mut clear: *const u8 = data;
-        if let Some(cb) = decrypt {
-            let n = clear_buffer.len().min(data_sz as usize);
-            let src = core::slice::from_raw_parts(data, n);
-            cb(src, &mut clear_buffer[..n]);
-            clear = clear_buffer.as_ptr();
-        }
+        let clear: *const u8 = data;
         (*si).is_kf = 0;
 
         if data_sz >= 10 && (*clear.add(0) & 0x01) == 0 {
@@ -200,7 +187,7 @@ pub unsafe fn vp8_peek_si(
     data_sz: u32,
     si: *mut VpxCodecStreamInfo,
 ) -> VpxCodecErr {
-    vp8_peek_si_internal(data, data_sz, si, None)
+    vp8_peek_si_internal(data, data_sz, si)
 }
 
 /// `vp8_get_si` — `vp8/vp8_dx_iface.c:183`. Vtable `dec.get_si` slot.
@@ -345,7 +332,6 @@ pub unsafe fn vp8_decode(
         (*ctx).fragments.ptrs[0],
         (*ctx).fragments.sizes[0],
         &mut (*ctx).si,
-        (*ctx).decrypt.as_deref_mut(),
     );
 
     if res == VPX_CODEC_UNSUP_BITSTREAM && (*ctx).si.is_kf == 0 {
@@ -412,16 +398,6 @@ pub unsafe fn vp8_decode(
         }
     }
 
-    // Move the decryption callback into the inner Vp8dComp for the
-    // duration of this frame's decode. The bool decoder partitions
-    // borrow it from there. After the decode finishes (success or
-    // failure) we take it back so subsequent SET_DECRYPTOR control
-    // calls can update it on `ctx`.
-    if (*ctx).decoder_init != 0 {
-        let pbi = (*ctx).yv12_frame_buffers.pbi_ptr();
-        (*pbi).decrypt = (*ctx).decrypt.take();
-    }
-
     if res == VPX_CODEC_OK {
         let pbi = (*ctx).yv12_frame_buffers.pbi_ptr();
         let pc = &mut (*pbi).common as *mut crate::types::Vp8Common;
@@ -431,7 +407,6 @@ pub unsafe fn vp8_decode(
             if vp8_decode_resolution_change(pbi, w, h).is_err() {
                 res = update_error_state(&(*pbi).common.error);
                 (*ctx).fragments.count = 0;
-                (*ctx).decrypt = (*pbi).decrypt.take();
                 return res;
             }
 
@@ -451,14 +426,6 @@ pub unsafe fn vp8_decode(
 
         // get ready for the next series of fragments
         (*ctx).fragments.count = 0;
-    }
-
-    // Move cb back if it was migrated.
-    if (*ctx).decoder_init != 0 {
-        let pbi = (*ctx).yv12_frame_buffers.pbi_ptr();
-        if !pbi.is_null() {
-            (*ctx).decrypt = (*pbi).decrypt.take();
-        }
     }
 
     res
@@ -751,21 +718,10 @@ impl Decoder for Vp8Decoder {
                     *out = vp8dx_get_quantizer(pbi);
                     Ok(())
                 }
-                ControlCmd::SetDecryptor(init) => {
-                    ctx.decrypt = init.and_then(|i| {
-                        let cb_fn = i.decrypt_cb?;
-                        let state = i.decrypt_state;
-                        let boxed: DecryptCb = Box::new(move |input: &[u8], output: &mut [u8]| {
-                            cb_fn(
-                                state,
-                                input.as_ptr(),
-                                output.as_mut_ptr(),
-                                input.len() as i32,
-                            );
-                        });
-                        Some(boxed)
-                    });
-                    Ok(())
+                ControlCmd::SetDecryptor(_init) => {
+                    // Bytestream decryption was removed from this build; the
+                    // control is kept for ABI shape but reports unsupported.
+                    Err(VPX_CODEC_INCAPABLE)
                 }
             }
         }

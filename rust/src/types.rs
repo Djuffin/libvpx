@@ -362,19 +362,6 @@ pub const BD_VALUE_BITS: u32 = (core::mem::size_of::<BdValue>() * 8) as u32;
 /// exhausted, to keep `vp8dx_bool_error` cheap.
 pub const VP8_LOTS_OF_BITS: i32 = 0x4000_0000;
 
-/// Bytestream decryption callback (DRM hook). Invoked by the refill
-/// path before bytes enter `value`. The C signature is
-/// `void cb(void *state, const u8 *in, u8 *out, int count)`; the
-/// Rust port wraps the `state` capture into the closure.
-pub type DecryptFn = dyn FnMut(&[u8], &mut [u8]) + 'static;
-
-/// Owned form, stored on `Vp8AlgPriv.decrypt` and `Vp8dComp.decrypt`.
-/// Built once at `VPXD_SET_DECRYPTOR` time.
-pub type DecryptCb = Box<DecryptFn>;
-
-/// Borrowed form, handed to the bool decoder per partition.
-pub type DecryptCbMut<'a> = &'a mut DecryptFn;
-
 /// `BOOL_DECODER` (`dboolhuff.h`). The libvpx C struct keeps
 /// `(user_buffer, user_buffer_end)` plus a separate cursor inside
 /// `value`. We replace those with a borrowed slice plus an offset; the
@@ -385,9 +372,6 @@ pub struct BoolDecoder<'a> {
     pub value: BdValue,
     pub count: i32,
     pub range: u32,
-    /// Borrow of the codec's persistent decryption closure. None when
-    /// no decryptor is installed.
-    pub decrypt: Option<DecryptCbMut<'a>>,
 }
 
 /// `vp8_reader` typedef alias in `treereader.h` / `dboolhuff.h`.
@@ -826,9 +810,10 @@ pub struct FragmentData {
 /// Holds the live `Macroblockd` working state, the `Vp8Common`
 /// per-frame state, and one bool decoder per partition. Fields gated
 /// by `CONFIG_MULTITHREAD` / `CONFIG_ERROR_CONCEALMENT` are omitted.
-// `#[repr(C)]` dropped: the `decrypt` field stores a `Box<dyn FnMut>`
-// (a fat pointer with Rust-defined layout). `#[repr(align(16))]` is
-// retained for the embedded `Macroblockd` SIMD alignment.
+// `#[repr(C)]` dropped: the `mbc` bool readers hold `&[u8]` partition
+// slices (fat pointers with Rust-defined layout), and this struct is
+// never passed across FFI by layout. `#[repr(align(16))]` is retained
+// for the embedded `Macroblockd` SIMD alignment.
 #[repr(align(16))]
 pub struct Vp8dComp<'a> {
     pub mb: Macroblockd,
@@ -865,12 +850,6 @@ pub struct Vp8dComp<'a> {
     pub decoded_key_frame: i32,
     pub independent_partitions: i32,
     pub frame_corrupt_residual: i32,
-
-    /// Optional bytestream decryption callback. Owned for the
-    /// duration of a single `vp8_decode` call: moved in from the
-    /// parent `Vp8AlgPriv.decrypt` at the start of each frame, taken
-    /// back at the end. Bool-decoder partitions borrow from this slot.
-    pub decrypt: Option<DecryptCb>,
 }
 
 // ===========================================================================

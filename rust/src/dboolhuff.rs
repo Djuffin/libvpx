@@ -15,7 +15,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use crate::tables::VP8_NORM;
-use crate::types::{BD_VALUE_BITS, BdValue, BoolDecoder, DecryptCbMut, VP8_LOTS_OF_BITS};
+use crate::types::{BD_VALUE_BITS, BdValue, BoolDecoder, VP8_LOTS_OF_BITS};
 
 // ---------------------------------------------------------------------------
 // Local constants mirroring the C `#define`s in `dboolhuff.h`.
@@ -37,16 +37,12 @@ const VP8_BD_VALUE_SIZE: i32 = BD_VALUE_BITS as i32;
 ///
 /// Source: `vp8/decoder/dboolhuff.c:15`.
 ///
-/// In libvpx C the decryptor is a `(callback, state)` pair. In the Rust
-/// port the callback is owned by the decoder as `Option<DecryptCb>`; the
-/// caller hands it in here and we install it before priming the buffer.
 /// Returns `0` on success, `1` if `source_sz != 0 && source.is_null()`
 /// (UBSan-clean equivalent of the C `if (source_sz && !source)` check).
 pub fn vp8dx_start_decode<'a>(
     br: &mut BoolDecoder<'a>,
     source: *const u8,
     source_sz: u32,
-    decrypt_cb: Option<DecryptCbMut<'a>>,
 ) -> i32 {
     if source_sz != 0 && source.is_null() {
         return 1;
@@ -69,7 +65,6 @@ pub fn vp8dx_start_decode<'a>(
     br.value = 0;
     br.count = -8;
     br.range = 255;
-    br.decrypt = decrypt_cb;
 
     // Populate the buffer.
     vp8dx_bool_decoder_fill(br);
@@ -90,9 +85,7 @@ pub fn vp8dx_start_decode<'a>(
 /// invariants.
 pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
     // Stand-in for `const unsigned char *bufptr = br->user_buffer;`. We
-    // keep a usize cursor into `buffer` rather than a raw pointer so the
-    // optional decrypt path can swap the source out for a stack buffer
-    // without aliasing the borrowed slice.
+    // keep a usize cursor into `buffer` rather than a raw pointer.
     let buffer_ptr = br.buffer.as_ptr();
     let buffer_len = br.buffer.len();
 
@@ -100,14 +93,10 @@ pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
     let mut count: i32 = br.count;
     let mut shift: i32 = VP8_BD_VALUE_SIZE - CHAR_BIT - (count + CHAR_BIT);
     let mut loop_end: i32 = 0;
-    let mut decrypted: [u8; core::mem::size_of::<BdValue>() + 1] =
-        [0; core::mem::size_of::<BdValue>() + 1];
 
-    // SAFETY: the byte cursor `bufptr` walks `br.buffer[pos..]`; the
-    // optional decryptor reroutes it to a stack scratch buffer. All
-    // dereferences stay within `buffer_len - pos` bytes (or the
-    // decrypted scratch for `n` bytes). `buffer_end` is one-past-the-end,
-    // valid to form but never dereferenced.
+    // SAFETY: the byte cursor `bufptr` walks `br.buffer[pos..]`; all
+    // dereferences stay within `buffer_len - pos` bytes. `buffer_end` is
+    // one-past-the-end, valid to form but never dereferenced.
     unsafe {
         let buffer_end = buffer_ptr.add(buffer_len);
         let mut bufptr: *const u8 = buffer_ptr.add(br.pos);
@@ -115,14 +104,6 @@ pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
         let bytes_left: usize = (buffer_end as usize).wrapping_sub(bufptr as usize);
         let bits_left: usize = bytes_left * CHAR_BIT as usize;
         let x: i32 = shift + CHAR_BIT - (bits_left as i32);
-
-        if let Some(cb) = br.decrypt.as_mut() {
-            // VPXMIN(sizeof(decrypted), bytes_left)
-            let n: usize = decrypted.len().min(bytes_left);
-            let src_slice = core::slice::from_raw_parts(bufptr, n);
-            cb(src_slice, &mut decrypted[..n]);
-            bufptr = decrypted.as_ptr();
-        }
 
         if x >= 0 {
             count += VP8_LOTS_OF_BITS;
@@ -134,9 +115,6 @@ pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
                 count += CHAR_BIT;
                 value |= (*bufptr as BdValue) << shift;
                 bufptr = bufptr.add(1);
-                // Mirror `++br->user_buffer` — advance the real cursor even
-                // when the optional decryptor rerouted `bufptr` to the stack
-                // buffer.
                 br.pos += 1;
                 shift -= CHAR_BIT;
             }
@@ -149,8 +127,8 @@ pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
 
 // ---------------------------------------------------------------------------
 // vp8dx_decode_bool (dboolhuff.h:54) — `static inline` in C, the per-bit
-// hot path. Translated as a regular `pub unsafe fn`; later phases may
-// mark it `#[inline]` once the call-site shape is settled.
+// hot path. Translated as a safe `pub fn`; later phases may mark it
+// `#[inline]` once the call-site shape is settled.
 // ---------------------------------------------------------------------------
 
 /// `vp8dx_decode_bool` — decode one binary symbol at the given probability.
