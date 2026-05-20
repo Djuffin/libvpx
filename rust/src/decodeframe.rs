@@ -100,10 +100,7 @@ use crate::vpx_codec::vpx_internal_error;
 
 /// `vp8cx_init_de_quantizer` (vp8/decoder/decodeframe.c:42).
 pub fn vp8cx_init_de_quantizer(pc: &mut Vp8Common) {
-    let mut Q: c_int;
-
-    Q = 0;
-    while Q < crate::tables::QINDEX_RANGE as c_int {
+    for Q in 0..crate::tables::QINDEX_RANGE as c_int {
         pc.y1_dequant[Q as usize][0] = vp8_dc_quant(Q, pc.y1dc_delta_q) as i16;
         pc.y2_dequant[Q as usize][0] = vp8_dc2quant(Q, pc.y2dc_delta_q) as i16;
         pc.uv_dequant[Q as usize][0] = vp8_dc_uv_quant(Q, pc.uvdc_delta_q) as i16;
@@ -111,8 +108,6 @@ pub fn vp8cx_init_de_quantizer(pc: &mut Vp8Common) {
         pc.y1_dequant[Q as usize][1] = vp8_ac_yquant(Q) as i16;
         pc.y2_dequant[Q as usize][1] = vp8_ac2quant(Q, pc.y2ac_delta_q) as i16;
         pc.uv_dequant[Q as usize][1] = vp8_ac_uv_quant(Q, pc.uvac_delta_q) as i16;
-
-        Q += 1;
     }
 }
 
@@ -373,7 +368,6 @@ fn get_delta_q(bc: &mut Vp8Reader<'static>, prev: c_int, q_update: &mut c_int) -
 
 /// `yv12_extend_frame_top_c` (vp8/decoder/decodeframe.c:255). Static helper.
 unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
-    let mut i: c_int;
     let mut src_ptr1: *mut u8;
     let mut dest_ptr1: *mut u8;
 
@@ -386,11 +380,9 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     src_ptr1 = (*ybf).y_buffer.offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
-    i = 0;
-    while i < Border as c_int {
+    for _ in 0..Border as c_int {
         ptr::copy_nonoverlapping(src_ptr1, dest_ptr1, plane_stride as usize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
-        i += 1;
     }
 
     /* U Plane */
@@ -399,22 +391,18 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     src_ptr1 = (*ybf).u_buffer.offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
-    i = 0;
-    while i < Border as c_int {
+    for _ in 0..Border as c_int {
         ptr::copy_nonoverlapping(src_ptr1, dest_ptr1, plane_stride as usize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
-        i += 1;
     }
 
     /* V Plane */
     src_ptr1 = (*ybf).v_buffer.offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
-    i = 0;
-    while i < Border as c_int {
+    for _ in 0..Border as c_int {
         ptr::copy_nonoverlapping(src_ptr1, dest_ptr1, plane_stride as usize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
-        i += 1;
     }
 }
 
@@ -424,7 +412,6 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
 
 /// `yv12_extend_frame_bottom_c` (vp8/decoder/decodeframe.c:302). Static helper.
 unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
-    let mut i: c_int;
     let mut src_ptr1: *mut u8;
     let mut src_ptr2: *mut u8;
     let mut dest_ptr2: *mut u8;
@@ -444,11 +431,9 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
         .offset(-(plane_stride as isize));
     dest_ptr2 = src_ptr2.offset(plane_stride as isize);
 
-    i = 0;
-    while i < Border as c_int {
+    for _ in 0..Border as c_int {
         ptr::copy_nonoverlapping(src_ptr2, dest_ptr2, plane_stride as usize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
-        i += 1;
     }
 
     /* U Plane */
@@ -462,11 +447,9 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
         .offset(-(plane_stride as isize));
     dest_ptr2 = src_ptr2.offset(plane_stride as isize);
 
-    i = 0;
-    while i < Border as c_int {
+    for _ in 0..Border as c_int {
         ptr::copy_nonoverlapping(src_ptr2, dest_ptr2, plane_stride as usize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
-        i += 1;
     }
 
     /* V Plane */
@@ -476,11 +459,9 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
         .offset(-(plane_stride as isize));
     dest_ptr2 = src_ptr2.offset(plane_stride as isize);
 
-    i = 0;
-    while i < Border as c_int {
+    for _ in 0..Border as c_int {
         ptr::copy_nonoverlapping(src_ptr2, dest_ptr2, plane_stride as usize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
-        i += 1;
     }
 }
 
@@ -495,7 +476,6 @@ unsafe fn yv12_extend_frame_left_right_c(
     u_src: *mut u8,
     v_src: *mut u8,
 ) {
-    let mut i: c_int;
     let mut src_ptr1: *mut u8;
     let mut src_ptr2: *mut u8;
     let mut dest_ptr1: *mut u8;
@@ -518,15 +498,13 @@ unsafe fn yv12_extend_frame_left_right_c(
     dest_ptr1 = src_ptr1.offset(-(Border as isize));
     dest_ptr2 = src_ptr2.offset(1);
 
-    i = 0;
-    while i < plane_height {
+    for _ in 0..plane_height {
         ptr::write_bytes(dest_ptr1, *src_ptr1, Border as usize);
         ptr::write_bytes(dest_ptr2, *src_ptr2, Border as usize);
         src_ptr1 = src_ptr1.offset(plane_stride as isize);
         src_ptr2 = src_ptr2.offset(plane_stride as isize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
-        i += 1;
     }
 
     /* U Plane */
@@ -540,15 +518,13 @@ unsafe fn yv12_extend_frame_left_right_c(
     dest_ptr1 = src_ptr1.offset(-(Border as isize));
     dest_ptr2 = src_ptr2.offset(1);
 
-    i = 0;
-    while i < plane_height {
+    for _ in 0..plane_height {
         ptr::write_bytes(dest_ptr1, *src_ptr1, Border as usize);
         ptr::write_bytes(dest_ptr2, *src_ptr2, Border as usize);
         src_ptr1 = src_ptr1.offset(plane_stride as isize);
         src_ptr2 = src_ptr2.offset(plane_stride as isize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
-        i += 1;
     }
 
     /* V Plane */
@@ -557,15 +533,13 @@ unsafe fn yv12_extend_frame_left_right_c(
     dest_ptr1 = src_ptr1.offset(-(Border as isize));
     dest_ptr2 = src_ptr2.offset(1);
 
-    i = 0;
-    while i < plane_height {
+    for _ in 0..plane_height {
         ptr::write_bytes(dest_ptr1, *src_ptr1, Border as usize);
         ptr::write_bytes(dest_ptr2, *src_ptr2, Border as usize);
         src_ptr1 = src_ptr1.offset(plane_stride as isize);
         src_ptr2 = src_ptr2.offset(plane_stride as isize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
-        i += 1;
     }
 }
 
@@ -660,8 +634,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
             );
         }
 
-        let mut mb_col: c_int = 0;
-        while mb_col < mb_cols {
+        for mb_col in 0..mb_cols {
             /* Distance of Mb to the various image edges. */
             pbi.mb.mb_to_left_edge = -((mb_col * 16) << 3);
             pbi.mb.mb_to_right_edge = (mb_cols - 1 - mb_col) * 16 << 3;
@@ -743,8 +716,6 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
 
             recon_yoffset += 16;
             recon_uvoffset += 8;
-
-            mb_col += 1;
         }
 
         // SAFETY: dst.{y,u,v}_buffer point to live plane memory.
@@ -927,7 +898,6 @@ unsafe fn setup_token_decoder(
     pbi: &mut Vp8dComp<'static>,
     token_part_sizes: *const u8,
 ) -> VpxResult<()> {
-    let mut partition_idx: c_uint;
     let mut fragment_idx: c_uint;
     let num_token_partitions: c_uint;
     let first_fragment_end: *const u8 =
@@ -1007,14 +977,12 @@ unsafe fn setup_token_decoder(
     // `mbc` cursor with `++bool_decoder`; here it is a bounds-checked
     // index — `mbc[partition_idx - 1]` (cursor started at `mbc[0]` for
     // `partition_idx == 1`).
-    partition_idx = 1;
-    while partition_idx < pbi.fragments.count {
+    for partition_idx in 1..pbi.fragments.count {
         let src = pbi.fragments.ptrs[partition_idx as usize];
         let sz = pbi.fragments.sizes[partition_idx as usize];
         if vp8dx_start_decode(&mut pbi.mbc[(partition_idx - 1) as usize], src, sz) != 0 {
             return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
         }
-        partition_idx += 1;
     }
 
     // CONFIG_MULTITHREAD branch is intentionally omitted (minimal build).

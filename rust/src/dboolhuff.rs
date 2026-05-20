@@ -177,10 +177,8 @@ pub fn vp8dx_decode_bool(br: &mut BoolDecoder<'_>, probability: i32) -> i32 {
 /// Source: `vp8/decoder/dboolhuff.h:93`.
 pub fn vp8_decode_value(br: &mut BoolDecoder<'_>, bits: i32) -> i32 {
     let mut z: i32 = 0;
-    let mut bit: i32 = bits - 1;
-    while bit >= 0 {
+    for bit in (0..bits).rev() {
         z |= vp8dx_decode_bool(br, 0x80) << bit;
-        bit -= 1;
     }
     z
 }
