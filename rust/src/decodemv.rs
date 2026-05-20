@@ -5,18 +5,17 @@
 //! private helper used by it. See `documentation/vp8_files/decodemv.md`
 //! for the algorithmic rationale.
 //!
-//! Pointer / unsafe conventions match `dboolhuff.rs`:
-//!   - the bool decoder is addressed through a `*mut BoolDecoder`;
-//!   - the `MODE_INFO` grid is walked with raw pointer arithmetic to
-//!     mirror the C `mi - mis`, `mi - 1`, `mi - mis - 1` neighbour
-//!     lookups (column −1 / row −1 sentinels are set up elsewhere);
-//!   - helper functions translated from `findnearmv.h` /
-//!     `entropymv.h` / `treereader.h` are imported from their host
-//!     modules at the top.
+//! The whole chain is safe Rust. The `MODE_INFO` grid is walked through
+//! [`Vp8Common::mi_split_neighbors`], which `split_at_mut`s the slab into
+//! the current cell (`&mut`) and its three causal neighbours (`&`) — the
+//! safe analogue of the C `mi - mis`, `mi - 1`, `mi - mis - 1` lookups
+//! (the column −1 / row −1 sentinels are set up elsewhere). The remaining
+//! `Vp8dComp` state reaches the per-MB parsers as field-disjoint borrows.
+//! Helper functions translated from `findnearmv.h` / `entropymv.h` /
+//! `treereader.h` are imported from their host modules at the top.
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
-#![allow(clippy::missing_safety_doc)]
 #![allow(clippy::too_many_arguments)]
 
 use crate::tables::{
@@ -25,8 +24,8 @@ use crate::tables::{
     VP8_MV_UPDATE_PROBS, VP8_SMALL_MVTREE, VP8_SUBMVREFS, VP8_UV_MODE_TREE, VP8_YMODE_TREE,
 };
 use crate::types::{
-    BModeInfo, BPredictionMode, FrameType, MAX_REF_FRAMES, Macroblockd, MbModeInfo, MbPredictionMode,
-    ModeInfo, Mv, MvReferenceFrame, Vp8Common, Vp8Reader, Vp8dComp,
+    BModeInfo, BPredictionMode, FrameContext, FrameType, MAX_REF_FRAMES, Macroblockd, MbModeInfo,
+    MbPredictionMode, ModeInfo, Mv, MvReferenceFrame, Vp8Common, Vp8Reader, Vp8dComp,
 };
 
 // ===========================================================================
@@ -144,12 +143,13 @@ const VP8_MBSPLIT_OFFSET: [[u8; 16]; 4] = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
 ];
 
-/// `above_block_mode` (`findnearmv.h:128`).
+/// `above_block_mode` (`findnearmv.h:128`). `cur` is the current cell,
+/// `above` its already-resolved above neighbour (both shared refs into
+/// the MI slab, partitioned by [`Vp8Common::mi_split_neighbors`]).
 #[inline]
-fn above_block_mode(pc: &Vp8Common, mb_row: i32, mb_col: i32, mi: &ModeInfo, b: i32) -> BPredictionMode {
+fn above_block_mode(cur: &ModeInfo, above: &ModeInfo, b: i32) -> BPredictionMode {
     if (b >> 2) == 0 {
         // On top edge, get from MB above us
-        let above = pc.mi_above(mb_row, mb_col);
         return match above.mbmi.mode {
             MbPredictionMode::BPred => match above.bmi[(b + 12) as usize] {
                 BModeInfo::Intra(m) => m,
@@ -162,18 +162,18 @@ fn above_block_mode(pc: &Vp8Common, mb_row: i32, mb_col: i32, mi: &ModeInfo, b: 
         };
     }
 
-    match mi.bmi[(b - 4) as usize] {
+    match cur.bmi[(b - 4) as usize] {
         BModeInfo::Intra(m) => m,
         _ => BPredictionMode::DcPred,
     }
 }
 
-/// `left_block_mode` (`findnearmv.h:110`).
+/// `left_block_mode` (`findnearmv.h:110`). `cur` is the current cell,
+/// `left` its already-resolved left neighbour.
 #[inline]
-fn left_block_mode(pc: &Vp8Common, mb_row: i32, mb_col: i32, mi: &ModeInfo, b: i32) -> BPredictionMode {
+fn left_block_mode(cur: &ModeInfo, left: &ModeInfo, b: i32) -> BPredictionMode {
     if (b & 3) == 0 {
         // On L edge, get from MB to left of us
-        let left = pc.mi_left(mb_row, mb_col);
         return match left.mbmi.mode {
             MbPredictionMode::BPred => match left.bmi[(b + 3) as usize] {
                 BModeInfo::Intra(m) => m,
@@ -186,7 +186,7 @@ fn left_block_mode(pc: &Vp8Common, mb_row: i32, mb_col: i32, mi: &ModeInfo, b: i
         };
     }
 
-    match mi.bmi[(b - 1) as usize] {
+    match cur.bmi[(b - 1) as usize] {
         BModeInfo::Intra(m) => m,
         _ => BPredictionMode::DcPred,
     }
@@ -277,25 +277,31 @@ fn read_uv_mode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
 // `read_kf_modes` (decodemv.c:42).
 // ===========================================================================
 
-unsafe fn read_kf_modes(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: i32, mb_col: i32) {
-    let bc = &mut (*pbi).mbc[8];
+/// `read_kf_modes` (decodemv.c:42). `cur` is the current cell (mutated);
+/// `above`/`left` are its causal neighbours (shared), partitioned out of
+/// the MI slab by the caller via [`Vp8Common::mi_split_neighbors`].
+fn read_kf_modes(
+    bc: &mut Vp8Reader<'_>,
+    cur: &mut ModeInfo,
+    above: &ModeInfo,
+    left: &ModeInfo,
+) {
+    cur.mbmi.ref_frame = MvReferenceFrame::Intra;
+    cur.mbmi.mode = read_kf_ymode(bc, VP8_KF_YMODE_PROB.as_ptr());
 
-    (*mi).mbmi.ref_frame = MvReferenceFrame::Intra;
-    (*mi).mbmi.mode = read_kf_ymode(bc, VP8_KF_YMODE_PROB.as_ptr());
-
-    if (*mi).mbmi.mode == MbPredictionMode::BPred {
-        (*mi).mbmi.is_4x4 = true;
+    if cur.mbmi.mode == MbPredictionMode::BPred {
+        cur.mbmi.is_4x4 = true;
 
         for i in 0..16i32 {
-            let a = above_block_mode(&(*pbi).common, mb_row, mb_col, &*mi, i);
-            let l = left_block_mode(&(*pbi).common, mb_row, mb_col, &*mi, i);
+            let a = above_block_mode(cur, above, i);
+            let l = left_block_mode(cur, left, i);
 
             let m = read_bmode(bc, VP8_KF_BMODE_PROB[a as usize][l as usize].as_ptr());
-            (*mi).bmi[i as usize] = BModeInfo::Intra(m);
+            cur.bmi[i as usize] = BModeInfo::Intra(m);
         }
     }
 
-    (*mi).mbmi.uv_mode = read_uv_mode(bc, VP8_KF_UV_MODE_PROB.as_ptr());
+    cur.mbmi.uv_mode = read_uv_mode(bc, VP8_KF_UV_MODE_PROB.as_ptr());
 }
 
 // ===========================================================================
@@ -374,37 +380,38 @@ static MBSPLIT_FILL_OFFSET: [[u8; 16]; 4] = [
 // `mb_mode_mv_init` (decodemv.c:122).
 // ===========================================================================
 
-unsafe fn mb_mode_mv_init(pbi: *mut Vp8dComp<'_>) {
-    let bc = &mut (*pbi).mbc[8];
-
+fn mb_mode_mv_init(pbi: &mut Vp8dComp<'_>) {
     // (CONFIG_ERROR_CONCEALMENT branch omitted — minimal build.)
 
     /* Read the mb_no_coeff_skip flag */
-    (*pbi).common.mb_no_coeff_skip = vp8_read_bit(bc);
+    pbi.common.mb_no_coeff_skip = vp8_read_bit(&mut pbi.mbc[8]);
 
-    (*pbi).prob_skip_false = 0;
-    if (*pbi).common.mb_no_coeff_skip != 0 {
-        (*pbi).prob_skip_false = vp8_read_literal(bc, 8) as Prob;
+    pbi.prob_skip_false = 0;
+    if pbi.common.mb_no_coeff_skip != 0 {
+        pbi.prob_skip_false = vp8_read_literal(&mut pbi.mbc[8], 8) as Prob;
     }
 
-    if (*pbi).common.frame_type != FrameType::Key {
-        (*pbi).prob_intra = vp8_read_literal(bc, 8) as Prob;
-        (*pbi).prob_last = vp8_read_literal(bc, 8) as Prob;
-        (*pbi).prob_gf = vp8_read_literal(bc, 8) as Prob;
+    if pbi.common.frame_type != FrameType::Key {
+        pbi.prob_intra = vp8_read_literal(&mut pbi.mbc[8], 8) as Prob;
+        pbi.prob_last = vp8_read_literal(&mut pbi.mbc[8], 8) as Prob;
+        pbi.prob_gf = vp8_read_literal(&mut pbi.mbc[8], 8) as Prob;
 
-        if vp8_read_bit(bc) != 0 {
+        if vp8_read_bit(&mut pbi.mbc[8]) != 0 {
             for i in 0..4usize {
-                (*pbi).common.fc.ymode_prob[i] = vp8_read_literal(bc, 8) as Prob;
+                pbi.common.fc.ymode_prob[i] = vp8_read_literal(&mut pbi.mbc[8], 8) as Prob;
             }
         }
 
-        if vp8_read_bit(bc) != 0 {
+        if vp8_read_bit(&mut pbi.mbc[8]) != 0 {
             for i in 0..3usize {
-                (*pbi).common.fc.uv_mode_prob[i] = vp8_read_literal(bc, 8) as Prob;
+                pbi.common.fc.uv_mode_prob[i] = vp8_read_literal(&mut pbi.mbc[8], 8) as Prob;
             }
         }
 
-        read_mvcontexts(bc, &mut (*pbi).common.fc.mvc);
+        // `mbc` and `common.fc` are disjoint fields, so the bool-reader
+        // borrow coexists with the `&mut` into the MV-context table.
+        let bc = &mut pbi.mbc[8];
+        read_mvcontexts(bc, &mut pbi.common.fc.mvc);
     }
 }
 
@@ -429,24 +436,26 @@ pub const VP8_SUB_MV_REF_PROB3: [[Prob; VP8_SUBMVREFS - 1]; 8] = [
 // `get_sub_mv_ref_prob` (decodemv.c:176).
 // ===========================================================================
 
-fn get_sub_mv_ref_prob(left: u32, above: u32) -> *const Prob {
+fn get_sub_mv_ref_prob(left: u32, above: u32) -> &'static [Prob; VP8_SUBMVREFS - 1] {
     let lez = (left == 0) as usize;
     let aez = (above == 0) as usize;
     let lea = (left == above) as usize;
 
-    VP8_SUB_MV_REF_PROB3[(aez << 2) | (lez << 1) | lea].as_ptr()
+    &VP8_SUB_MV_REF_PROB3[(aez << 2) | (lez << 1) | lea]
 }
 
 // ===========================================================================
 // `decode_split_mv` (decodemv.c:188).
 // ===========================================================================
 
-unsafe fn decode_split_mv(
+/// `decode_split_mv` (decodemv.c:188). `cur` is the current cell
+/// (mutated); `left_mb`/`above_mb` are causal neighbours (shared). All
+/// three are partitioned out of the MI slab by the caller.
+fn decode_split_mv(
     bc: &mut Vp8Reader<'_>,
-    mi: *mut ModeInfo,
-    left_mb: *const ModeInfo,
-    above_mb: *const ModeInfo,
-    mbmi: *mut MbModeInfo,
+    cur: &mut ModeInfo,
+    left_mb: &ModeInfo,
+    above_mb: &ModeInfo,
     best_mv: Mv,
     mvc: &[MvContext; 2],
     mb_to_left_edge: i32,
@@ -477,37 +486,36 @@ unsafe fn decode_split_mv(
         let mut blockmv: u32;
         let k: i32; /* first block in subset j */
 
-        let prob: *const Prob;
         k = VP8_MBSPLIT_OFFSET[s as usize][j as usize] as i32;
 
         if (k & 3) == 0 {
             /* On L edge, get from MB to left of us */
-            if (*left_mb).mbmi.mode != MbPredictionMode::SplitMv {
-                leftmv = mv_as_int((*left_mb).mbmi.mv);
+            if left_mb.mbmi.mode != MbPredictionMode::SplitMv {
+                leftmv = mv_as_int(left_mb.mbmi.mv);
             } else {
-                leftmv = bmi_mv_as_int((*left_mb).bmi[(k + 4 - 1) as usize]);
+                leftmv = bmi_mv_as_int(left_mb.bmi[(k + 4 - 1) as usize]);
             }
         } else {
-            leftmv = bmi_mv_as_int((*mi).bmi[(k - 1) as usize]);
+            leftmv = bmi_mv_as_int(cur.bmi[(k - 1) as usize]);
         }
 
         if (k >> 2) == 0 {
             /* On top edge, get from MB above us */
-            if (*above_mb).mbmi.mode != MbPredictionMode::SplitMv {
-                abovemv = mv_as_int((*above_mb).mbmi.mv);
+            if above_mb.mbmi.mode != MbPredictionMode::SplitMv {
+                abovemv = mv_as_int(above_mb.mbmi.mv);
             } else {
-                abovemv = bmi_mv_as_int((*above_mb).bmi[(k + 16 - 4) as usize]);
+                abovemv = bmi_mv_as_int(above_mb.bmi[(k + 16 - 4) as usize]);
             }
         } else {
-            abovemv = bmi_mv_as_int((*mi).bmi[(k - 4) as usize]);
+            abovemv = bmi_mv_as_int(cur.bmi[(k - 4) as usize]);
         }
 
-        prob = get_sub_mv_ref_prob(leftmv, abovemv);
+        let prob = get_sub_mv_ref_prob(leftmv, abovemv);
 
-        if vp8_read(bc, *prob.add(0) as i32) != 0 {
-            if vp8_read(bc, *prob.add(1) as i32) != 0 {
+        if vp8_read(bc, prob[0] as i32) != 0 {
+            if vp8_read(bc, prob[1] as i32) != 0 {
                 blockmv = 0;
-                if vp8_read(bc, *prob.add(2) as i32) != 0 {
+                if vp8_read(bc, prob[2] as i32) != 0 {
                     let mut tmp = Mv { row: 0, col: 0 };
                     tmp.row = (read_mvcomponent(bc, &mvc[0].prob) * 2) as i16;
                     tmp.row = tmp.row.wrapping_add(best_mv.row);
@@ -523,7 +531,7 @@ unsafe fn decode_split_mv(
         }
 
         let blockmv_as_mv = int_as_mv(blockmv);
-        (*mbmi).need_to_clamp_mvs = (*mbmi).need_to_clamp_mvs
+        cur.mbmi.need_to_clamp_mvs = cur.mbmi.need_to_clamp_mvs
             || vp8_check_mv_bounds(
                 &blockmv_as_mv,
                 mb_to_left_edge,
@@ -536,45 +544,53 @@ unsafe fn decode_split_mv(
             /* Fill (uniform) modes, mvs of jth subset.
             Must do it here because ensuing subsets can
             refer back to us via "left" or "above". */
-            let mut fill_offset: *const u8;
-            let mut fill_count: u32 = MBSPLIT_FILL_COUNT[s as usize] as u32;
-
-            fill_offset = MBSPLIT_FILL_OFFSET[s as usize]
-                .as_ptr()
-                .add((j as u8 as usize) * (MBSPLIT_FILL_COUNT[s as usize] as usize));
-
-            loop {
-                let idx = *fill_offset as usize;
-                (*mi).bmi[idx] = BModeInfo::Mv(int_as_mv(blockmv));
-                fill_offset = fill_offset.add(1);
-                fill_count -= 1;
-                if fill_count == 0 {
-                    break;
-                }
+            let s_us = s as usize;
+            let count = MBSPLIT_FILL_COUNT[s_us] as usize;
+            let base = (j as usize) * count;
+            for &off in &MBSPLIT_FILL_OFFSET[s_us][base..base + count] {
+                cur.bmi[off as usize] = BModeInfo::Mv(int_as_mv(blockmv));
             }
         }
     }
 
-    (*mbmi).partitioning = s as u8;
+    cur.mbmi.partitioning = s as u8;
 }
 
 // ===========================================================================
 // `read_mb_modes_mv` (decodemv.c:284).
 // ===========================================================================
 
-unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut MbModeInfo) {
-    let bc = &mut (*pbi).mbc[8];
-
+/// `read_mb_modes_mv` (decodemv.c:284). `cur` is the current cell
+/// (mutated); `above`/`left`/`aboveleft` are causal neighbours (shared),
+/// partitioned from the MI slab by the caller. The remaining `pbi` state
+/// (probs, sign-bias table, MV contexts, MB edges) is passed in as
+/// field-disjoint borrows / copied scalars.
+fn read_mb_modes_mv(
+    bc: &mut Vp8Reader<'_>,
+    cur: &mut ModeInfo,
+    above: &ModeInfo,
+    left: &ModeInfo,
+    aboveleft: &ModeInfo,
+    prob_intra: Prob,
+    prob_last: Prob,
+    prob_gf: Prob,
+    ref_frame_sign_bias: &[i32; MAX_REF_FRAMES],
+    fc: &FrameContext,
+    edge_left: i32,
+    edge_right: i32,
+    edge_top: i32,
+    edge_bottom: i32,
+) {
     // ref_frame = (MV_REFERENCE_FRAME)vp8_read(bc, pbi->prob_intra);
-    let rf = vp8_read(bc, (*pbi).prob_intra as i32);
-    (*mbmi).ref_frame = match rf {
+    let rf = vp8_read(bc, prob_intra as i32);
+    cur.mbmi.ref_frame = match rf {
         0 => MvReferenceFrame::Intra,
         1 => MvReferenceFrame::Last,
         2 => MvReferenceFrame::Golden,
         _ => MvReferenceFrame::Altref,
     };
 
-    if (*mbmi).ref_frame != MvReferenceFrame::Intra {
+    if cur.mbmi.ref_frame != MvReferenceFrame::Intra {
         /* inter MB */
         const CNT_INTRA: usize = 0;
         const CNT_NEAREST: usize = 1;
@@ -585,17 +601,12 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
         let mut cntx_idx: usize = 0;
         let mut near_mvs: [Mv; 4] = [Mv { row: 0, col: 0 }; 4];
         let mut nmv_idx: usize = 0;
-        let mis = (*pbi).mb.mode_info_stride;
-        let above: *const ModeInfo = mi.offset(-(mis as isize));
-        let left: *const ModeInfo = mi.offset(-1);
-        let aboveleft: *const ModeInfo = above.offset(-1);
-        let ref_frame_sign_bias: &[i32; MAX_REF_FRAMES] = &(*pbi).common.ref_frame_sign_bias;
 
-        (*mbmi).need_to_clamp_mvs = false;
+        cur.mbmi.need_to_clamp_mvs = false;
 
-        if vp8_read(bc, (*pbi).prob_last as i32) != 0 {
-            let v = 2 + vp8_read(bc, (*pbi).prob_gf as i32);
-            (*mbmi).ref_frame = match v {
+        if vp8_read(bc, prob_last as i32) != 0 {
+            let v = 2 + vp8_read(bc, prob_gf as i32);
+            cur.mbmi.ref_frame = match v {
                 2 => MvReferenceFrame::Golden,
                 _ => MvReferenceFrame::Altref,
             };
@@ -612,13 +623,13 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
         cnt[3] = 0;
 
         /* Process above */
-        if (*above).mbmi.ref_frame != MvReferenceFrame::Intra {
-            if mv_as_int((*above).mbmi.mv) != 0 {
+        if above.mbmi.ref_frame != MvReferenceFrame::Intra {
+            if mv_as_int(above.mbmi.mv) != 0 {
                 nmv_idx += 1;
-                near_mvs[nmv_idx] = (*above).mbmi.mv;
+                near_mvs[nmv_idx] = above.mbmi.mv;
                 mv_bias(
-                    ref_frame_sign_bias[(*above).mbmi.ref_frame as usize],
-                    (*mbmi).ref_frame,
+                    ref_frame_sign_bias[above.mbmi.ref_frame as usize],
+                    cur.mbmi.ref_frame,
                     &mut near_mvs[nmv_idx],
                     ref_frame_sign_bias,
                 );
@@ -628,12 +639,12 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
         }
 
         /* Process left */
-        if (*left).mbmi.ref_frame != MvReferenceFrame::Intra {
-            if mv_as_int((*left).mbmi.mv) != 0 {
-                let mut this_mv: Mv = (*left).mbmi.mv;
+        if left.mbmi.ref_frame != MvReferenceFrame::Intra {
+            if mv_as_int(left.mbmi.mv) != 0 {
+                let mut this_mv: Mv = left.mbmi.mv;
                 mv_bias(
-                    ref_frame_sign_bias[(*left).mbmi.ref_frame as usize],
-                    (*mbmi).ref_frame,
+                    ref_frame_sign_bias[left.mbmi.ref_frame as usize],
+                    cur.mbmi.ref_frame,
                     &mut this_mv,
                     ref_frame_sign_bias,
                 );
@@ -650,12 +661,12 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
         }
 
         /* Process above left */
-        if (*aboveleft).mbmi.ref_frame != MvReferenceFrame::Intra {
-            if mv_as_int((*aboveleft).mbmi.mv) != 0 {
-                let mut this_mv: Mv = (*aboveleft).mbmi.mv;
+        if aboveleft.mbmi.ref_frame != MvReferenceFrame::Intra {
+            if mv_as_int(aboveleft.mbmi.mv) != 0 {
+                let mut this_mv: Mv = aboveleft.mbmi.mv;
                 mv_bias(
-                    ref_frame_sign_bias[(*aboveleft).mbmi.ref_frame as usize],
-                    (*mbmi).ref_frame,
+                    ref_frame_sign_bias[aboveleft.mbmi.ref_frame as usize],
+                    cur.mbmi.ref_frame,
                     &mut this_mv,
                     ref_frame_sign_bias,
                 );
@@ -689,45 +700,38 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
 
             if vp8_read(bc, VP8_MODE_CONTEXTS[cnt[CNT_NEAREST] as usize][1]) != 0 {
                 if vp8_read(bc, VP8_MODE_CONTEXTS[cnt[CNT_NEAR] as usize][2]) != 0 {
-                    let mut mb_to_top_edge: i32;
-                    let mut mb_to_bottom_edge: i32;
-                    let mut mb_to_left_edge: i32;
-                    let mut mb_to_right_edge: i32;
-                    let mvc: &[MvContext; 2] = &(*pbi).common.fc.mvc;
+                    let mvc: &[MvContext; 2] = &fc.mvc;
                     let near_index: usize;
 
-                    mb_to_top_edge = (*pbi).mb.mb_to_top_edge;
-                    mb_to_bottom_edge = (*pbi).mb.mb_to_bottom_edge;
-                    mb_to_top_edge -= LEFT_TOP_MARGIN;
-                    mb_to_bottom_edge += RIGHT_BOTTOM_MARGIN;
-                    mb_to_right_edge = (*pbi).mb.mb_to_right_edge;
-                    mb_to_right_edge += RIGHT_BOTTOM_MARGIN;
-                    mb_to_left_edge = (*pbi).mb.mb_to_left_edge;
-                    mb_to_left_edge -= LEFT_TOP_MARGIN;
+                    // Margined edges for split-MV / NEWMV bounds checks
+                    // (the raw `edge_*` feed `vp8_clamp_mv2` unchanged).
+                    let mb_to_top_edge = edge_top - LEFT_TOP_MARGIN;
+                    let mb_to_bottom_edge = edge_bottom + RIGHT_BOTTOM_MARGIN;
+                    let mb_to_right_edge = edge_right + RIGHT_BOTTOM_MARGIN;
+                    let mb_to_left_edge = edge_left - LEFT_TOP_MARGIN;
 
                     /* Use near_mvs[0] to store the "best" MV */
                     near_index = CNT_INTRA + ((cnt[CNT_NEAREST] >= cnt[CNT_INTRA]) as usize);
 
                     vp8_clamp_mv2(
                         &mut near_mvs[near_index],
-                        (*pbi).mb.mb_to_left_edge,
-                        (*pbi).mb.mb_to_right_edge,
-                        (*pbi).mb.mb_to_top_edge,
-                        (*pbi).mb.mb_to_bottom_edge,
+                        edge_left,
+                        edge_right,
+                        edge_top,
+                        edge_bottom,
                     );
 
-                    cnt[CNT_SPLITMV] = (((*above).mbmi.mode == MbPredictionMode::SplitMv) as i32
-                        + ((*left).mbmi.mode == MbPredictionMode::SplitMv) as i32)
+                    cnt[CNT_SPLITMV] = ((above.mbmi.mode == MbPredictionMode::SplitMv) as i32
+                        + (left.mbmi.mode == MbPredictionMode::SplitMv) as i32)
                         * 2
-                        + ((*aboveleft).mbmi.mode == MbPredictionMode::SplitMv) as i32;
+                        + (aboveleft.mbmi.mode == MbPredictionMode::SplitMv) as i32;
 
                     if vp8_read(bc, VP8_MODE_CONTEXTS[cnt[CNT_SPLITMV] as usize][3]) != 0 {
                         decode_split_mv(
                             bc,
-                            mi,
+                            cur,
                             left,
                             above,
-                            mbmi,
                             near_mvs[near_index],
                             mvc,
                             mb_to_left_edge,
@@ -735,74 +739,75 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
                             mb_to_top_edge,
                             mb_to_bottom_edge,
                         );
-                        (*mbmi).mv = int_as_mv(bmi_mv_as_int((*mi).bmi[15]));
-                        (*mbmi).mode = MbPredictionMode::SplitMv;
-                        (*mbmi).is_4x4 = true;
+                        let last_bmv = bmi_mv_as_int(cur.bmi[15]);
+                        cur.mbmi.mv = int_as_mv(last_bmv);
+                        cur.mbmi.mode = MbPredictionMode::SplitMv;
+                        cur.mbmi.is_4x4 = true;
                     } else {
-                        read_mv(bc, &mut (*mbmi).mv, mvc);
-                        (*mbmi).mv.row =
-                            (*mbmi).mv.row.wrapping_add(near_mvs[near_index].row);
-                        (*mbmi).mv.col =
-                            (*mbmi).mv.col.wrapping_add(near_mvs[near_index].col);
+                        read_mv(bc, &mut cur.mbmi.mv, mvc);
+                        cur.mbmi.mv.row =
+                            cur.mbmi.mv.row.wrapping_add(near_mvs[near_index].row);
+                        cur.mbmi.mv.col =
+                            cur.mbmi.mv.col.wrapping_add(near_mvs[near_index].col);
 
                         /* Don't need to check this on NEARMV and NEARESTMV
                          * modes since those modes clamp the MV. The NEWMV mode
                          * does not, so signal to the prediction stage whether
                          * special handling may be required.
                          */
-                        (*mbmi).need_to_clamp_mvs = vp8_check_mv_bounds(
-                            &(*mbmi).mv,
+                        cur.mbmi.need_to_clamp_mvs = vp8_check_mv_bounds(
+                            &cur.mbmi.mv,
                             mb_to_left_edge,
                             mb_to_right_edge,
                             mb_to_top_edge,
                             mb_to_bottom_edge,
                         ) != 0;
-                        (*mbmi).mode = MbPredictionMode::NewMv;
+                        cur.mbmi.mode = MbPredictionMode::NewMv;
                     }
                 } else {
-                    (*mbmi).mode = MbPredictionMode::NearMv;
-                    (*mbmi).mv = near_mvs[CNT_NEAR];
+                    cur.mbmi.mode = MbPredictionMode::NearMv;
+                    cur.mbmi.mv = near_mvs[CNT_NEAR];
                     vp8_clamp_mv2(
-                        &mut (*mbmi).mv,
-                        (*pbi).mb.mb_to_left_edge,
-                        (*pbi).mb.mb_to_right_edge,
-                        (*pbi).mb.mb_to_top_edge,
-                        (*pbi).mb.mb_to_bottom_edge,
+                        &mut cur.mbmi.mv,
+                        edge_left,
+                        edge_right,
+                        edge_top,
+                        edge_bottom,
                     );
                 }
             } else {
-                (*mbmi).mode = MbPredictionMode::NearestMv;
-                (*mbmi).mv = near_mvs[CNT_NEAREST];
+                cur.mbmi.mode = MbPredictionMode::NearestMv;
+                cur.mbmi.mv = near_mvs[CNT_NEAREST];
                 vp8_clamp_mv2(
-                    &mut (*mbmi).mv,
-                    (*pbi).mb.mb_to_left_edge,
-                    (*pbi).mb.mb_to_right_edge,
-                    (*pbi).mb.mb_to_top_edge,
-                    (*pbi).mb.mb_to_bottom_edge,
+                    &mut cur.mbmi.mv,
+                    edge_left,
+                    edge_right,
+                    edge_top,
+                    edge_bottom,
                 );
             }
         } else {
-            (*mbmi).mode = MbPredictionMode::ZeroMv;
-            (*mbmi).mv = Mv { row: 0, col: 0 };
+            cur.mbmi.mode = MbPredictionMode::ZeroMv;
+            cur.mbmi.mv = Mv { row: 0, col: 0 };
         }
 
         // (CONFIG_ERROR_CONCEALMENT branch omitted — minimal build.)
     } else {
         /* required for left and above block mv */
-        (*mbmi).mv = Mv { row: 0, col: 0 };
+        cur.mbmi.mv = Mv { row: 0, col: 0 };
 
         /* MB is intra coded */
-        let ym = read_ymode(bc, (*pbi).common.fc.ymode_prob.as_ptr());
-        (*mbmi).mode = ym;
+        let ym = read_ymode(bc, fc.ymode_prob.as_ptr());
+        cur.mbmi.mode = ym;
         if ym == MbPredictionMode::BPred {
-            (*mbmi).is_4x4 = true;
+            cur.mbmi.is_4x4 = true;
             for j in 0..16usize {
-                let m = read_bmode(bc, (*pbi).common.fc.bmode_prob.as_ptr());
-                (*mi).bmi[j] = BModeInfo::Intra(m);
+                let m = read_bmode(bc, fc.bmode_prob.as_ptr());
+                cur.bmi[j] = BModeInfo::Intra(m);
             }
         }
 
-        (*mbmi).uv_mode = read_uv_mode(bc, (*pbi).common.fc.uv_mode_prob.as_ptr());
+        cur.mbmi.uv_mode = read_uv_mode(bc, fc.uv_mode_prob.as_ptr());
     }
 }
 
@@ -826,35 +831,71 @@ fn read_mb_features(r: &mut Vp8Reader<'_>, mi: &mut MbModeInfo, x: &Macroblockd)
 // `decode_mb_mode_mvs` (decodemv.c:489).
 // ===========================================================================
 
-unsafe fn decode_mb_mode_mvs(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: i32, mb_col: i32) {
+/// `decode_mb_mode_mvs` (decodemv.c:489). Resolves the current MI cell
+/// and its three causal neighbours from the slab via
+/// [`Vp8Common::mi_split_neighbors`], then dispatches to the key-frame or
+/// inter parser. The bool reader (`mbc`), the segmentation state
+/// (`mb`), the entropy contexts (`common.fc`) and the sign-bias table
+/// (`common.ref_frame_sign_bias`) are all field-disjoint from the slab
+/// (`common.mip`), so they coexist as separate borrows.
+fn decode_mb_mode_mvs(pbi: &mut Vp8dComp<'_>, mb_row: i32, mb_col: i32) {
+    // Copy out the per-MB scalars before borrowing the slab so the
+    // borrows below stay field-disjoint.
+    let frame_type = pbi.common.frame_type;
+    let mb_no_coeff_skip = pbi.common.mb_no_coeff_skip;
+    let prob_skip_false = pbi.prob_skip_false;
+    let prob_intra = pbi.prob_intra;
+    let prob_last = pbi.prob_last;
+    let prob_gf = pbi.prob_gf;
+    let update_seg_map = pbi.mb.update_mb_segmentation_map;
+    let edge_left = pbi.mb.mb_to_left_edge;
+    let edge_right = pbi.mb.mb_to_right_edge;
+    let edge_top = pbi.mb.mb_to_top_edge;
+    let edge_bottom = pbi.mb.mb_to_bottom_edge;
+    let stride = pbi.common.mode_info_stride as usize;
+
+    let slab = pbi.common.mip.as_deref_mut().expect("MI grid not allocated");
+    let (cur, above, left, aboveleft) =
+        Vp8Common::mi_split_neighbors(slab, stride, mb_row, mb_col);
+
     /* Read the Macroblock segmentation map if it is being updated explicitly
      * this frame (reset to 0 above by default)
      * By default on a key frame reset all MBs to segment 0
      */
-    if (*pbi).mb.update_mb_segmentation_map != 0 {
-        read_mb_features(
-            &mut (*pbi).mbc[8],
-            &mut (*mi).mbmi,
-            &(*pbi).mb,
-        );
-    } else if (*pbi).common.frame_type == FrameType::Key {
-        (*mi).mbmi.segment_id = 0;
+    if update_seg_map != 0 {
+        read_mb_features(&mut pbi.mbc[8], &mut cur.mbmi, &pbi.mb);
+    } else if frame_type == FrameType::Key {
+        cur.mbmi.segment_id = 0;
     }
 
     /* Read the macroblock coeff skip flag if this feature is in use,
      * else default to 0 */
-    if (*pbi).common.mb_no_coeff_skip != 0 {
-        (*mi).mbmi.mb_skip_coeff =
-            vp8_read(&mut (*pbi).mbc[8], (*pbi).prob_skip_false as i32) != 0;
+    if mb_no_coeff_skip != 0 {
+        cur.mbmi.mb_skip_coeff = vp8_read(&mut pbi.mbc[8], prob_skip_false as i32) != 0;
     } else {
-        (*mi).mbmi.mb_skip_coeff = false;
+        cur.mbmi.mb_skip_coeff = false;
     }
 
-    (*mi).mbmi.is_4x4 = false;
-    if (*pbi).common.frame_type == FrameType::Key {
-        read_kf_modes(pbi, mi, mb_row, mb_col);
+    cur.mbmi.is_4x4 = false;
+    if frame_type == FrameType::Key {
+        read_kf_modes(&mut pbi.mbc[8], cur, above, left);
     } else {
-        read_mb_modes_mv(pbi, mi, &mut (*mi).mbmi as *mut MbModeInfo);
+        read_mb_modes_mv(
+            &mut pbi.mbc[8],
+            cur,
+            above,
+            left,
+            aboveleft,
+            prob_intra,
+            prob_last,
+            prob_gf,
+            &pbi.common.ref_frame_sign_bias,
+            &pbi.common.fc,
+            edge_left,
+            edge_right,
+            edge_top,
+            edge_bottom,
+        );
     }
 }
 
@@ -866,30 +907,31 @@ unsafe fn decode_mb_mode_mvs(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: 
 /// for the current frame, writing into `pbi->common.mi[]`.
 ///
 /// Source: `vp8/decoder/decodemv.c:516`.
-pub unsafe fn vp8_decode_mode_mvs(pbi: *mut Vp8dComp<'_>) {
+pub fn vp8_decode_mode_mvs(pbi: &mut Vp8dComp<'_>) {
     mb_mode_mv_init(pbi);
 
-    (*pbi).mb.mb_to_top_edge = 0;
-    (*pbi).mb.mb_to_bottom_edge = (((*pbi).common.mb_rows - 1) * 16) << 3;
-    let mb_to_right_edge_start: i32 = (((*pbi).common.mb_cols - 1) * 16) << 3;
+    pbi.mb.mb_to_top_edge = 0;
+    pbi.mb.mb_to_bottom_edge = ((pbi.common.mb_rows - 1) * 16) << 3;
+    let mb_to_right_edge_start: i32 = ((pbi.common.mb_cols - 1) * 16) << 3;
+    let mb_rows = pbi.common.mb_rows;
+    let mb_cols = pbi.common.mb_cols;
 
-    for mb_row in 0..(*pbi).common.mb_rows {
-        (*pbi).mb.mb_to_left_edge = 0;
-        (*pbi).mb.mb_to_right_edge = mb_to_right_edge_start;
+    for mb_row in 0..mb_rows {
+        pbi.mb.mb_to_left_edge = 0;
+        pbi.mb.mb_to_right_edge = mb_to_right_edge_start;
 
-        for mb_col in 0..(*pbi).common.mb_cols {
-            // Address the current MB cell through the safe accessor;
-            // demote to raw `*mut ModeInfo` for the still-raw-ptr-shaped
-            // sub-call chain.
-            let mi: *mut ModeInfo = (*pbi).common.mi_mut(mb_row, mb_col);
-            decode_mb_mode_mvs(pbi, mi, mb_row, mb_col);
+        for mb_col in 0..mb_cols {
+            // The slab split + neighbour resolution happens inside
+            // `decode_mb_mode_mvs`; `pbi` is reborrowed fresh each
+            // iteration so the per-MB borrows don't outlive the call.
+            decode_mb_mode_mvs(pbi, mb_row, mb_col);
 
             // (CONFIG_ERROR_CONCEALMENT branch omitted — minimal build.)
 
-            (*pbi).mb.mb_to_left_edge -= 16 << 3;
-            (*pbi).mb.mb_to_right_edge -= 16 << 3;
+            pbi.mb.mb_to_left_edge -= 16 << 3;
+            pbi.mb.mb_to_right_edge -= 16 << 3;
         }
-        (*pbi).mb.mb_to_top_edge -= 16 << 3;
-        (*pbi).mb.mb_to_bottom_edge -= 16 << 3;
+        pbi.mb.mb_to_top_edge -= 16 << 3;
+        pbi.mb.mb_to_bottom_edge -= 16 << 3;
     }
 }

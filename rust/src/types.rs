@@ -724,6 +724,12 @@ impl Vp8Common {
     /// Shared references to the neighbour cells. Always valid (the
     /// padding row+column at the top and left make `(-1, c)` /
     /// `(r, -1)` / `(-1, -1)` real entries).
+    ///
+    /// These each re-borrow the whole `mip` field, so they cannot be
+    /// combined with `mi_mut(row, col)` in a single scope. They serve the
+    /// read-only neighbour lookups on the loop-filter / detokenize paths;
+    /// the per-MB MV parser, which needs `&mut current` + `&neighbours`
+    /// simultaneously, uses [`Vp8Common::mi_split_neighbors`] instead.
     #[inline] pub fn mi_left(&self, row: i32, col: i32) -> &ModeInfo { self.mi(row, col - 1) }
     #[inline] pub fn mi_above(&self, row: i32, col: i32) -> &ModeInfo { self.mi(row - 1, col) }
     #[inline] pub fn mi_above_left(&self, row: i32, col: i32) -> &ModeInfo {
@@ -747,6 +753,41 @@ impl Vp8Common {
         let start = ((row + 1) as usize) * stride + 1;
         let mb_cols = self.mb_cols as usize;
         &self.mip.as_deref().expect("MI grid not allocated")[start..start + mb_cols]
+    }
+
+    /// Split the MI slab into the current `(row, col)` cell (`&mut`) and
+    /// its three causal neighbours (`&`): above, left, above-left. With
+    /// the padding row/column, the above-left cell has linear index
+    /// `al = row*stride + col`, and `above = al+1`, `left = al+stride`,
+    /// `cur = al+stride+1`. A single `split_at_mut(al+stride+1)` puts the
+    /// three neighbours in `before` and the current cell at `rest[0]`,
+    /// with no aliasing.
+    ///
+    /// Takes the slab and stride by argument rather than `&mut self` on
+    /// purpose: the caller borrows only `common.mip` (via `as_deref_mut`)
+    /// and copies `mode_info_stride` out first, so `common.fc` /
+    /// `common.ref_frame_sign_bias` stay independently borrowable. Going
+    /// through a `&mut self` method would re-borrow the whole `Vp8Common`
+    /// and defeat that field-disjoint access.
+    ///
+    /// The indices are written as sums of non-negative terms (rather than
+    /// `idx - stride - 1` etc.) so the optimizer sees no `usize`
+    /// underflow and can prove each index is `< before.len()`, eliding
+    /// the bounds checks on the per-MB hot path.
+    #[inline]
+    pub fn mi_split_neighbors(
+        slab: &mut [ModeInfo],
+        stride: usize,
+        row: i32,
+        col: i32,
+    ) -> (&mut ModeInfo, &ModeInfo, &ModeInfo, &ModeInfo) {
+        let al = (row as usize) * stride + (col as usize);
+        let (before, rest) = slab.split_at_mut(al + stride + 1);
+        let cur = &mut rest[0];
+        let aboveleft = &before[al];
+        let above = &before[al + 1];
+        let left = &before[al + stride];
+        (cur, above, left, aboveleft)
     }
 }
 

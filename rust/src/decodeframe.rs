@@ -1437,8 +1437,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
     /* clear out the coeff buffer */
     pbi.mb.qcoeff.fill(0);
 
-    // SAFETY: vp8_decode_mode_mvs takes *mut Vp8dComp.
-    unsafe { vp8_decode_mode_mvs(pbi); }
+    vp8_decode_mode_mvs(pbi);
 
     /* Reset above_context for the upcoming row walk. */
     {
