@@ -646,16 +646,23 @@ fn build_4x4uvmvs(x: &mut Macroblockd, mi: &ModeInfo) {
 /// per inter macroblock from `decodeframe.c`.
 ///
 /// Source: `vp8/common/reconinter.c:494`.
-pub unsafe fn vp8_build_inter_predictors_mb(xd: &mut Macroblockd, mi: &ModeInfo) {
+pub fn vp8_build_inter_predictors_mb(xd: &mut Macroblockd, mi: &ModeInfo) {
     if mi.mbmi.mode != MbPredictionMode::SplitMv {
         let dst_y = xd.dst.y_buffer;
         let dst_u = xd.dst.u_buffer;
         let dst_v = xd.dst.v_buffer;
         let y_stride = xd.dst.y_stride;
         let uv_stride = xd.dst.uv_stride;
-        vp8_build_inter16x16_predictors_mb(&*xd, mi, dst_y, dst_u, dst_v, y_stride, uv_stride);
+        // SAFETY: dst plane pointers come from xd.dst (live Yv12 frame);
+        // the 16x16 predictor reads ref-frame planes within their bounds.
+        unsafe {
+            vp8_build_inter16x16_predictors_mb(&*xd, mi, dst_y, dst_u, dst_v, y_stride, uv_stride);
+        }
     } else {
         build_4x4uvmvs(xd, mi);
-        build_inter4x4_predictors_mb(xd, mi);
+        // SAFETY: SPLITMV 4x4 sub-block dispatcher walks per-sub-block
+        // motion vectors into ref-frame pixel ranges; xd carries the
+        // dst/pre plane state.
+        unsafe { build_inter4x4_predictors_mb(xd, mi); }
     }
 }

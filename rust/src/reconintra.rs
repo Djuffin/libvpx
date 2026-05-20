@@ -96,7 +96,7 @@ unsafe fn vp8_init_intra_predictors_internal() {
 /// Writes the 16x16 luma intra predictor into `ypred_ptr` for the
 /// macroblock described by `x`. Caller must have set
 /// `x->left_available` / `x->up_available` and `x->mode_info_context`.
-pub unsafe fn vp8_build_intra_predictors_mby_s(
+pub fn vp8_build_intra_predictors_mby_s(
     x: &Macroblockd,
     mi: &ModeInfo,
     yabove_row: *mut u8,
@@ -112,17 +112,22 @@ pub unsafe fn vp8_build_intra_predictors_mby_s(
     let mut yleft_col_buf = Aligned16([0u8; 16]);
     let yleft_col: *mut u8 = yleft_col_buf.0.as_mut_ptr();
 
-    for i in 0..16i32 {
-        *yleft_col.offset(i as isize) = *yleft.offset((i * left_stride) as isize);
+    // SAFETY: `yleft` is the dst left-neighbor column pointer; we read 16
+    // bytes at `(0..16)*left_stride`, which stays within the dst plane.
+    // The dispatch tables are populated before this is ever called.
+    unsafe {
+        for i in 0..16i32 {
+            *yleft_col.offset(i as isize) = *yleft.offset((i * left_stride) as isize);
+        }
+
+        let fn_: IntraPredFn = if mode == MbPredictionMode::DcPred {
+            dc_pred[x.left_available as usize][x.up_available as usize][SIZE_16].unwrap()
+        } else {
+            pred[mode as usize][SIZE_16].unwrap()
+        };
+
+        fn_(ypred_ptr, y_stride as isize, yabove_row, yleft_col);
     }
-
-    let fn_: IntraPredFn = if mode == MbPredictionMode::DcPred {
-        dc_pred[x.left_available as usize][x.up_available as usize][SIZE_16].unwrap()
-    } else {
-        pred[mode as usize][SIZE_16].unwrap()
-    };
-
-    fn_(ypred_ptr, y_stride as isize, yabove_row, yleft_col);
 }
 
 /// `vp8_build_intra_predictors_mbuv_s` (vp8/common/reconintra.c:69).
@@ -130,7 +135,7 @@ pub unsafe fn vp8_build_intra_predictors_mby_s(
 /// Writes the 8x8 U and V intra predictors into `upred_ptr` /
 /// `vpred_ptr`. U and V always share the single `uv_mode` selector
 /// per RFC 6386 §13.4.
-pub unsafe fn vp8_build_intra_predictors_mbuv_s(
+pub fn vp8_build_intra_predictors_mbuv_s(
     x: &Macroblockd,
     mi: &ModeInfo,
     uabove_row: *mut u8,
@@ -149,29 +154,34 @@ pub unsafe fn vp8_build_intra_predictors_mbuv_s(
     let mut uleft_col: [u8; 16] = [0; 16];
     let mut vleft_col: [u8; 16] = [0; 16];
 
-    for i in 0..8i32 {
-        uleft_col[i as usize] = *uleft.offset((i * left_stride) as isize);
-        vleft_col[i as usize] = *vleft.offset((i * left_stride) as isize);
+    // SAFETY: uleft/vleft are dst-plane left-neighbor column pointers;
+    // we read 8 stride-spaced bytes from each. The predictor dispatch
+    // table is initialized at decoder startup.
+    unsafe {
+        for i in 0..8i32 {
+            uleft_col[i as usize] = *uleft.offset((i * left_stride) as isize);
+            vleft_col[i as usize] = *vleft.offset((i * left_stride) as isize);
+        }
+
+        let fn_: IntraPredFn = if uvmode == MbPredictionMode::DcPred {
+            dc_pred[x.left_available as usize][x.up_available as usize][SIZE_8].unwrap()
+        } else {
+            pred[uvmode as usize][SIZE_8].unwrap()
+        };
+
+        fn_(
+            upred_ptr,
+            pred_stride as isize,
+            uabove_row,
+            uleft_col.as_ptr(),
+        );
+        fn_(
+            vpred_ptr,
+            pred_stride as isize,
+            vabove_row,
+            vleft_col.as_ptr(),
+        );
     }
-
-    let fn_: IntraPredFn = if uvmode == MbPredictionMode::DcPred {
-        dc_pred[x.left_available as usize][x.up_available as usize][SIZE_8].unwrap()
-    } else {
-        pred[uvmode as usize][SIZE_8].unwrap()
-    };
-
-    fn_(
-        upred_ptr,
-        pred_stride as isize,
-        uabove_row,
-        uleft_col.as_ptr(),
-    );
-    fn_(
-        vpred_ptr,
-        pred_stride as isize,
-        vabove_row,
-        vleft_col.as_ptr(),
-    );
 }
 
 /// `vp8_init_intra_predictors` (vp8/common/reconintra.c:102).

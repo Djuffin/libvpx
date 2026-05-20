@@ -441,7 +441,7 @@ pub unsafe fn vp8_decode(
 
         // update the pbi fragment data
         (*pbi).fragments = (*ctx).fragments;
-        if vp8dx_receive_compressed_data(pbi).is_err() {
+        if vp8dx_receive_compressed_data(&mut *pbi).is_err() {
             (*pc).yv12_fb[(*pc).lst_fb_idx as usize].corrupted = 1;
             if (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] > 0 {
                 (*pc).fb_idx_ref_cnt[(*pc).new_fb_idx as usize] -= 1;

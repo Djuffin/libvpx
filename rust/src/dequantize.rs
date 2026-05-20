@@ -30,12 +30,16 @@ use crate::idctllm::vp8_short_idct4x4llm_c;
 /// `d->dqcoeff` — which in this port are just `xd.{qcoeff,dqcoeff} +
 /// 24 * 16` (the Y2 block's slot). We take them directly to avoid the
 /// `Blockd` indirection.
-pub unsafe fn vp8_dequantize_b_c(qcoeff: *mut i16, dqcoeff: *mut i16, DQC: *mut i16) {
-    for i in 0..16isize {
-        // `Q[i] * DQC[i]` is promoted to `int` in C and truncated back
-        // to `short` on store — match with a wrapping i32 multiply.
-        let prod = (*qcoeff.offset(i) as i32).wrapping_mul(*DQC.offset(i) as i32);
-        *dqcoeff.offset(i) = prod as i16;
+pub fn vp8_dequantize_b_c(qcoeff: *mut i16, dqcoeff: *mut i16, DQC: *mut i16) {
+    // SAFETY: caller passes pointers to 16-element i16 blocks: the
+    // qcoeff/dqcoeff slots inside `xd` and a 16-entry dequant table.
+    unsafe {
+        for i in 0..16isize {
+            // `Q[i] * DQC[i]` is promoted to `int` in C and truncated back
+            // to `short` on store — match with a wrapping i32 multiply.
+            let prod = (*qcoeff.offset(i) as i32).wrapping_mul(*DQC.offset(i) as i32);
+            *dqcoeff.offset(i) = prod as i16;
+        }
     }
 }
 
@@ -46,13 +50,17 @@ pub unsafe fn vp8_dequantize_b_c(qcoeff: *mut i16, dqcoeff: *mut i16, DQC: *mut 
 /// residual onto `dest` (stride `stride`), then zeros the 16-short
 /// `input` buffer (32 bytes) so the next pass over this MB starts
 /// from a clean slate.
-pub unsafe fn vp8_dequant_idct_add_c(input: *mut i16, dq: *mut i16, dest: *mut u8, stride: i32) {
-    for i in 0..16isize {
-        let prod = (*dq.offset(i) as i32).wrapping_mul(*input.offset(i) as i32);
-        *input.offset(i) = prod as i16;
+pub fn vp8_dequant_idct_add_c(input: *mut i16, dq: *mut i16, dest: *mut u8, stride: i32) {
+    // SAFETY: input and dq are 16-element i16 blocks; dest is a 4x4 pixel
+    // region in a Yv12 plane reachable at offsets 0..4*stride.
+    unsafe {
+        for i in 0..16isize {
+            let prod = (*dq.offset(i) as i32).wrapping_mul(*input.offset(i) as i32);
+            *input.offset(i) = prod as i16;
+        }
+
+        vp8_short_idct4x4llm_c(input, dest, stride, dest, stride);
+
+        ptr::write_bytes(input as *mut u8, 0, 32);
     }
-
-    vp8_short_idct4x4llm_c(input, dest, stride, dest, stride);
-
-    ptr::write_bytes(input as *mut u8, 0, 32);
 }

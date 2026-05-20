@@ -90,15 +90,13 @@ fn test_all_zeros() {
     predict.set(0);
     output.set(0);
 
-    unsafe {
-        vp8_short_idct4x4llm_c(
-            input.top_left(),
-            predict.top_left(),
-            predict.stride(),
-            output.top_left(),
-            output.stride(),
-        );
-    }
+    vp8_short_idct4x4llm_c(
+        input.top_left(),
+        predict.top_left(),
+        predict.stride(),
+        output.top_left(),
+        output.stride(),
+    );
 
     assert!(input.check_values(0));
     assert!(input.check_padding(PAD_VAL_I16));
@@ -118,15 +116,13 @@ fn test_all_ones() {
     predict.set(0);
     output.set(0);
 
-    unsafe {
-        vp8_short_idct4x4llm_c(
-            input.top_left(),
-            predict.top_left(),
-            predict.stride(),
-            output.top_left(),
-            output.stride(),
-        );
-    }
+    vp8_short_idct4x4llm_c(
+        input.top_left(),
+        predict.top_left(),
+        predict.stride(),
+        output.top_left(),
+        output.stride(),
+    );
 
     assert!(output.check_values(1));
     assert!(output.check_padding(PAD_BYTE_U8));
@@ -154,15 +150,13 @@ fn test_add_one() {
         }
     }
 
-    unsafe {
-        vp8_short_idct4x4llm_c(
-            input.top_left(),
-            predict.top_left(),
-            predict.stride(),
-            output.top_left(),
-            output.stride(),
-        );
-    }
+    vp8_short_idct4x4llm_c(
+        input.top_left(),
+        predict.top_left(),
+        predict.stride(),
+        output.top_left(),
+        output.stride(),
+    );
 
     for y in 0..SIZE {
         for x in 0..SIZE {
@@ -200,15 +194,13 @@ fn test_with_data() {
         }
     }
 
-    unsafe {
-        vp8_short_idct4x4llm_c(
-            input.top_left(),
-            predict.top_left(),
-            predict.stride(),
-            output.top_left(),
-            output.stride(),
-        );
-    }
+    vp8_short_idct4x4llm_c(
+        input.top_left(),
+        predict.top_left(),
+        predict.stride(),
+        output.top_left(),
+        output.stride(),
+    );
 
     for y in 0..SIZE {
         for x in 0..SIZE {

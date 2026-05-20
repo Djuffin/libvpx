@@ -17,14 +17,14 @@ use core::ffi::{c_int, c_uint};
 use core::ptr;
 
 use crate::tables::{
-    BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MAXQ, PREV_COEF_CONTEXTS, Prob, VP8_COEF_UPDATE_PROBS,
-    VP8_DEFAULT_MV_CONTEXT, VP8_MB_FEATURE_DATA_BITS,
+    BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MAXQ, PREV_COEF_CONTEXTS, Prob, QINDEX_RANGE,
+    VP8_COEF_UPDATE_PROBS, VP8_DEFAULT_MV_CONTEXT, VP8_MB_FEATURE_DATA_BITS,
 };
 use crate::types::{
-    Blockd, ClampType, EntropyContextPlanes, FrameType, LoopFilterType, MAX_MB_SEGMENTS,
+    ClampType, EntropyContextPlanes, FrameContext, FrameType, LoopFilterType, MAX_MB_SEGMENTS,
     MAX_MODE_LF_DELTAS, MAX_REF_FRAMES, MAX_REF_LF_DELTAS, MB_FEATURE_TREE_PROBS, MB_LVL_MAX,
-    Macroblockd, MbLevelFeature, MbPredictionMode, ModeInfo, MvReferenceFrame,
-    TokenPartition, Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig,
+    Macroblockd, MbLevelFeature, MbPredictionMode, ModeInfo, MvReferenceFrame, TokenPartition,
+    Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -122,7 +122,14 @@ pub unsafe fn vp8cx_init_de_quantizer(pbi: *mut Vp8dComp<'static>) {
 // ---------------------------------------------------------------------------
 
 /// `vp8_mb_init_dequantizer` (vp8/decoder/decodeframe.c:57).
-pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd, mi: &ModeInfo) {
+pub fn vp8_mb_init_dequantizer(
+    y1_dequant: &[[i16; 2]; QINDEX_RANGE],
+    y2_dequant: &[[i16; 2]; QINDEX_RANGE],
+    uv_dequant: &[[i16; 2]; QINDEX_RANGE],
+    base_qindex: c_int,
+    mb: &mut Macroblockd,
+    mi: &ModeInfo,
+) {
     let segment_id = mi.mbmi.segment_id as usize;
 
     /* Decide whether to use the default or alternate baseline Q value. */
@@ -130,25 +137,25 @@ pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd, mi: &ModeIn
         let q = if mb.mb_segment_abs_delta == SEGMENT_ABSDATA {
             mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as c_int
         } else {
-            pc.base_qindex + mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as c_int
+            base_qindex + mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as c_int
         };
         q.clamp(0, MAXQ as c_int)
     } else {
-        pc.base_qindex
+        base_qindex
     }) as usize;
 
     /* Set up the macroblock dequant constants */
     mb.dequant_y1_dc[0] = 1;
-    mb.dequant_y1[0] = pc.y1_dequant[qi][0];
-    mb.dequant_y2[0] = pc.y2_dequant[qi][0];
-    mb.dequant_uv[0] = pc.uv_dequant[qi][0];
+    mb.dequant_y1[0] = y1_dequant[qi][0];
+    mb.dequant_y2[0] = y2_dequant[qi][0];
+    mb.dequant_uv[0] = uv_dequant[qi][0];
 
     for i in 1..16 {
-        let ac = pc.y1_dequant[qi][1];
+        let ac = y1_dequant[qi][1];
         mb.dequant_y1_dc[i] = ac;
         mb.dequant_y1[i] = ac;
-        mb.dequant_y2[i] = pc.y2_dequant[qi][1];
-        mb.dequant_uv[i] = pc.uv_dequant[qi][1];
+        mb.dequant_y2[i] = y2_dequant[qi][1];
+        mb.dequant_uv[i] = uv_dequant[qi][1];
     }
 }
 
@@ -157,19 +164,25 @@ pub fn vp8_mb_init_dequantizer(pc: &Vp8Common, mb: &mut Macroblockd, mi: &ModeIn
 // ---------------------------------------------------------------------------
 
 /// `decode_macroblock` (vp8/decoder/decodeframe.c:94). Static helper.
-unsafe fn decode_macroblock(
-    pbi: *mut Vp8dComp<'static>,
-    xd: *mut Macroblockd,
+fn decode_macroblock(
+    fc: &FrameContext,
+    above_slot: &mut EntropyContextPlanes,
+    left_context: &mut EntropyContextPlanes,
+    y1_dequant: &[[i16; 2]; QINDEX_RANGE],
+    y2_dequant: &[[i16; 2]; QINDEX_RANGE],
+    uv_dequant: &[[i16; 2]; QINDEX_RANGE],
+    base_qindex: c_int,
+    xd: &mut Macroblockd,
     mi: &mut ModeInfo,
-    mb_col: c_int,
-    bc: *mut Vp8Reader<'static>,
+    bc: &mut Vp8Reader<'static>,
 ) {
     let mode: MbPredictionMode;
 
     if mi.mbmi.mb_skip_coeff {
-        vp8_reset_mb_tokens_context(pbi, mi, mb_col);
+        vp8_reset_mb_tokens_context(above_slot, left_context, mi);
     } else if vp8dx_bool_error(bc) == 0 {
-        let eobtotal: c_int = vp8_decode_mb_tokens(pbi, xd, mi, mb_col, bc);
+        let eobtotal: c_int =
+            vp8_decode_mb_tokens(above_slot, left_context, fc, xd, mi, bc as *mut _);
 
         /* Special case:  Force the loopfilter to skip when eobtotal is zero */
         mi.mbmi.mb_skip_coeff = eobtotal == 0;
@@ -177,152 +190,155 @@ unsafe fn decode_macroblock(
 
     mode = mi.mbmi.mode;
 
-    if (*xd).segmentation_enabled != 0 {
-        vp8_mb_init_dequantizer(&(*pbi).common, &mut *xd, mi);
+    if xd.segmentation_enabled != 0 {
+        vp8_mb_init_dequantizer(y1_dequant, y2_dequant, uv_dequant, base_qindex, xd, mi);
     }
 
     /* do prediction */
     if mi.mbmi.ref_frame == MvReferenceFrame::Intra {
-        let y_stride: isize = (*xd).dst.y_stride as isize;
-        let uv_stride: isize = (*xd).dst.uv_stride as isize;
+        let y_stride: isize = xd.dst.y_stride as isize;
+        let uv_stride: isize = xd.dst.uv_stride as isize;
+        // SAFETY: plane-pointer arithmetic for neighbor rows reaches
+        // valid pixels in xd.dst (yabove = y_buffer - y_stride; yleft =
+        // y_buffer - 1). The predictor calls themselves are safe fn.
+        let (uabove, vabove, uleft, vleft, yabove, yleft) = unsafe {
+            (
+                xd.dst.u_buffer.offset(-uv_stride),
+                xd.dst.v_buffer.offset(-uv_stride),
+                xd.dst.u_buffer.offset(-1),
+                xd.dst.v_buffer.offset(-1),
+                xd.dst.y_buffer.offset(-y_stride),
+                xd.dst.y_buffer.offset(-1),
+            )
+        };
         vp8_build_intra_predictors_mbuv_s(
-            &*xd,
-            mi,
-            (*xd).dst.u_buffer.offset(-uv_stride), // uabove_row
-            (*xd).dst.v_buffer.offset(-uv_stride), // vabove_row
-            (*xd).dst.u_buffer.offset(-1),         // uleft
-            (*xd).dst.v_buffer.offset(-1),         // vleft
-            (*xd).dst.uv_stride,                   // left_stride
-            (*xd).dst.u_buffer,
-            (*xd).dst.v_buffer,
-            (*xd).dst.uv_stride,
+            xd, mi, uabove, vabove, uleft, vleft,
+            xd.dst.uv_stride, xd.dst.u_buffer, xd.dst.v_buffer, xd.dst.uv_stride,
         );
 
         if mode != B_PRED {
             vp8_build_intra_predictors_mby_s(
-                &*xd,
-                mi,
-                (*xd).dst.y_buffer.offset(-y_stride), // yabove_row
-                (*xd).dst.y_buffer.offset(-1),        // yleft
-                (*xd).dst.y_stride,                   // left_stride
-                (*xd).dst.y_buffer,
-                (*xd).dst.y_stride,
+                xd, mi, yabove, yleft, xd.dst.y_stride, xd.dst.y_buffer, xd.dst.y_stride,
             );
         } else {
-            let DQC: *mut i16 = (*xd).dequant_y1.as_mut_ptr();
-            let dst_stride: c_int = (*xd).dst.y_stride;
+            let dst_stride: c_int = xd.dst.y_stride;
 
             /* clear out residual eob info */
             if mi.mbmi.mb_skip_coeff {
-                ptr::write_bytes((*xd).eobs.as_mut_ptr(), 0, 25);
+                xd.eobs.fill(0);
             }
 
-            intra_prediction_down_copy(&*xd, (*xd).dst.y_buffer.offset(-y_stride).add(16));
+            // SAFETY: above_right_src reaches the above row of the dst plane.
+            let above_right = unsafe { xd.dst.y_buffer.offset(-y_stride).add(16) };
+            intra_prediction_down_copy(xd, above_right);
 
-            for i in 0..16 {
-                let b: *mut Blockd = &mut (*xd).block[i as usize];
-                let qcoeff: *mut i16 = (*xd).qcoeff.as_mut_ptr().add((i as usize) * 16);
-                let dst: *mut u8 = (*xd).dst.y_buffer.offset((*b).offset as isize);
-                // Extract the 4x4 intra mode from the BModeInfo enum at this
-                // sub-block slot. In C this is `bmi[i].as_mode` — a plain
-                // `B_PREDICTION_MODE`.
-                let b_mode_val: crate::types::BPredictionMode =
-                    match mi.bmi[i as usize] {
-                        crate::types::BModeInfo::Intra(m) => m,
-                        // SPLITMV path stores an Mv here; in B_PRED context this
-                        // branch should be unreachable, but mirror C's behaviour
-                        // (which would just read garbage from the union) by
-                        // treating it as DC_PRED.
-                        crate::types::BModeInfo::Mv(_) => crate::types::BPredictionMode::DcPred,
-                    };
-                let above: *mut u8 = dst.offset(-(dst_stride as isize));
-                let yleft: *mut u8 = dst.offset(-1);
-                let left_stride: c_int = dst_stride;
-                let top_left: u8 = *above.offset(-1);
+            for i in 0..16usize {
+                let b_mode_val: crate::types::BPredictionMode = match mi.bmi[i] {
+                    crate::types::BModeInfo::Intra(m) => m,
+                    crate::types::BModeInfo::Mv(_) => crate::types::BPredictionMode::DcPred,
+                };
+                let b_offset = xd.block[i].offset as isize;
+                // SAFETY: per-sub-block pixel pointers stay within the
+                // dst luma plane; qcoeff/DQC index well-defined 16-coeff
+                // ranges of xd.qcoeff/xd.dequant_y1.
+                let (dst, above, yleft, top_left, qcoeff, DQC) = unsafe {
+                    let dst = xd.dst.y_buffer.offset(b_offset);
+                    let above = dst.offset(-(dst_stride as isize));
+                    (
+                        dst,
+                        above,
+                        dst.offset(-1),
+                        *above.offset(-1),
+                        xd.qcoeff.as_mut_ptr().add(i * 16),
+                        xd.dequant_y1.as_mut_ptr(),
+                    )
+                };
+                vp8_intra4x4_predict(above, yleft, dst_stride, b_mode_val, dst, dst_stride, top_left);
 
-                vp8_intra4x4_predict(
-                    above,
-                    yleft,
-                    left_stride,
-                    b_mode_val,
-                    dst,
-                    dst_stride,
-                    top_left,
-                );
-
-                if (*xd).eobs[i as usize] != 0 {
-                    if (*xd).eobs[i as usize] > 1 {
+                if xd.eobs[i] != 0 {
+                    if xd.eobs[i] > 1 {
                         vp8_dequant_idct_add(qcoeff, DQC, dst, dst_stride);
                     } else {
-                        let q0 = *qcoeff;
-                        let dqc0 = *DQC;
+                        // SAFETY: qcoeff/DQC[0] reads are 1 i16 each.
+                        let (q0, dqc0) = unsafe { (*qcoeff, *DQC) };
                         vp8_dc_only_idct_add(
                             (q0 as i32 * dqc0 as i32) as i16,
-                            dst,
-                            dst_stride,
-                            dst,
-                            dst_stride,
+                            dst, dst_stride, dst, dst_stride,
                         );
-                        ptr::write_bytes(
-                            qcoeff as *mut u8,
-                            0,
-                            2 * core::mem::size_of::<i16>(),
-                        );
+                        // SAFETY: clear 2 i16 entries of qcoeff.
+                        unsafe {
+                            ptr::write_bytes(qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
+                        }
                     }
                 }
             }
         }
     } else {
-        vp8_build_inter_predictors_mb(&mut *xd, mi);
+        vp8_build_inter_predictors_mb(xd, mi);
     }
 
     if !mi.mbmi.mb_skip_coeff {
         /* dequantization and idct */
         if mode != B_PRED {
-            let mut DQC: *mut i16 = (*xd).dequant_y1.as_mut_ptr();
+            // SAFETY: qcoeff/dqcoeff/dequant raw pointers are derived
+            // from xd's owned arrays at well-defined block offsets.
+            let mut DQC: *mut i16 = xd.dequant_y1.as_mut_ptr();
 
             if mode != SPLITMV {
-                // Y2 is block index 24; its coefficients sit at
-                // `qcoeff[24*16..]` / `dqcoeff[24*16..]`.
-                let y2_qcoeff: *mut i16 = (*xd).qcoeff.as_mut_ptr().add(24 * 16);
-                let y2_dqcoeff: *mut i16 = (*xd).dqcoeff.as_mut_ptr().add(24 * 16);
+                let (y2_qcoeff, y2_dqcoeff, dequant_y2) = unsafe {
+                    (
+                        xd.qcoeff.as_mut_ptr().add(24 * 16),
+                        xd.dqcoeff.as_mut_ptr().add(24 * 16),
+                        xd.dequant_y2.as_mut_ptr(),
+                    )
+                };
 
                 /* do 2nd order transform on the dc block */
-                if (*xd).eobs[24] > 1 {
-                    vp8_dequantize_b(y2_qcoeff, y2_dqcoeff, (*xd).dequant_y2.as_mut_ptr());
-
-                    vp8_short_inv_walsh4x4(y2_dqcoeff, (*xd).qcoeff.as_mut_ptr());
-                    ptr::write_bytes(y2_qcoeff as *mut u8, 0, 16 * core::mem::size_of::<i16>());
+                if xd.eobs[24] > 1 {
+                    vp8_dequantize_b(y2_qcoeff, y2_dqcoeff, dequant_y2);
+                    vp8_short_inv_walsh4x4(y2_dqcoeff, xd.qcoeff.as_mut_ptr());
+                    // SAFETY: clear 16 i16 entries at y2 slot.
+                    unsafe {
+                        ptr::write_bytes(y2_qcoeff as *mut u8, 0, 16 * core::mem::size_of::<i16>());
+                    }
                 } else {
-                    let q0 = *y2_qcoeff;
-                    let dq0 = (*xd).dequant_y2[0];
-                    *y2_dqcoeff = (q0 as i32 * dq0 as i32) as i16;
-                    vp8_short_inv_walsh4x4_1(y2_dqcoeff, (*xd).qcoeff.as_mut_ptr());
-                    ptr::write_bytes(y2_qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
+                    // SAFETY: read 1 i16 from the y2 qcoeff slot.
+                    let q0 = unsafe { *y2_qcoeff };
+                    let dq0 = xd.dequant_y2[0];
+                    // SAFETY: write 1 i16 at the y2 dqcoeff slot.
+                    unsafe { *y2_dqcoeff = (q0 as i32 * dq0 as i32) as i16; }
+                    vp8_short_inv_walsh4x4_1(y2_dqcoeff, xd.qcoeff.as_mut_ptr());
+                    // SAFETY: clear 2 i16 entries.
+                    unsafe {
+                        ptr::write_bytes(y2_qcoeff as *mut u8, 0, 2 * core::mem::size_of::<i16>());
+                    }
                 }
 
                 /* override the dc dequant constant in order to preserve the
                  * dc components
                  */
-                DQC = (*xd).dequant_y1_dc.as_mut_ptr();
+                DQC = xd.dequant_y1_dc.as_mut_ptr();
             }
 
             vp8_dequant_idct_add_y_block(
-                (*xd).qcoeff.as_mut_ptr(),
+                xd.qcoeff.as_mut_ptr(),
                 DQC,
-                (*xd).dst.y_buffer,
-                (*xd).dst.y_stride,
-                (*xd).eobs.as_mut_ptr(),
+                xd.dst.y_buffer,
+                xd.dst.y_stride,
+                xd.eobs.as_mut_ptr(),
             );
         }
 
+        // SAFETY: chroma qcoeff/eobs at known offsets; uv buffers from xd.dst.
+        let (uv_q, uv_dq, uv_eobs) = unsafe {
+            (
+                xd.qcoeff.as_mut_ptr().add(16 * 16),
+                xd.dequant_uv.as_mut_ptr(),
+                xd.eobs.as_mut_ptr().add(16),
+            )
+        };
         vp8_dequant_idct_add_uv_block(
-            (*xd).qcoeff.as_mut_ptr().add(16 * 16),
-            (*xd).dequant_uv.as_mut_ptr(),
-            (*xd).dst.u_buffer,
-            (*xd).dst.v_buffer,
-            (*xd).dst.uv_stride,
-            (*xd).eobs.as_mut_ptr().add(16),
+            uv_q, uv_dq, xd.dst.u_buffer, xd.dst.v_buffer, xd.dst.uv_stride, uv_eobs,
         );
     }
 }
@@ -558,150 +574,171 @@ unsafe fn yv12_extend_frame_left_right_c(
 // ---------------------------------------------------------------------------
 
 /// `decode_mb_rows` (vp8/decoder/decodeframe.c:436). Static helper.
-unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
-    let pc: *mut Vp8Common = &mut (*pbi).common;
-    let xd: *mut Macroblockd = &mut (*pbi).mb;
-
-
+fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
+    let num_part: c_int = 1 << (pbi.common.multi_token_partition as c_int);
     let mut ibc: c_int = 0;
-    let num_part: c_int = 1 << ((*pc).multi_token_partition as c_int);
 
-    let mut recon_yoffset: c_int;
-    let mut recon_uvoffset: c_int;
-    let mut mb_row: c_int;
-    let mut mb_col: c_int;
+    let new_idx = pbi.dec_fb_ref_idx[INTRA_FRAME] as usize;
 
-    let yv12_fb_new: *mut Yv12BufferConfig =
-        &mut (*pbi).common.yv12_fb[(*pbi).dec_fb_ref_idx[INTRA_FRAME] as usize];
-
-    let recon_y_stride: c_int = (*yv12_fb_new).y_stride;
-    let recon_uv_stride: c_int = (*yv12_fb_new).uv_stride;
-
+    // Snapshot reference frame plane pointers + corrupted flags up front.
+    // These come from yv12_fb slots distinct from the new (output) slot.
     let mut ref_buffer: [[*mut u8; 3]; MAX_REF_FRAMES] = [[ptr::null_mut(); 3]; MAX_REF_FRAMES];
-    let mut dst_buffer: [*mut u8; 3] = [ptr::null_mut(); 3];
-    let mut lf_dst: [*mut u8; 3] = [ptr::null_mut(); 3];
-    let mut eb_dst: [*mut u8; 3] = [ptr::null_mut(); 3];
-    let mut i: c_int;
     let mut ref_fb_corrupted: [c_int; MAX_REF_FRAMES] = [0; MAX_REF_FRAMES];
-
-    ref_fb_corrupted[INTRA_FRAME] = 0;
-
-    i = 1;
-    while i < MAX_REF_FRAMES as c_int {
-        let this_fb: *mut Yv12BufferConfig =
-            &mut (*pbi).common.yv12_fb[(*pbi).dec_fb_ref_idx[i as usize] as usize];
-
-        ref_buffer[i as usize][0] = (*this_fb).y_buffer;
-        ref_buffer[i as usize][1] = (*this_fb).u_buffer;
-        ref_buffer[i as usize][2] = (*this_fb).v_buffer;
-
-        ref_fb_corrupted[i as usize] = (*this_fb).corrupted;
-        i += 1;
+    for i in 1..MAX_REF_FRAMES {
+        let this_fb = &pbi.common.yv12_fb[pbi.dec_fb_ref_idx[i] as usize];
+        ref_buffer[i][0] = this_fb.y_buffer;
+        ref_buffer[i][1] = this_fb.u_buffer;
+        ref_buffer[i][2] = this_fb.v_buffer;
+        ref_fb_corrupted[i] = this_fb.corrupted;
     }
 
-    /* Set up the buffer pointers */
-    dst_buffer[0] = (*yv12_fb_new).y_buffer;
-    lf_dst[0] = dst_buffer[0];
-    eb_dst[0] = dst_buffer[0];
-    dst_buffer[1] = (*yv12_fb_new).u_buffer;
-    lf_dst[1] = dst_buffer[1];
-    eb_dst[1] = dst_buffer[1];
-    dst_buffer[2] = (*yv12_fb_new).v_buffer;
-    lf_dst[2] = dst_buffer[2];
-    eb_dst[2] = dst_buffer[2];
+    // Snapshot the new frame's plane state. We keep a raw pointer to the
+    // Yv12BufferConfig for sub-calls that take *mut, and capture plane
+    // pointers/strides as locals.
+    let yv12_fb_new: *mut Yv12BufferConfig = &mut pbi.common.yv12_fb[new_idx];
+    let (recon_y_stride, recon_uv_stride, dst_y, dst_u, dst_v) = {
+        let yv12 = &pbi.common.yv12_fb[new_idx];
+        (yv12.y_stride, yv12.uv_stride, yv12.y_buffer, yv12.u_buffer, yv12.v_buffer)
+    };
+    let dst_buffer: [*mut u8; 3] = [dst_y, dst_u, dst_v];
+    let mut lf_dst: [*mut u8; 3] = [dst_y, dst_u, dst_v];
+    let mut eb_dst: [*mut u8; 3] = [dst_y, dst_u, dst_v];
 
-    (*xd).up_available = false;
+    pbi.mb.up_available = false;
 
     /* Initialize the loop filter for this frame. */
-    if (*pc).filter_level != 0 {
-        vp8_loop_filter_frame_init(pc, xd, (*pc).filter_level);
+    if pbi.common.filter_level != 0 {
+        let filter_level = pbi.common.filter_level;
+        // SAFETY: cm/mbd raw ptrs are taken from live &mut Vp8dComp fields.
+        unsafe {
+            vp8_loop_filter_frame_init(&mut pbi.common, &mut pbi.mb, filter_level);
+        }
     }
 
-    vp8_setup_intra_recon_top_line(yv12_fb_new);
+    // SAFETY: yv12_fb_new points to the live new-frame slot in pbi.common.
+    unsafe { vp8_setup_intra_recon_top_line(yv12_fb_new); }
+
+    let mb_rows = pbi.common.mb_rows;
+    let mb_cols = pbi.common.mb_cols;
 
     /* Decode the individual macro block */
-    mb_row = 0;
-    while mb_row < (*pc).mb_rows {
-        // Pick the bool reader for this row: cycle through the N token
+    let mut mb_row: c_int = 0;
+    while mb_row < mb_rows {
+        // Pick the bool reader for this row: cycle through N token
         // partitions when multi-partition, else always the lone reader.
-        let bc: *mut Vp8Reader<'static> = if num_part > 1 {
-            let p = &mut (*pbi).mbc[ibc as usize] as *mut Vp8Reader<'static>;
+        let bc_idx: usize = if num_part > 1 {
+            let cur = ibc as usize;
             ibc += 1;
             if ibc == num_part {
                 ibc = 0;
             }
-            p
+            cur
         } else {
-            &mut (*pbi).mbc[0] as *mut Vp8Reader<'static>
+            0
         };
 
-        recon_yoffset = mb_row * recon_y_stride * 16;
-        recon_uvoffset = mb_row * recon_uv_stride * 8;
+        let mut recon_yoffset: c_int = mb_row * recon_y_stride * 16;
+        let mut recon_uvoffset: c_int = mb_row * recon_uv_stride * 8;
 
         /* reset contexts */
-        ptr::write_bytes(
-            &mut (*pc).left_context as *mut _ as *mut u8,
-            0,
-            core::mem::size_of::<EntropyContextPlanes>(),
-        );
+        pbi.common.left_context = EntropyContextPlanes::default();
 
-        (*xd).left_available = false;
+        pbi.mb.left_available = false;
+        pbi.mb.mb_to_top_edge = -((mb_row * 16) << 3);
+        pbi.mb.mb_to_bottom_edge = (mb_rows - 1 - mb_row) * 16 << 3;
 
-        (*xd).mb_to_top_edge = -((mb_row * 16) << 3);
-        (*xd).mb_to_bottom_edge = ((*pc).mb_rows - 1 - mb_row) * 16 << 3;
+        // SAFETY: dst_buffer pointers reach the new-frame plane allocation;
+        // the -1 offsets compute the left-column scratch location used by
+        // intra-prediction. setup_intra_recon_left writes 16 byte stripes.
+        unsafe {
+            let y_row_base = dst_buffer[0].offset(recon_yoffset as isize);
+            let u_row_base = dst_buffer[1].offset(recon_uvoffset as isize);
+            let v_row_base = dst_buffer[2].offset(recon_uvoffset as isize);
+            setup_intra_recon_left(
+                y_row_base.offset(-1),
+                u_row_base.offset(-1),
+                v_row_base.offset(-1),
+                recon_y_stride,
+                recon_uv_stride,
+            );
+        }
 
-        // Compute the left-column pointers for the upcoming row's first
-        // MB. (`recon_above` / `recon_left` are no longer cached on
-        // `xd`; the intra-predictor call sites derive them on demand
-        // from `xd.dst.{y,u,v}_buffer` at the point of use.)
-        let y_row_base = dst_buffer[0].offset(recon_yoffset as isize);
-        let u_row_base = dst_buffer[1].offset(recon_uvoffset as isize);
-        let v_row_base = dst_buffer[2].offset(recon_uvoffset as isize);
-        setup_intra_recon_left(
-            y_row_base.offset(-1),
-            u_row_base.offset(-1),
-            v_row_base.offset(-1),
-            recon_y_stride,
-            recon_uv_stride,
-        );
-
-        // Hoist the per-row slice once so the inner loop is a single
-        // `slice[col]` index (multiply-by-stride done up front, not
-        // per-MB).
-        let mi_row: &mut [ModeInfo] = (*pc).mi_row_mut(mb_row);
-
-        mb_col = 0;
-        while mb_col < (*pc).mb_cols {
+        let mut mb_col: c_int = 0;
+        while mb_col < mb_cols {
             /* Distance of Mb to the various image edges. */
-            (*xd).mb_to_left_edge = -((mb_col * 16) << 3);
-            (*xd).mb_to_right_edge = ((*pc).mb_cols - 1 - mb_col) * 16 << 3;
+            pbi.mb.mb_to_left_edge = -((mb_col * 16) << 3);
+            pbi.mb.mb_to_right_edge = (mb_cols - 1 - mb_col) * 16 << 3;
 
-            (*xd).dst.y_buffer = dst_buffer[0].offset(recon_yoffset as isize);
-            (*xd).dst.u_buffer = dst_buffer[1].offset(recon_uvoffset as isize);
-            (*xd).dst.v_buffer = dst_buffer[2].offset(recon_uvoffset as isize);
+            // SAFETY: dst_buffer pointers + recon_yoffset stay within the
+            // new-frame plane allocation.
+            unsafe {
+                pbi.mb.dst.y_buffer = dst_buffer[0].offset(recon_yoffset as isize);
+                pbi.mb.dst.u_buffer = dst_buffer[1].offset(recon_uvoffset as isize);
+                pbi.mb.dst.v_buffer = dst_buffer[2].offset(recon_uvoffset as isize);
+            }
 
-            let mi: &mut ModeInfo = &mut mi_row[mb_col as usize];
-            if mi.mbmi.ref_frame as u8 >= LAST_FRAME as u8 {
-                let ref_idx = mi.mbmi.ref_frame as usize;
-                (*xd).pre.y_buffer = ref_buffer[ref_idx][0].offset(recon_yoffset as isize);
-                (*xd).pre.u_buffer = ref_buffer[ref_idx][1].offset(recon_uvoffset as isize);
-                (*xd).pre.v_buffer = ref_buffer[ref_idx][2].offset(recon_uvoffset as isize);
+            // Look up the ref_frame of this MB (sub-borrow of pbi.common.mip).
+            let (ref_frame, mi_ptr): (MvReferenceFrame, *mut ModeInfo) = {
+                let mi = pbi.common.mi_mut(mb_row, mb_col);
+                (mi.mbmi.ref_frame, mi as *mut _)
+            };
+
+            if ref_frame as u8 >= LAST_FRAME as u8 {
+                let ref_idx = ref_frame as usize;
+                // SAFETY: ref_buffer points into a distinct yv12_fb slot.
+                unsafe {
+                    pbi.mb.pre.y_buffer = ref_buffer[ref_idx][0].offset(recon_yoffset as isize);
+                    pbi.mb.pre.u_buffer = ref_buffer[ref_idx][1].offset(recon_uvoffset as isize);
+                    pbi.mb.pre.v_buffer = ref_buffer[ref_idx][2].offset(recon_uvoffset as isize);
+                }
             } else {
-                // ref_frame is INTRA_FRAME, pre buffer should not be used.
-                (*xd).pre.y_buffer = ptr::null_mut();
-                (*xd).pre.u_buffer = ptr::null_mut();
-                (*xd).pre.v_buffer = ptr::null_mut();
+                pbi.mb.pre.y_buffer = ptr::null_mut();
+                pbi.mb.pre.u_buffer = ptr::null_mut();
+                pbi.mb.pre.v_buffer = ptr::null_mut();
             }
 
             /* propagate errors from reference frames */
-            (*xd).corrupted |= ref_fb_corrupted[mi.mbmi.ref_frame as usize];
+            pbi.mb.corrupted |= ref_fb_corrupted[ref_frame as usize];
 
-            decode_macroblock(pbi, xd, mi, mb_col, bc);
+            // Field-disjoint borrows for decode_macroblock. We split
+            // pbi.common via the helper so all sub-borrows live
+            // simultaneously alongside pbi.mb and pbi.mbc[bc_idx].
+            let common = &mut pbi.common;
+            let above_slot = &mut common
+                .above_context
+                .as_deref_mut()
+                .expect("above_context allocated")[mb_col as usize];
+            let left_context = &mut common.left_context;
+            let fc = &common.fc;
+            let y1_dq = &common.y1_dequant;
+            let y2_dq = &common.y2_dequant;
+            let uv_dq = &common.uv_dequant;
+            let base_qi = common.base_qindex;
+            // SAFETY: mi_ptr was just derived from common.mi_mut; it
+            // remains valid for this iteration. We re-create the &mut
+            // here so it doesn't conflict with the disjoint common
+            // borrows above (common.mip is a separate field).
+            let mi: &mut ModeInfo = unsafe { &mut *mi_ptr };
+            let mb = &mut pbi.mb;
+            let bc = &mut pbi.mbc[bc_idx];
 
-            (*xd).left_available = true;
+            decode_macroblock(
+                fc,
+                above_slot,
+                left_context,
+                y1_dq,
+                y2_dq,
+                uv_dq,
+                base_qi,
+                mb,
+                mi,
+                bc,
+            );
+
+            pbi.mb.left_available = true;
 
             /* check if the boolean decoder has suffered an error */
-            (*xd).corrupted |= vp8dx_bool_error(bc);
+            pbi.mb.corrupted |= vp8dx_bool_error(&pbi.mbc[bc_idx]);
 
             recon_yoffset += 16;
             recon_uvoffset += 8;
@@ -709,45 +746,62 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
             mb_col += 1;
         }
 
-        /* adjust to the next row of mbs */
-        vp8_extend_mb_row(
-            yv12_fb_new,
-            (*xd).dst.y_buffer.add(16),
-            (*xd).dst.u_buffer.add(8),
-            (*xd).dst.v_buffer.add(8),
-        );
+        // SAFETY: dst.{y,u,v}_buffer point to live plane memory.
+        unsafe {
+            vp8_extend_mb_row(
+                yv12_fb_new,
+                pbi.mb.dst.y_buffer.add(16),
+                pbi.mb.dst.u_buffer.add(8),
+                pbi.mb.dst.v_buffer.add(8),
+            );
+        }
 
-        (*xd).up_available = true;
+        pbi.mb.up_available = true;
 
-        if (*pc).filter_level != 0 {
+        if pbi.common.filter_level != 0 {
             if mb_row > 0 {
-                if (*pc).filter_type == NORMAL_LOOPFILTER {
-                    vp8_loop_filter_row_normal(
-                        pc,
-                        mb_row - 1,
-                        recon_y_stride,
-                        recon_uv_stride,
-                        lf_dst[0],
-                        lf_dst[1],
-                        lf_dst[2],
-                    );
-                } else {
-                    vp8_loop_filter_row_simple(pc, mb_row - 1, recon_y_stride, lf_dst[0]);
-                }
-                if mb_row > 1 {
-                    yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
+                // SAFETY: lf_dst/eb_dst pointers walk the live new-frame
+                // planes; loop-filter routines operate within the allocation.
+                unsafe {
+                    if pbi.common.filter_type == NORMAL_LOOPFILTER {
+                        vp8_loop_filter_row_normal(
+                            &mut pbi.common,
+                            mb_row - 1,
+                            recon_y_stride,
+                            recon_uv_stride,
+                            lf_dst[0],
+                            lf_dst[1],
+                            lf_dst[2],
+                        );
+                    } else {
+                        vp8_loop_filter_row_simple(
+                            &mut pbi.common,
+                            mb_row - 1,
+                            recon_y_stride,
+                            lf_dst[0],
+                        );
+                    }
+                    if mb_row > 1 {
+                        yv12_extend_frame_left_right_c(
+                            yv12_fb_new,
+                            eb_dst[0],
+                            eb_dst[1],
+                            eb_dst[2],
+                        );
 
-                    eb_dst[0] = eb_dst[0].offset((recon_y_stride * 16) as isize);
-                    eb_dst[1] = eb_dst[1].offset((recon_uv_stride * 8) as isize);
-                    eb_dst[2] = eb_dst[2].offset((recon_uv_stride * 8) as isize);
-                }
+                        eb_dst[0] = eb_dst[0].offset((recon_y_stride * 16) as isize);
+                        eb_dst[1] = eb_dst[1].offset((recon_uv_stride * 8) as isize);
+                        eb_dst[2] = eb_dst[2].offset((recon_uv_stride * 8) as isize);
+                    }
 
-                lf_dst[0] = lf_dst[0].offset((recon_y_stride * 16) as isize);
-                lf_dst[1] = lf_dst[1].offset((recon_uv_stride * 8) as isize);
-                lf_dst[2] = lf_dst[2].offset((recon_uv_stride * 8) as isize);
+                    lf_dst[0] = lf_dst[0].offset((recon_y_stride * 16) as isize);
+                    lf_dst[1] = lf_dst[1].offset((recon_uv_stride * 8) as isize);
+                    lf_dst[2] = lf_dst[2].offset((recon_uv_stride * 8) as isize);
+                }
             }
-        } else {
-            if mb_row > 0 {
+        } else if mb_row > 0 {
+            // SAFETY: extend the previous row's edge pixels.
+            unsafe {
                 yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
                 eb_dst[0] = eb_dst[0].offset((recon_y_stride * 16) as isize);
                 eb_dst[1] = eb_dst[1].offset((recon_uv_stride * 8) as isize);
@@ -758,29 +812,40 @@ unsafe fn decode_mb_rows(pbi: *mut Vp8dComp<'static>) {
         mb_row += 1;
     }
 
-    if (*pc).filter_level != 0 {
-        if (*pc).filter_type == NORMAL_LOOPFILTER {
-            vp8_loop_filter_row_normal(
-                pc,
-                mb_row - 1,
-                recon_y_stride,
-                recon_uv_stride,
-                lf_dst[0],
-                lf_dst[1],
-                lf_dst[2],
-            );
-        } else {
-            vp8_loop_filter_row_simple(pc, mb_row - 1, recon_y_stride, lf_dst[0]);
-        }
+    if pbi.common.filter_level != 0 {
+        // SAFETY: final row's loop-filter + edge-extend on the live plane.
+        unsafe {
+            if pbi.common.filter_type == NORMAL_LOOPFILTER {
+                vp8_loop_filter_row_normal(
+                    &mut pbi.common,
+                    mb_row - 1,
+                    recon_y_stride,
+                    recon_uv_stride,
+                    lf_dst[0],
+                    lf_dst[1],
+                    lf_dst[2],
+                );
+            } else {
+                vp8_loop_filter_row_simple(
+                    &mut pbi.common,
+                    mb_row - 1,
+                    recon_y_stride,
+                    lf_dst[0],
+                );
+            }
 
-        yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
-        eb_dst[0] = eb_dst[0].offset((recon_y_stride * 16) as isize);
-        eb_dst[1] = eb_dst[1].offset((recon_uv_stride * 8) as isize);
-        eb_dst[2] = eb_dst[2].offset((recon_uv_stride * 8) as isize);
+            yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
+            eb_dst[0] = eb_dst[0].offset((recon_y_stride * 16) as isize);
+            eb_dst[1] = eb_dst[1].offset((recon_uv_stride * 8) as isize);
+            eb_dst[2] = eb_dst[2].offset((recon_uv_stride * 8) as isize);
+        }
     }
-    yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
-    yv12_extend_frame_top_c(yv12_fb_new);
-    yv12_extend_frame_bottom_c(yv12_fb_new);
+    // SAFETY: extend remaining edges + top/bottom borders.
+    unsafe {
+        yv12_extend_frame_left_right_c(yv12_fb_new, eb_dst[0], eb_dst[1], eb_dst[2]);
+        yv12_extend_frame_top_c(yv12_fb_new);
+        yv12_extend_frame_bottom_c(yv12_fb_new);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -884,7 +949,7 @@ unsafe fn setup_token_decoder(
         2 => TokenPartition::Four,
         _ => TokenPartition::Eight,
     };
-    if vp8dx_bool_error(mbc8) == 0 {
+    if vp8dx_bool_error(&*mbc8) == 0 {
         (*pbi).common.multi_token_partition = multi_token_partition;
     }
     num_token_partitions = 1u32 << ((*pbi).common.multi_token_partition as c_int);
@@ -1049,381 +1114,359 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
 // ---------------------------------------------------------------------------
 
 /// `vp8_decode_frame` (vp8/decoder/decodeframe.c:879). Public entry point.
-pub unsafe fn vp8_decode_frame(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
-    let bc: *mut Vp8Reader<'static> = &mut (*pbi).mbc[8] as *mut Vp8Reader<'static>;
-    let pc: *mut Vp8Common = &mut (*pbi).common;
-    let xd: *mut Macroblockd = &mut (*pbi).mb;
-    let mut data: *const u8 = (*pbi).fragments.ptrs[0];
-    let data_sz: c_uint = (*pbi).fragments.sizes[0];
-    let data_end: *const u8 = data.offset(data_sz as isize);
+pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
+    let bc = &raw mut pbi.mbc[8];
+    let mut data: *const u8 = pbi.fragments.ptrs[0];
+    let data_sz: c_uint = pbi.fragments.sizes[0];
+    // SAFETY: data_sz bytes are guaranteed valid past `data` by the caller.
+    let data_end: *const u8 = unsafe { data.offset(data_sz as isize) };
     let first_partition_length_in_bytes: c_int;
 
-    let mut i: c_int;
-    let mut j: c_int;
-    let mut k: c_int;
-    let mut l: c_int;
     let mb_feature_data_bits: *const i32 = VP8_MB_FEATURE_DATA_BITS.as_ptr();
     let mut corrupt_tokens: c_int = 0;
-    let prev_independent_partitions: c_int = (*pbi).independent_partitions;
+    let prev_independent_partitions: c_int = pbi.independent_partitions;
 
-    let yv12_fb_new: *mut Yv12BufferConfig =
-        &mut (*pbi).common.yv12_fb[(*pbi).dec_fb_ref_idx[INTRA_FRAME] as usize];
+    let new_idx = pbi.dec_fb_ref_idx[INTRA_FRAME] as usize;
 
     /* start with no corruption of current frame */
-    (*xd).corrupted = 0;
-    (*yv12_fb_new).corrupted = 0;
+    pbi.mb.corrupted = 0;
+    pbi.common.yv12_fb[new_idx].corrupted = 0;
 
     if (data_end as isize) - (data as isize) < 3 {
-        if (*pbi).ec_active == 0 {
-            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+        if pbi.ec_active == 0 {
+            // SAFETY: vpx_internal_error writes an error code and returns.
+            return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
         }
 
         /* Declare the missing frame as an inter frame. */
-        (*pc).frame_type = INTER_FRAME;
-        (*pc).version = 0;
-        (*pc).show_frame = 1;
+        pbi.common.frame_type = INTER_FRAME;
+        pbi.common.version = 0;
+        pbi.common.show_frame = 1;
         first_partition_length_in_bytes = 0;
     } else {
+        // Header byte parsing — raw byte reads from `data`, optionally
+        // decrypted into a scratch buffer first.
         let mut clear_buffer: [u8; 10] = [0; 10];
-        let mut clear: *const u8 = data;
-        if let Some(cb) = (*pbi).decrypt.as_mut() {
-            let n = core::cmp::min(clear_buffer.len(), data_sz as usize);
-            let src = core::slice::from_raw_parts(data, n);
-            cb(src, &mut clear_buffer[..n]);
-            clear = clear_buffer.as_ptr();
-        }
-
-        (*pc).frame_type = if (*clear.add(0) & 1) == 0 {
-            FrameType::Key
-        } else {
-            FrameType::Inter
+        // SAFETY: data[0..min(10, data_sz)] is readable; the decrypt
+        // callback returns into clear_buffer of the same length.
+        let clear: *const u8 = unsafe {
+            if let Some(cb) = pbi.decrypt.as_mut() {
+                let n = core::cmp::min(clear_buffer.len(), data_sz as usize);
+                let src = core::slice::from_raw_parts(data, n);
+                cb(src, &mut clear_buffer[..n]);
+                clear_buffer.as_ptr()
+            } else {
+                data
+            }
         };
-        (*pc).version = ((*clear.add(0) >> 1) & 7) as i32;
-        (*pc).show_frame = ((*clear.add(0) >> 4) & 1) as i32;
-        first_partition_length_in_bytes = (((*clear.add(0) as c_int)
-            | ((*clear.add(1) as c_int) << 8)
-            | ((*clear.add(2) as c_int) << 16))
-            >> 5) as c_int;
 
-        if (*pbi).ec_active == 0 && first_partition_length_in_bytes == 0 {
-            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+        // SAFETY: clear[0..3] guaranteed valid (we checked data_end-data >= 3).
+        let (b0, b1, b2) = unsafe { (*clear.add(0), *clear.add(1), *clear.add(2)) };
+
+        pbi.common.frame_type = if (b0 & 1) == 0 { FrameType::Key } else { FrameType::Inter };
+        pbi.common.version = ((b0 >> 1) & 7) as i32;
+        pbi.common.show_frame = ((b0 >> 4) & 1) as i32;
+        first_partition_length_in_bytes =
+            (((b0 as c_int) | ((b1 as c_int) << 8) | ((b2 as c_int) << 16)) >> 5) as c_int;
+
+        if pbi.ec_active == 0 && first_partition_length_in_bytes == 0 {
+            return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
         }
 
-        data = data.add(3);
-        clear = clear.add(3);
+        // SAFETY: advance past the 3 header bytes we just consumed.
+        data = unsafe { data.add(3) };
 
-        vp8_setup_version(&mut *pc);
+        vp8_setup_version(&mut pbi.common);
 
-        if (*pc).frame_type == KEY_FRAME {
+        if pbi.common.frame_type == KEY_FRAME {
             if (data_end as isize) - (data as isize) >= 7 {
-                /* vet via sync code */
-                if *clear.add(0) != 0x9d || *clear.add(1) != 0x01 || *clear.add(2) != 0x2a {
-                    return vpx_internal_error(&mut (*pc).error, VPX_CODEC_UNSUP_BITSTREAM);
+                // Sync code + width/height live at clear[3..9] (the
+                // top-of-function `clear` was *not* advanced when we
+                // advanced `data`).
+                // SAFETY: at least 10 bytes were copied into clear_buffer
+                // (or `data_sz` >= 10); the if-condition above ensures
+                // bytes 3..9 are valid past `data`.
+                let (s0, s1, s2, w0, w1, h0, h1) = unsafe {
+                    (
+                        *clear.add(3), *clear.add(4), *clear.add(5),
+                        *clear.add(6), *clear.add(7), *clear.add(8), *clear.add(9),
+                    )
+                };
+                if s0 != 0x9d || s1 != 0x01 || s2 != 0x2a {
+                    return unsafe {
+                        vpx_internal_error(&mut pbi.common.error, VPX_CODEC_UNSUP_BITSTREAM)
+                    };
                 }
 
-                (*pc).width = ((*clear.add(3) as c_int) | ((*clear.add(4) as c_int) << 8)) & 0x3fff;
-                (*pc).horiz_scale = (*clear.add(4) >> 6) as c_int;
-                (*pc).height =
-                    ((*clear.add(5) as c_int) | ((*clear.add(6) as c_int) << 8)) & 0x3fff;
-                (*pc).vert_scale = (*clear.add(6) >> 6) as c_int;
-                data = data.add(7);
-            } else if (*pbi).ec_active == 0 {
-                return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+                pbi.common.width = ((w0 as c_int) | ((w1 as c_int) << 8)) & 0x3fff;
+                pbi.common.horiz_scale = (w1 >> 6) as c_int;
+                pbi.common.height = ((h0 as c_int) | ((h1 as c_int) << 8)) & 0x3fff;
+                pbi.common.vert_scale = (h1 >> 6) as c_int;
+                // SAFETY: 7 bytes confirmed available.
+                data = unsafe { data.add(7) };
+            } else if pbi.ec_active == 0 {
+                return unsafe {
+                    vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME)
+                };
             } else {
                 /* Error concealment is active, clear the frame. */
                 data = data_end;
             }
         } else {
-            // The C `xd->pre = *yv12_fb_new; xd->dst = *yv12_fb_new;` does a
-            // full struct copy of the YV12 config. `Yv12BufferConfig` is not
-            // `Copy` (it owns raw pointers), so use ptr::copy to mirror the
-            // C semantics byte-for-byte.
-            ptr::copy_nonoverlapping(yv12_fb_new, &mut (*xd).pre, 1);
-            ptr::copy_nonoverlapping(yv12_fb_new, &mut (*xd).dst, 1);
+            // C does `xd->pre = *yv12_fb_new; xd->dst = *yv12_fb_new;` —
+            // a full struct copy. Yv12BufferConfig is not Copy (it owns
+            // raw plane pointers), so mirror with ptr::copy.
+            // SAFETY: yv12_fb[new_idx] is live and distinct from xd.pre/xd.dst.
+            unsafe {
+                let src: *const Yv12BufferConfig = &pbi.common.yv12_fb[new_idx];
+                ptr::copy_nonoverlapping(src, &mut pbi.mb.pre, 1);
+                ptr::copy_nonoverlapping(src, &mut pbi.mb.dst, 1);
+            }
         }
     }
-    if (*pbi).decoded_key_frame == 0 && (*pc).frame_type != KEY_FRAME {
-        // C source returns -1 here without populating common.error;
-        // the caller maps that to VPX_CODEC_ERROR.
+    if pbi.decoded_key_frame == 0 && pbi.common.frame_type != KEY_FRAME {
         return Err(crate::vpx_api::VPX_CODEC_ERROR);
     }
 
-    if (*pbi).ec_active == 0
+    if pbi.ec_active == 0
         && ((data_end as isize) - (data as isize)) < first_partition_length_in_bytes as isize
     {
-        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+        return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
     }
 
-    init_frame(pbi);
+    // SAFETY: init_frame takes `*mut Vp8dComp` (legacy ABI). Pass the &mut as raw.
+    unsafe { init_frame(pbi); }
 
-    if vp8dx_start_decode(
-        bc,
-        data,
-        ((data_end as isize) - (data as isize)) as c_uint,
-        (*pbi).decrypt.as_deref_mut(),
-    ) != 0
-    {
-        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_MEM_ERROR);
-    }
-    if (*pc).frame_type == KEY_FRAME {
-        let _ = vp8_read_bit(bc); // colorspace
-        (*pc).clamp_type = if vp8_read_bit(bc) == 0 {
-            ClampType::Required
-        } else {
-            ClampType::NotRequired
-        };
-    }
-
-    /* Is segmentation enabled */
-    (*xd).segmentation_enabled = vp8_read_bit(bc) as u8;
-
-    if (*xd).segmentation_enabled != 0 {
-        /* segmentation map update flag */
-        (*xd).update_mb_segmentation_map = vp8_read_bit(bc) as u8;
-        (*xd).update_mb_segmentation_data = vp8_read_bit(bc) as u8;
-
-        if (*xd).update_mb_segmentation_data != 0 {
-            (*xd).mb_segment_abs_delta = vp8_read_bit(bc) as u8;
-
-            ptr::write_bytes(
-                (*xd).segment_feature_data.as_mut_ptr() as *mut u8,
-                0,
-                core::mem::size_of_val(&(*xd).segment_feature_data),
-            );
-
-            /* For each segmentation feature (Quant and loop filter level) */
-            i = 0;
-            while i < MB_LVL_MAX as c_int {
-                j = 0;
-                while j < MAX_MB_SEGMENTS as c_int {
-                    /* Frame level data */
-                    if vp8_read_bit(bc) != 0 {
-                        (*xd).segment_feature_data[i as usize][j as usize] =
-                            vp8_read_literal(bc, *mb_feature_data_bits.offset(i as isize)) as i8;
-
-                        if vp8_read_bit(bc) != 0 {
-                            (*xd).segment_feature_data[i as usize][j as usize] =
-                                -(*xd).segment_feature_data[i as usize][j as usize];
-                        }
-                    } else {
-                        (*xd).segment_feature_data[i as usize][j as usize] = 0;
-                    }
-                    j += 1;
-                }
-                i += 1;
-            }
-        }
-
-        if (*xd).update_mb_segmentation_map != 0 {
-            /* Which macro block level features are enabled */
-            ptr::write_bytes(
-                (*xd).mb_segment_tree_probs.as_mut_ptr() as *mut u8,
-                255,
-                core::mem::size_of_val(&(*xd).mb_segment_tree_probs),
-            );
-
-            /* Read probs used to decode segment id per macroblock. */
-            i = 0;
-            while i < MB_FEATURE_TREE_PROBS as c_int {
-                if vp8_read_bit(bc) != 0 {
-                    (*xd).mb_segment_tree_probs[i as usize] = vp8_read_literal(bc, 8) as Prob;
-                }
-                i += 1;
-            }
-        }
-    } else {
-        /* No segmentation updates on this frame */
-        (*xd).update_mb_segmentation_map = 0;
-        (*xd).update_mb_segmentation_data = 0;
-    }
-
-    /* Read the loop filter level and type */
-    (*pc).filter_type = if vp8_read_bit(bc) == 0 {
-        LoopFilterType::Normal
-    } else {
-        LoopFilterType::Simple
+    // SAFETY: vp8dx_start_decode initializes the bool reader from `data`/`sz`.
+    // Routing the decrypt callback through a raw `*mut Vp8dComp` bypasses
+    // a borrow-checker false positive: the function's `'a` parameter would
+    // otherwise unify `bc`'s BoolDecoder<'static> with `pbi.decrypt`'s
+    // borrow lifetime, locking out later uses of pbi.
+    let data_remaining = ((data_end as isize) - (data as isize)) as c_uint;
+    let start_rc = unsafe {
+        let pbi_raw: *mut Vp8dComp<'static> = pbi;
+        vp8dx_start_decode(bc, data, data_remaining, (*pbi_raw).decrypt.as_deref_mut())
     };
-    (*pc).filter_level = vp8_read_literal(bc, 6);
-    (*pc).sharpness_level = vp8_read_literal(bc, 3);
+    if start_rc != 0 {
+        return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR) };
+    }
 
-    /* Read in loop filter deltas applied at the MB level. */
-    (*xd).mode_ref_lf_delta_update = 0;
-    (*xd).mode_ref_lf_delta_enabled = vp8_read_bit(bc) as u8;
+    // SAFETY block: all the bool-reader-driven header parsing. Each
+    // vp8_read*(bc) is unsafe today but operates purely on the bool
+    // decoder backing buffer plus pbi fields we mutate directly.
+    unsafe {
+        if pbi.common.frame_type == KEY_FRAME {
+            let _ = vp8_read_bit(bc); // colorspace
+            pbi.common.clamp_type = if vp8_read_bit(bc) == 0 {
+                ClampType::Required
+            } else {
+                ClampType::NotRequired
+            };
+        }
 
-    if (*xd).mode_ref_lf_delta_enabled != 0 {
-        /* Do the deltas need to be updated */
-        (*xd).mode_ref_lf_delta_update = vp8_read_bit(bc) as u8;
+        /* Is segmentation enabled */
+        pbi.mb.segmentation_enabled = vp8_read_bit(bc) as u8;
 
-        if (*xd).mode_ref_lf_delta_update != 0 {
-            /* Send update */
-            i = 0;
-            while i < MAX_REF_LF_DELTAS as c_int {
-                if vp8_read_bit(bc) != 0 {
-                    (*xd).ref_lf_deltas[i as usize] = vp8_read_literal(bc, 6) as i8;
+        if pbi.mb.segmentation_enabled != 0 {
+            pbi.mb.update_mb_segmentation_map = vp8_read_bit(bc) as u8;
+            pbi.mb.update_mb_segmentation_data = vp8_read_bit(bc) as u8;
 
-                    if vp8_read_bit(bc) != 0 {
-                        /* Apply sign */
-                        (*xd).ref_lf_deltas[i as usize] = -(*xd).ref_lf_deltas[i as usize];
+            if pbi.mb.update_mb_segmentation_data != 0 {
+                pbi.mb.mb_segment_abs_delta = vp8_read_bit(bc) as u8;
+                pbi.mb.segment_feature_data = Default::default();
+
+                /* For each segmentation feature (Quant and loop filter level) */
+                for i in 0..MB_LVL_MAX {
+                    for j in 0..MAX_MB_SEGMENTS {
+                        if vp8_read_bit(bc) != 0 {
+                            let v = vp8_read_literal(bc, *mb_feature_data_bits.offset(i as isize))
+                                as i8;
+                            pbi.mb.segment_feature_data[i][j] =
+                                if vp8_read_bit(bc) != 0 { -v } else { v };
+                        } else {
+                            pbi.mb.segment_feature_data[i][j] = 0;
+                        }
                     }
                 }
-                i += 1;
             }
 
-            /* Send update */
-            i = 0;
-            while i < MAX_MODE_LF_DELTAS as c_int {
-                if vp8_read_bit(bc) != 0 {
-                    (*xd).mode_lf_deltas[i as usize] = vp8_read_literal(bc, 6) as i8;
+            if pbi.mb.update_mb_segmentation_map != 0 {
+                pbi.mb.mb_segment_tree_probs = [255; MB_FEATURE_TREE_PROBS];
 
+                /* Read probs used to decode segment id per macroblock. */
+                for i in 0..MB_FEATURE_TREE_PROBS {
                     if vp8_read_bit(bc) != 0 {
-                        /* Apply sign */
-                        (*xd).mode_lf_deltas[i as usize] = -(*xd).mode_lf_deltas[i as usize];
+                        pbi.mb.mb_segment_tree_probs[i] = vp8_read_literal(bc, 8) as Prob;
                     }
                 }
-                i += 1;
+            }
+        } else {
+            pbi.mb.update_mb_segmentation_map = 0;
+            pbi.mb.update_mb_segmentation_data = 0;
+        }
+
+        /* Read the loop filter level and type */
+        pbi.common.filter_type = if vp8_read_bit(bc) == 0 {
+            LoopFilterType::Normal
+        } else {
+            LoopFilterType::Simple
+        };
+        pbi.common.filter_level = vp8_read_literal(bc, 6);
+        pbi.common.sharpness_level = vp8_read_literal(bc, 3);
+
+        /* Read in loop filter deltas applied at the MB level. */
+        pbi.mb.mode_ref_lf_delta_update = 0;
+        pbi.mb.mode_ref_lf_delta_enabled = vp8_read_bit(bc) as u8;
+
+        if pbi.mb.mode_ref_lf_delta_enabled != 0 {
+            pbi.mb.mode_ref_lf_delta_update = vp8_read_bit(bc) as u8;
+
+            if pbi.mb.mode_ref_lf_delta_update != 0 {
+                for i in 0..MAX_REF_LF_DELTAS {
+                    if vp8_read_bit(bc) != 0 {
+                        let v = vp8_read_literal(bc, 6) as i8;
+                        pbi.mb.ref_lf_deltas[i] = if vp8_read_bit(bc) != 0 { -v } else { v };
+                    }
+                }
+
+                for i in 0..MAX_MODE_LF_DELTAS {
+                    if vp8_read_bit(bc) != 0 {
+                        let v = vp8_read_literal(bc, 6) as i8;
+                        pbi.mb.mode_lf_deltas[i] = if vp8_read_bit(bc) != 0 { -v } else { v };
+                    }
+                }
             }
         }
     }
 
-    setup_token_decoder(pbi, data.offset(first_partition_length_in_bytes as isize))?;
+    // SAFETY: setup_token_decoder takes *mut Vp8dComp; data offset is
+    // pre-validated against first_partition_length_in_bytes.
+    unsafe { setup_token_decoder(pbi, data.offset(first_partition_length_in_bytes as isize))?; }
 
     /* Read the default quantizers. */
     {
-        let Q: c_int;
-        let mut q_update: c_int;
-
-        Q = vp8_read_literal(bc, 7); /* AC 1st order Q = default */
-        (*pc).base_qindex = Q;
-        q_update = 0;
-        (*pc).y1dc_delta_q = get_delta_q(bc, (*pc).y1dc_delta_q, &mut q_update);
-        (*pc).y2dc_delta_q = get_delta_q(bc, (*pc).y2dc_delta_q, &mut q_update);
-        (*pc).y2ac_delta_q = get_delta_q(bc, (*pc).y2ac_delta_q, &mut q_update);
-        (*pc).uvdc_delta_q = get_delta_q(bc, (*pc).uvdc_delta_q, &mut q_update);
-        (*pc).uvac_delta_q = get_delta_q(bc, (*pc).uvac_delta_q, &mut q_update);
+        // SAFETY: bool-reader literal reads + delta-Q deltas; both
+        // operate on the bool decoder and update pbi.common fields.
+        let q_update;
+        unsafe {
+            pbi.common.base_qindex = vp8_read_literal(bc, 7);
+            let mut q_upd: c_int = 0;
+            pbi.common.y1dc_delta_q = get_delta_q(bc, pbi.common.y1dc_delta_q, &mut q_upd);
+            pbi.common.y2dc_delta_q = get_delta_q(bc, pbi.common.y2dc_delta_q, &mut q_upd);
+            pbi.common.y2ac_delta_q = get_delta_q(bc, pbi.common.y2ac_delta_q, &mut q_upd);
+            pbi.common.uvdc_delta_q = get_delta_q(bc, pbi.common.uvdc_delta_q, &mut q_upd);
+            pbi.common.uvac_delta_q = get_delta_q(bc, pbi.common.uvac_delta_q, &mut q_upd);
+            q_update = q_upd;
+        }
 
         if q_update != 0 {
-            vp8cx_init_de_quantizer(pbi);
+            // SAFETY: vp8cx_init_de_quantizer takes *mut Vp8dComp.
+            unsafe { vp8cx_init_de_quantizer(pbi); }
         }
 
         /* MB level dequantizer setup */
-        let pc_ref = &(*pbi).common;
-        let mi = pc_ref.mi(0, 0);
-        vp8_mb_init_dequantizer(pc_ref, &mut (*pbi).mb, mi);
+        let common = &pbi.common;
+        let mi = common.mi(0, 0);
+        vp8_mb_init_dequantizer(
+            &common.y1_dequant,
+            &common.y2_dequant,
+            &common.uv_dequant,
+            common.base_qindex,
+            &mut pbi.mb,
+            mi,
+        );
     }
 
-    /* Determine if GF/ARF buffers should be updated and how. */
-    if (*pc).frame_type != KEY_FRAME {
-        /* GF/ARF refresh flags */
-        (*pc).refresh_golden_frame = vp8_read_bit(bc);
-        (*pc).refresh_alt_ref_frame = vp8_read_bit(bc);
+    // SAFETY: more bool-reader-driven header parsing.
+    unsafe {
+        /* Determine if GF/ARF buffers should be updated and how. */
+        if pbi.common.frame_type != KEY_FRAME {
+            pbi.common.refresh_golden_frame = vp8_read_bit(bc);
+            pbi.common.refresh_alt_ref_frame = vp8_read_bit(bc);
 
-        /* Buffer to buffer copy flags. */
-        (*pc).copy_buffer_to_gf = 0;
+            pbi.common.copy_buffer_to_gf = 0;
+            if pbi.common.refresh_golden_frame == 0 {
+                pbi.common.copy_buffer_to_gf = vp8_read_literal(bc, 2);
+            }
 
-        if (*pc).refresh_golden_frame == 0 {
-            (*pc).copy_buffer_to_gf = vp8_read_literal(bc, 2);
+            pbi.common.copy_buffer_to_arf = 0;
+            if pbi.common.refresh_alt_ref_frame == 0 {
+                pbi.common.copy_buffer_to_arf = vp8_read_literal(bc, 2);
+            }
+
+            pbi.common.ref_frame_sign_bias[GOLDEN_FRAME] = vp8_read_bit(bc);
+            pbi.common.ref_frame_sign_bias[ALTREF_FRAME] = vp8_read_bit(bc);
         }
 
-        (*pc).copy_buffer_to_arf = 0;
-
-        if (*pc).refresh_alt_ref_frame == 0 {
-            (*pc).copy_buffer_to_arf = vp8_read_literal(bc, 2);
+        pbi.common.refresh_entropy_probs = vp8_read_bit(bc);
+        if pbi.common.refresh_entropy_probs == 0 {
+            pbi.common.lfc = pbi.common.fc;
         }
 
-        (*pc).ref_frame_sign_bias[GOLDEN_FRAME] = vp8_read_bit(bc);
-        (*pc).ref_frame_sign_bias[ALTREF_FRAME] = vp8_read_bit(bc);
-    }
+        pbi.common.refresh_last_frame = if pbi.common.frame_type == KEY_FRAME {
+            1
+        } else {
+            vp8_read_bit(bc)
+        };
 
-    (*pc).refresh_entropy_probs = vp8_read_bit(bc);
-    if (*pc).refresh_entropy_probs == 0 {
-        (*pc).lfc = (*pc).fc;
-    }
-
-    (*pc).refresh_last_frame = if (*pc).frame_type == KEY_FRAME {
-        1
-    } else {
-        vp8_read_bit(bc)
-    };
-
-    {
-        (*pbi).independent_partitions = 1;
-
-        /* read coef probability tree */
-        i = 0;
-        while i < BLOCK_TYPES as c_int {
-            j = 0;
-            while j < COEF_BANDS as c_int {
-                k = 0;
-                while k < PREV_COEF_CONTEXTS as c_int {
-                    l = 0;
-                    while l < ENTROPY_NODES as c_int {
-                        let p: *mut Prob = (*pc).fc.coef_probs[i as usize][j as usize][k as usize]
-                            .as_mut_ptr()
-                            .offset(l as isize);
-
-                        if vp8_read(
-                            bc,
-                            VP8_COEF_UPDATE_PROBS[i as usize][j as usize][k as usize][l as usize]
-                                as c_int,
-                        ) != 0
-                        {
-                            *p = vp8_read_literal(bc, 8) as Prob;
+        /* Read coef probability tree. */
+        pbi.independent_partitions = 1;
+        for i in 0..BLOCK_TYPES {
+            for j in 0..COEF_BANDS {
+                for k in 0..PREV_COEF_CONTEXTS {
+                    for l in 0..ENTROPY_NODES {
+                        if vp8_read(bc, VP8_COEF_UPDATE_PROBS[i][j][k][l] as c_int) != 0 {
+                            pbi.common.fc.coef_probs[i][j][k][l] = vp8_read_literal(bc, 8) as Prob;
                         }
                         if k > 0
-                            && *p
-                                != (*pc).fc.coef_probs[i as usize][j as usize][(k - 1) as usize]
-                                    [l as usize]
+                            && pbi.common.fc.coef_probs[i][j][k][l]
+                                != pbi.common.fc.coef_probs[i][j][k - 1][l]
                         {
-                            (*pbi).independent_partitions = 0;
+                            pbi.independent_partitions = 0;
                         }
-                        l += 1;
                     }
-                    k += 1;
                 }
-                j += 1;
             }
-            i += 1;
         }
     }
 
     /* clear out the coeff buffer */
-    ptr::write_bytes(
-        (*xd).qcoeff.as_mut_ptr() as *mut u8,
-        0,
-        core::mem::size_of_val(&(*xd).qcoeff),
-    );
+    pbi.mb.qcoeff.fill(0);
 
-    vp8_decode_mode_mvs(pbi);
+    // SAFETY: vp8_decode_mode_mvs takes *mut Vp8dComp.
+    unsafe { vp8_decode_mode_mvs(pbi); }
 
-    ptr::write_bytes(
-        (*pc).above_context.as_deref_mut().unwrap().as_mut_ptr() as *mut u8,
-        0,
-        core::mem::size_of::<EntropyContextPlanes>() * (*pc).mb_cols as usize,
-    );
-    (*pbi).frame_corrupt_residual = 0;
-
+    /* Reset above_context for the upcoming row walk. */
     {
-        decode_mb_rows(pbi);
-        corrupt_tokens |= (*xd).corrupted;
+        let above = pbi.common.above_context.as_deref_mut().expect("above_context allocated");
+        let mb_cols = pbi.common.mb_cols as usize;
+        for slot in &mut above[..mb_cols] {
+            *slot = EntropyContextPlanes::default();
+        }
     }
+    pbi.frame_corrupt_residual = 0;
+
+    decode_mb_rows(pbi);
+    corrupt_tokens |= pbi.mb.corrupted;
 
     /* Collect information about decoder corruption. */
-    /* 1. Check first boolean decoder for errors. */
-    (*yv12_fb_new).corrupted = vp8dx_bool_error(bc);
-    /* 2. Check the macroblock information */
-    (*yv12_fb_new).corrupted |= corrupt_tokens;
+    {
+        let bc_ref = &pbi.mbc[8];
+        let new_corrupt = vp8dx_bool_error(bc_ref) | corrupt_tokens;
+        pbi.common.yv12_fb[new_idx].corrupted = new_corrupt;
+    }
 
-    if (*pbi).decoded_key_frame == 0 {
-        if (*pc).frame_type == KEY_FRAME && (*yv12_fb_new).corrupted == 0 {
-            (*pbi).decoded_key_frame = 1;
+    if pbi.decoded_key_frame == 0 {
+        if pbi.common.frame_type == KEY_FRAME && pbi.common.yv12_fb[new_idx].corrupted == 0 {
+            pbi.decoded_key_frame = 1;
         } else {
-            return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
+            return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
         }
     }
 
-    if (*pc).refresh_entropy_probs == 0 {
-        (*pc).fc = (*pc).lfc;
-        (*pbi).independent_partitions = prev_independent_partitions;
+    if pbi.common.refresh_entropy_probs == 0 {
+        pbi.common.fc = pbi.common.lfc;
+        pbi.independent_partitions = prev_independent_partitions;
     }
 
     Ok(())

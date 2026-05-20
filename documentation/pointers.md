@@ -80,7 +80,42 @@ The neighbor-accessor migration cascaded `(mb_row, mb_col)` through `read_kf_mod
 
 **Bench delta vs. baseline**: 480p **−1.20% improvement** (p<0.01), 720p **−1.12% improvement** (p<0.01). Both benches are now ~1% faster than baseline. The neighbor-accessor migration (`pc.mi_above` / `mi_left`) compiles to faster code than the C-style negative-offset cursor it replaced — LLVM can prove `idx < slab.len()` from the `mb_row < mb_rows` / `mb_col < mb_cols` invariants, eliding the bounds check entirely. The earlier MI-grid regression has been fully recovered AND beaten.
 
+### Split-borrow refactor — Phase 2c (vp8_decode_mode_mvs + read_mb_features)
+
+| Function | Change |
+|---|---|
+| `vp8_decode_mode_mvs` | The raw `mi: *mut ModeInfo` cursor that walked the MI grid is gone. Each iteration of the inner loop now obtains `mi` fresh from `pc.mi_mut(mb_row, mb_col)`. The `mi.add(1)` per-MB advance and `mi.add(1)` row-end skip-padding are deleted. Function itself stays `unsafe fn` (still derefs `*mut Vp8dComp`). |
+| `Vp8Common::mi_base_ptr` | **Deleted** — no remaining callers after the cursor elimination. |
+| `read_mb_features` | `unsafe fn(r: *mut Vp8Reader, mi: *mut MbModeInfo, x: *mut Macroblockd)` → `fn(r: *mut Vp8Reader, mi: &mut MbModeInfo, x: &Macroblockd)`. Body has one localized `unsafe { ... }` block around the three `vp8_read` calls (bool-reader API still raw). |
+
+**No raw MI cursors remain anywhere in the codebase.** Every neighbour read goes through `pc.mi_above` / `mi_left` / `mi_above_left`; every current-MB access through `pc.mi_mut`. The Box-owned `Option<Box<[ModeInfo]>>` slab is reached exclusively via safe accessors with bounds-checked indexing that LLVM elides at the call sites' loop bounds.
+
+**Bench delta vs. baseline**: 480p **−1.35% improvement** (p<0.01), 720p **−1.62% improvement** (p<0.01). The cumulative trajectory now sits comfortably below baseline.
+
 The kernel callers that still hold raw `*mut Vp8Common` cross into these safe APIs via `&mut *pc` at the call site — keeping the per-frame decoder loop raw-pointer-shaped while everything from `Vp8Common`-level alloc/teardown upward is type-checked.
+
+### Split-borrow refactor — Phase 3 (outer drivers)
+
+| Function | Change |
+|---|---|
+| `vp8_mb_init_dequantizer` | `(pc: &Vp8Common, ...)` → `(y1_dequant, y2_dequant, uv_dequant, base_qindex, mb, mi)`. Decomposed to take the specific `Vp8Common` fields it touches instead of the aggregate. |
+| `vp8_reset_mb_tokens_context` | `unsafe fn(dx: *mut Vp8dComp, mi, mb_col)` → `fn(above_slot: &mut EntropyContextPlanes, left_context: &mut EntropyContextPlanes, mi: &ModeInfo)`. Above/left slots are resolved at the caller. |
+| `vp8_decode_mb_tokens` | `unsafe fn(dx, xd, mi, mb_col, bc)` → `fn(above_slot, left_context, fc, mb, mi, bc: *mut BoolDecoder)`. Aggregate-pointer params replaced with field-disjoint references; only the bool-reader stays raw. |
+| `vp8dx_bool_error` | `unsafe fn(br: *mut BoolDecoder)` → `fn(br: &BoolDecoder)`. Pure shared-state predicate. |
+| `decode_macroblock` | `unsafe fn(pbi, xd, mi, mb_col, bc)` → `fn(fc, above_slot, left_context, y1_dequant, y2_dequant, uv_dequant, base_qindex, xd: &mut Macroblockd, mi: &mut ModeInfo, bc: &mut Vp8Reader<'static>)`. 10 args, all field-disjoint borrows. Body uses small internal `unsafe` blocks for pixel-pointer arithmetic and inter-predictor dispatch. |
+| `decode_mb_rows` | `unsafe fn(pbi: *mut)` → `fn(pbi: &mut Vp8dComp<'static>)`. The row driver materializes ref-frame plane snapshots up front, then walks MBs through safe field accesses on `pbi`. Pixel arithmetic and loop-filter row callees stay in small internal `unsafe` blocks. |
+| `vp8_decode_frame` | `unsafe fn(*mut Vp8dComp)` → `fn(pbi: &mut Vp8dComp<'static>)`. Body uses `pbi.foo` field access throughout, with localized `unsafe { }` blocks scoped to: (a) header-byte pointer arithmetic, (b) the bool-reader-driven segmentation/loop-filter/quantizer/refresh/coef-probs parsing clusters, (c) FFI-shaped sub-calls (`init_frame`, `vp8dx_start_decode`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vpx_internal_error`). |
+| `vp8dx_receive_compressed_data` | `unsafe fn` → `fn(pbi: &mut Vp8dComp<'static>)`. Body is fully safe field access — only `vp8_yv12_copy_frame` (pixel copy) is in a small `unsafe` block. **Public API is now callable from safe Rust.** |
+| `check_fragments_for_errors` | `unsafe fn(*mut Vp8dComp)` → `fn(&mut Vp8dComp)`. Body uses safe field access; the one `vp8_yv12_copy_frame` call sits in a scoped unsafe block. |
+
+**Key technique**: when sub-functions take individual `Vp8Common` fields (above_context slot, left_context, fc, dequant tables, base_qindex), Rust's field-disjoint borrow checker lets the caller hold *all of them simultaneously* alongside `&mut pbi.mb` and the current MI cell — even though they all originate from `pbi.common`. This is what unlocks safe `decode_macroblock`.
+
+**Bench delta vs. baseline**: 480p **−1.87% improvement** (p<0.01), 720p **−1.87% improvement** (p<0.01). Phase 3 *speeds the decoder up* — likely from removing raw-pointer dereferences (which suppress aliasing-based optimizations) in the per-MB hot path and frame-header parsing.
+
+What's left of the original §1 raw-pointer surface:
+- **Bool-reader API** (`vp8dx_decode_bool`, `vp8_read`, `vp8_read_literal`, `GetCoeffs`) — still `unsafe fn` taking `*mut BoolDecoder`. The outer drivers call them inside scoped `unsafe { }` blocks. See Phase 4.
+- **FFI-shaped sub-calls within `vp8_decode_frame`** (`init_frame`, `vp8dx_start_decode`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vp8_loop_filter_*`) — still take `*mut Vp8dComp` / `*mut Vp8Common`. Each is called inside a scoped `unsafe { }`.
+- **Loop filter row callees / pixel kernels** — intentionally raw-ptr-shaped (pixel-side, doc-excluded).
 
 ---
 

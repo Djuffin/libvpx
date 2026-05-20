@@ -46,13 +46,16 @@ const sinpi8sqrt2: i32 = 35468;
 /// `vp8_short_idct4x4llm_c` — reference 4x4 inverse DCT followed by the
 /// clip-and-add accumulate of RFC 6386 §14.4.
 
-pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
+pub extern "C" fn vp8_short_idct4x4llm_c(
     input: *mut i16,
     pred_ptr: *mut u8,
     pred_stride: i32,
     dst_ptr: *mut u8,
     dst_stride: i32,
 ) {
+    // SAFETY: input is a 16-i16 coefficient block; pred_ptr/dst_ptr point
+    // to 4x4 pixel regions in (possibly identical) Yv12 planes.
+    unsafe {
     // Build a bounded view of the input coefficients (fixed 16 shorts).
     // We materialize the predictor into a local 4x4 buffer before
     // touching `dst` because callers commonly pass the same buffer as
@@ -128,6 +131,7 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
             *row.offset(c as isize) = a.clamp(0, 255) as u8;
         }
     }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +142,7 @@ pub unsafe extern "C" fn vp8_short_idct4x4llm_c(
 /// coefficient is non-zero (`eobs[block] == 1`). The DC value is
 /// pre-multiplied by `dq[0]` by the caller.
 
-pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
+pub extern "C" fn vp8_dc_only_idct_add_c(
     input_dc: i16,
     pred_ptr: *mut u8,
     pred_stride: i32,
@@ -147,19 +151,20 @@ pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
 ) {
     let a1: i32 = ((input_dc as i32) + 4) >> 3;
 
-    // Same aliasing concern as `vp8_short_idct4x4llm_c`: callers may
-    // pass `pred_ptr == dst_ptr`. Read each predictor row into a local
-    // before writing the corresponding `dst` row.
-    for r in 0..4 {
-        let pred_row = pred_ptr.offset((r as isize) * (pred_stride as isize));
-        let dst_row = dst_ptr.offset((r as isize) * (dst_stride as isize));
-        let mut row: [u8; 4] = [0; 4];
-        for c in 0..4 {
-            row[c] = *pred_row.offset(c as isize);
-        }
-        for c in 0..4 {
-            let a = a1 + row[c] as i32;
-            *dst_row.offset(c as isize) = a.clamp(0, 255) as u8;
+    // SAFETY: pred_ptr and dst_ptr point to 4x4 pixel regions reachable
+    // at offsets (0..4)*stride + (0..4). Callers may pass pred==dst.
+    unsafe {
+        for r in 0..4 {
+            let pred_row = pred_ptr.offset((r as isize) * (pred_stride as isize));
+            let dst_row = dst_ptr.offset((r as isize) * (dst_stride as isize));
+            let mut row: [u8; 4] = [0; 4];
+            for c in 0..4 {
+                row[c] = *pred_row.offset(c as isize);
+            }
+            for c in 0..4 {
+                let a = a1 + row[c] as i32;
+                *dst_row.offset(c as isize) = a.clamp(0, 255) as u8;
+            }
         }
     }
 }
@@ -172,7 +177,10 @@ pub unsafe extern "C" fn vp8_dc_only_idct_add_c(
 /// scattering the 16 recovered luma DCs into the DC slot of each Y
 /// residual block (`mb_dqcoeff[i * 16]`).
 
-pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *mut i16) {
+pub extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *mut i16) {
+    // SAFETY: input is a 16-i16 block (the Y2 dqcoeff slot); mb_dqcoeff
+    // is qcoeff[0..16*16] addressed at stride 16.
+    unsafe {
     // `input` is a fixed 16-short block; snapshot it into a local
     // [i16; 16] up front and operate purely on safe arrays.
     let input: &[i16; 16] = &*(input as *const [i16; 16]);
@@ -225,6 +233,7 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *
     for i in 0..16 {
         *mb_dqcoeff.offset((i * 16) as isize) = output[i as usize];
     }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -234,10 +243,13 @@ pub unsafe extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *
 /// `vp8_short_inv_walsh4x4_1_c` — fast path when only the WHT DC is
 /// non-zero; every Y block gets the same recovered DC.
 
-pub unsafe extern "C" fn vp8_short_inv_walsh4x4_1_c(input: *mut i16, mb_dqcoeff: *mut i16) {
-    let a1: i32 = ((*input as i32) + 3) >> 3;
-
-    for i in 0..16 {
-        *mb_dqcoeff.offset((i * 16) as isize) = a1 as i16;
+pub extern "C" fn vp8_short_inv_walsh4x4_1_c(input: *mut i16, mb_dqcoeff: *mut i16) {
+    // SAFETY: input points to the Y2 dqcoeff DC slot; mb_dqcoeff[0..16*16]
+    // is the qcoeff array addressed at stride 16.
+    unsafe {
+        let a1: i32 = ((*input as i32) + 3) >> 3;
+        for i in 0..16 {
+            *mb_dqcoeff.offset((i * 16) as isize) = a1 as i16;
+        }
     }
 }

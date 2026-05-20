@@ -15,7 +15,7 @@
 use crate::tables::Prob;
 use crate::types::{
     BD_VALUE_BITS, BdValue, BoolDecoder, EntropyContext, EntropyContextPlanes, FrameContext,
-    Macroblockd, ModeInfo, Vp8dComp,
+    Macroblockd, ModeInfo,
 };
 
 // ===========================================================================
@@ -205,22 +205,23 @@ unsafe fn GetCoeffs(
 /// and left contexts. The 9th byte (Y2) is only cleared when the MB
 /// uses the second-order transform (`!is_4x4`); B_PRED MBs intentionally
 /// preserve whatever Y2 context the previous MB left there.
-pub unsafe fn vp8_reset_mb_tokens_context(
-    dx: *mut Vp8dComp<'static>,
+pub fn vp8_reset_mb_tokens_context(
+    above_slot: &mut EntropyContextPlanes,
+    left_context: &mut EntropyContextPlanes,
     mi: &ModeInfo,
-    mb_col: i32,
 ) {
-    let a_ctx: *mut EntropyContext = &mut (*dx).common.above_context.as_deref_mut().unwrap()
-        [mb_col as usize] as *mut _ as *mut EntropyContext;
-    let l_ctx: *mut EntropyContext = &mut (*dx).common.left_context as *mut _ as *mut EntropyContext;
+    let a_ctx: *mut EntropyContext = above_slot as *mut _ as *mut EntropyContext;
+    let l_ctx: *mut EntropyContext = left_context as *mut _ as *mut EntropyContext;
 
-    core::ptr::write_bytes(a_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
-    core::ptr::write_bytes(l_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
+    unsafe {
+        core::ptr::write_bytes(a_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
+        core::ptr::write_bytes(l_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
 
-    /* Clear entropy contexts for Y2 blocks */
-    if !mi.mbmi.is_4x4 {
-        *a_ctx.offset(8) = 0;
-        *l_ctx.offset(8) = 0;
+        /* Clear entropy contexts for Y2 blocks */
+        if !mi.mbmi.is_4x4 {
+            *a_ctx.offset(8) = 0;
+            *l_ctx.offset(8) = 0;
+        }
     }
 }
 
@@ -234,85 +235,85 @@ pub unsafe fn vp8_reset_mb_tokens_context(
 /// then 16 Y, then 8 UV), threading entropy contexts and the
 /// per-block `eobs` array. Returns `eobtotal` — the sum of every
 /// block's eob, with the Y2 adjustment described in the doc.
-pub unsafe fn vp8_decode_mb_tokens(
-    dx: *mut Vp8dComp<'static>,
-    x: *mut Macroblockd,
+pub fn vp8_decode_mb_tokens(
+    above_slot: &mut EntropyContextPlanes,
+    left_context: &mut EntropyContextPlanes,
+    fc: &FrameContext,
+    mb: &mut Macroblockd,
     mi: &ModeInfo,
-    mb_col: i32,
     bc: *mut BoolDecoder<'static>,
 ) -> i32 {
-    let fc = &(*dx).common.fc as *const FrameContext;
-    let eobs: *mut i8 = (*x).eobs.as_mut_ptr();
+    let eobs: *mut i8 = mb.eobs.as_mut_ptr();
 
     let mut nonzeros: i32;
     let mut eobtotal: i32 = 0;
 
     let mut coef_probs: ProbaArray;
-    let mut a_ctx: *mut EntropyContext = &mut (*dx).common.above_context.as_deref_mut().unwrap()
-        [mb_col as usize] as *mut _ as *mut EntropyContext;
-    let mut l_ctx: *mut EntropyContext =
-        &mut (*dx).common.left_context as *mut _ as *mut EntropyContext;
+    let mut a_ctx: *mut EntropyContext = above_slot as *mut _ as *mut EntropyContext;
+    let mut l_ctx: *mut EntropyContext = left_context as *mut _ as *mut EntropyContext;
     let mut a: *mut EntropyContext;
     let mut l: *mut EntropyContext;
     let skip_dc: i32;
 
-    let mut qcoeff_ptr: *mut i16 = (*x).qcoeff.as_mut_ptr();
+    let mut qcoeff_ptr: *mut i16 = mb.qcoeff.as_mut_ptr();
 
-    if !mi.mbmi.is_4x4 {
-        a = a_ctx.offset(8);
-        l = l_ctx.offset(8);
+    unsafe {
+        if !mi.mbmi.is_4x4 {
+            a = a_ctx.offset(8);
+            l = l_ctx.offset(8);
 
-        coef_probs = (*fc).coef_probs[1].as_ptr() as ProbaArray;
+            coef_probs = fc.coef_probs[1].as_ptr() as ProbaArray;
 
-        nonzeros = GetCoeffs(
-            bc,
-            coef_probs,
-            (*a + *l) as i32,
-            0,
-            qcoeff_ptr.offset(24 * 16),
-        );
-        *a = (nonzeros > 0) as EntropyContext;
-        *l = (nonzeros > 0) as EntropyContext;
+            nonzeros = GetCoeffs(
+                bc,
+                coef_probs,
+                (*a + *l) as i32,
+                0,
+                qcoeff_ptr.offset(24 * 16),
+            );
+            *a = (nonzeros > 0) as EntropyContext;
+            *l = (nonzeros > 0) as EntropyContext;
 
-        *eobs.offset(24) = nonzeros as i8;
-        eobtotal += nonzeros - 16;
+            *eobs.offset(24) = nonzeros as i8;
+            eobtotal += nonzeros - 16;
 
-        coef_probs = (*fc).coef_probs[0].as_ptr() as ProbaArray;
-        skip_dc = 1;
-    } else {
-        coef_probs = (*fc).coef_probs[3].as_ptr() as ProbaArray;
-        skip_dc = 0;
-    }
+            coef_probs = fc.coef_probs[0].as_ptr() as ProbaArray;
+            skip_dc = 1;
+        } else {
+            coef_probs = fc.coef_probs[3].as_ptr() as ProbaArray;
+            skip_dc = 0;
+        }
 
-    for i in 0..16i32 {
-        a = a_ctx.offset((i & 3) as isize);
-        l = l_ctx.offset(((i & 0xc) >> 2) as isize);
+        for i in 0..16i32 {
+            a = a_ctx.offset((i & 3) as isize);
+            l = l_ctx.offset(((i & 0xc) >> 2) as isize);
 
-        nonzeros = GetCoeffs(bc, coef_probs, (*a + *l) as i32, skip_dc, qcoeff_ptr);
-        *a = (nonzeros > 0) as EntropyContext;
-        *l = (nonzeros > 0) as EntropyContext;
+            nonzeros = GetCoeffs(bc, coef_probs, (*a + *l) as i32, skip_dc, qcoeff_ptr);
+            *a = (nonzeros > 0) as EntropyContext;
+            *l = (nonzeros > 0) as EntropyContext;
 
-        nonzeros += skip_dc;
-        *eobs.offset(i as isize) = nonzeros as i8;
-        eobtotal += nonzeros;
-        qcoeff_ptr = qcoeff_ptr.offset(16);
-    }
+            nonzeros += skip_dc;
+            *eobs.offset(i as isize) = nonzeros as i8;
+            eobtotal += nonzeros;
+            qcoeff_ptr = qcoeff_ptr.offset(16);
+        }
 
-    coef_probs = (*fc).coef_probs[2].as_ptr() as ProbaArray;
+        coef_probs = fc.coef_probs[2].as_ptr() as ProbaArray;
 
-    a_ctx = a_ctx.offset(4);
-    l_ctx = l_ctx.offset(4);
-    for i in 16..24i32 {
-        a = a_ctx.offset((((i > 19) as i32) << 1) as isize + (i & 1) as isize);
-        l = l_ctx.offset((((i > 19) as i32) << 1) as isize + ((i & 3) > 1) as isize);
+        a_ctx = a_ctx.offset(4);
+        l_ctx = l_ctx.offset(4);
+        for i in 16..24i32 {
+            a = a_ctx.offset((((i > 19) as i32) << 1) as isize + (i & 1) as isize);
+            l = l_ctx.offset((((i > 19) as i32) << 1) as isize + ((i & 3) > 1) as isize);
 
-        nonzeros = GetCoeffs(bc, coef_probs, (*a + *l) as i32, 0, qcoeff_ptr);
-        *a = (nonzeros > 0) as EntropyContext;
-        *l = (nonzeros > 0) as EntropyContext;
+            nonzeros = GetCoeffs(bc, coef_probs, (*a + *l) as i32, 0, qcoeff_ptr);
+            *a = (nonzeros > 0) as EntropyContext;
+            *l = (nonzeros > 0) as EntropyContext;
 
-        *eobs.offset(i as isize) = nonzeros as i8;
-        eobtotal += nonzeros;
-        qcoeff_ptr = qcoeff_ptr.offset(16);
+            *eobs.offset(i as isize) = nonzeros as i8;
+            eobtotal += nonzeros;
+            qcoeff_ptr = qcoeff_ptr.offset(16);
+        }
     }
 
     eobtotal

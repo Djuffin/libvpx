@@ -97,7 +97,7 @@ pub fn intra_prediction_down_copy(xd: &Macroblockd, above_right_src: *mut u8) {
 /// stack buffers and invokes the per-mode kernel that was wired up by
 /// `vp8_init_intra4x4_predictors_internal`. Stateless: consults
 /// neither `MACROBLOCKD` nor the frame.
-pub unsafe fn vp8_intra4x4_predict(
+pub fn vp8_intra4x4_predict(
     above: *mut u8,
     yleft: *mut u8,
     left_stride: i32,
@@ -111,16 +111,21 @@ pub unsafe fn vp8_intra4x4_predict(
     space here. Similary for "Left". */
     // Generic (non-VSX) build: 12 bytes is enough.
     let mut aboveb: [u8; 12] = [0; 12];
-    let above_buf: *mut u8 = aboveb.as_mut_ptr().offset(4);
-    // Generic (non-NEON, non-VSX) build: Left[4].
-    let mut left: [u8; 4] = [0; 4];
+    // SAFETY: above/yleft are 4x4 neighbor pointers from the dst plane;
+    // we read 4 stride-spaced bytes from yleft and 8 contiguous bytes
+    // from above. The dispatch table is populated at decoder startup.
+    unsafe {
+        let above_buf: *mut u8 = aboveb.as_mut_ptr().offset(4);
+        // Generic (non-NEON, non-VSX) build: Left[4].
+        let mut left: [u8; 4] = [0; 4];
 
-    left[0] = *yleft.offset(0);
-    left[1] = *yleft.offset(left_stride as isize);
-    left[2] = *yleft.offset((2 * left_stride) as isize);
-    left[3] = *yleft.offset((3 * left_stride) as isize);
-    copy_nonoverlapping(above, above_buf, 8);
-    *above_buf.offset(-1) = top_left;
+        left[0] = *yleft.offset(0);
+        left[1] = *yleft.offset(left_stride as isize);
+        left[2] = *yleft.offset((2 * left_stride) as isize);
+        left[3] = *yleft.offset((3 * left_stride) as isize);
+        copy_nonoverlapping(above, above_buf, 8);
+        *above_buf.offset(-1) = top_left;
 
-    (pred[b_mode as usize].unwrap())(dst, dst_stride as isize, above_buf, left.as_ptr());
+        (pred[b_mode as usize].unwrap())(dst, dst_stride as isize, above_buf, left.as_ptr());
+    }
 }

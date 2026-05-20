@@ -207,7 +207,7 @@ pub unsafe fn vp8_decode_value(br: *mut BoolDecoder<'_>, bits: i32) -> i32 {
 /// `vp8dx_bool_error` — non-zero iff the decoder has read past EOF.
 ///
 /// Source: `vp8/decoder/dboolhuff.h:104`.
-pub unsafe fn vp8dx_bool_error(br: *mut BoolDecoder<'_>) -> i32 {
+pub fn vp8dx_bool_error(br: &BoolDecoder<'_>) -> i32 {
     // Check if we have reached the end of the buffer.
     //
     // Variable 'count' stores the number of bits in the 'value' buffer, minus
@@ -219,7 +219,7 @@ pub unsafe fn vp8dx_bool_error(br: *mut BoolDecoder<'_>) -> i32 {
     // one byte is filled into the value buffer. When we reach the end of the
     // data, count is additionally filled with VP8_LOTS_OF_BITS. So when
     // count == VP8_LOTS_OF_BITS - 1, the user's data has been exhausted.
-    if (*br).count > VP8_BD_VALUE_SIZE && (*br).count < VP8_LOTS_OF_BITS {
+    if br.count > VP8_BD_VALUE_SIZE && br.count < VP8_LOTS_OF_BITS {
         // We have tried to decode bits after the end of stream was encountered.
         return 1;
     }

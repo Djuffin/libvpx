@@ -23,7 +23,7 @@
 use core::ptr;
 
 use crate::types::{
-    FragmentData, FrameBuffers, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
+    FrameBuffers, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
     Vp8dComp, Vp8dConfig, VpxResult, Yv12BufferConfig,
 };
 
@@ -233,39 +233,37 @@ fn swap_frame_buffers(cm: &mut Vp8Common) -> i32 {
 
 /// `static int check_fragments_for_errors(VP8D_COMP *)` —
 /// `vp8/decoder/onyxd_if.c:270`.
-unsafe fn check_fragments_for_errors(pbi: *mut Vp8dComp<'static>) -> i32 {
-    let fragments: *mut FragmentData = &mut (*pbi).fragments;
-    if (*pbi).ec_active == 0 && (*fragments).count <= 1 && (*fragments).sizes[0] == 0 {
-        let cm: *mut Vp8Common = &mut (*pbi).common;
-
-        // If error concealment is disabled we won't signal missing frames
-        // to the decoder.
-        if (*cm).fb_idx_ref_cnt[(*cm).lst_fb_idx as usize] > 1 {
-            // The last reference shares buffer with another reference
-            // buffer. Move it to its own buffer before setting it as
-            // corrupt, otherwise we will make multiple buffers corrupt.
-            let prev_idx = (*cm).lst_fb_idx;
-            (*cm).fb_idx_ref_cnt[prev_idx as usize] -= 1;
-            (*cm).lst_fb_idx = get_free_fb(&mut *cm);
-            vp8_yv12_copy_frame(
-                &(*cm).yv12_fb[prev_idx as usize] as *const Yv12BufferConfig,
-                &mut (*cm).yv12_fb[(*cm).lst_fb_idx as usize] as *mut Yv12BufferConfig,
-            );
-        }
-        // This is used to signal that we are missing frames. We do not
-        // know if the missing frame(s) was supposed to update any of the
-        // reference buffers, but we act conservative and mark only the
-        // last buffer as corrupted.
-        (*cm).yv12_fb[(*cm).lst_fb_idx as usize].corrupted = 1;
-
-        // Signal that we have no frame to show.
-        (*cm).show_frame = 0;
-
-        // Nothing more to do.
-        return 0;
+fn check_fragments_for_errors(pbi: &mut Vp8dComp<'static>) -> i32 {
+    if pbi.ec_active != 0 || pbi.fragments.count > 1 || pbi.fragments.sizes[0] != 0 {
+        return 1;
     }
 
-    1
+    let cm = &mut pbi.common;
+
+    // If error concealment is disabled we won't signal missing frames
+    // to the decoder.
+    if cm.fb_idx_ref_cnt[cm.lst_fb_idx as usize] > 1 {
+        // The last reference shares buffer with another reference
+        // buffer. Move it to its own buffer before setting it as
+        // corrupt, otherwise we will make multiple buffers corrupt.
+        let prev_idx = cm.lst_fb_idx;
+        cm.fb_idx_ref_cnt[prev_idx as usize] -= 1;
+        cm.lst_fb_idx = get_free_fb(cm);
+        // SAFETY: prev_idx and lst_fb_idx are distinct (get_free_fb
+        // returned an unallocated slot, and prev_idx is still
+        // refcounted), so the two raw projections don't alias.
+        let src: *const Yv12BufferConfig = &cm.yv12_fb[prev_idx as usize];
+        let dst: *mut Yv12BufferConfig = &mut cm.yv12_fb[cm.lst_fb_idx as usize];
+        unsafe { vp8_yv12_copy_frame(src, dst); }
+    }
+    // Mark only the last buffer as corrupted — we don't know which
+    // references the missing frame(s) would have updated.
+    cm.yv12_fb[cm.lst_fb_idx as usize].corrupted = 1;
+
+    // Signal that we have no frame to show.
+    cm.show_frame = 0;
+
+    0
 }
 
 // ===========================================================================
@@ -349,63 +347,53 @@ pub unsafe fn vp8dx_set_reference(
 }
 
 /// `vp8dx_receive_compressed_data` — `vp8/decoder/onyxd_if.c:305`.
-pub unsafe fn vp8dx_receive_compressed_data(pbi: *mut Vp8dComp<'static>) -> VpxResult<()> {
-    let cm: *mut Vp8Common = &mut (*pbi).common;
-
-    (*pbi).common.error.error_code = VPX_CODEC_OK;
+pub fn vp8dx_receive_compressed_data(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
+    pbi.common.error.error_code = VPX_CODEC_OK;
 
     let frag_status = check_fragments_for_errors(pbi);
     if frag_status <= 0 {
-        // No fragments to decode (the C source signals this with
-        // `return 0` / `return -1` *without* throwing). We mirror that
-        // by reporting success — the caller checks `(*cm).show_frame`
-        // and `error_code` separately.
+        // No fragments to decode (C signals this with `return 0` /
+        // `return -1` without throwing). Mirror by reporting success —
+        // callers check `common.show_frame` and `error_code` separately.
         return Ok(());
     }
 
-    (*cm).new_fb_idx = get_free_fb(&mut *cm);
+    pbi.common.new_fb_idx = get_free_fb(&mut pbi.common);
 
     // setup reference frames for vp8_decode_frame
-    (*pbi).dec_fb_ref_idx[INTRA_FRAME] = (*cm).new_fb_idx;
-    (*pbi).dec_fb_ref_idx[LAST_FRAME] = (*cm).lst_fb_idx;
-    (*pbi).dec_fb_ref_idx[GOLDEN_FRAME] = (*cm).gld_fb_idx;
-    (*pbi).dec_fb_ref_idx[ALTREF_FRAME] = (*cm).alt_fb_idx;
+    pbi.dec_fb_ref_idx[INTRA_FRAME] = pbi.common.new_fb_idx;
+    pbi.dec_fb_ref_idx[LAST_FRAME] = pbi.common.lst_fb_idx;
+    pbi.dec_fb_ref_idx[GOLDEN_FRAME] = pbi.common.gld_fb_idx;
+    pbi.dec_fb_ref_idx[ALTREF_FRAME] = pbi.common.alt_fb_idx;
 
     if let Err(e) = vp8_decode_frame(pbi) {
         // Drop the just-allocated new_fb refcount.
-        if (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] > 0 {
-            (*cm).fb_idx_ref_cnt[(*cm).new_fb_idx as usize] -= 1;
+        let new_idx = pbi.common.new_fb_idx as usize;
+        if pbi.common.fb_idx_ref_cnt[new_idx] > 0 {
+            pbi.common.fb_idx_ref_cnt[new_idx] -= 1;
         }
-        // The C source has a post-longjmp `pbi->common.error.error_code =
-        // VPX_CODEC_ERROR; if (mb.error_info.error_code) copy back;` block
-        // here that is unreachable in C (longjmp unwinds past it).
-        // `vpx_internal_error` already wrote the canonical code into
-        // `(*pc).error.error_code` before returning Err, so we just
-        // propagate it. (The Rust decoder never writes to
-        // `xd->error_info`, so the per-MB copy was dead code.)
-        (*pbi).common.error.error_code = e;
+        // C source has a post-longjmp error_code copyback block that is
+        // unreachable in C (longjmp unwinds past it). `vpx_internal_error`
+        // already wrote the canonical code into `common.error.error_code`
+        // before returning Err — we just propagate.
+        pbi.common.error.error_code = e;
         vpx_clear_system_state();
         return Err(e);
     }
 
-    if swap_frame_buffers(&mut *cm) != 0 {
-        (*pbi).common.error.error_code = VPX_CODEC_ERROR;
-        // goto decode_exit;
+    if swap_frame_buffers(&mut pbi.common) != 0 {
+        pbi.common.error.error_code = VPX_CODEC_ERROR;
         vpx_clear_system_state();
         return Err(VPX_CODEC_ERROR);
     }
 
     vpx_clear_system_state();
 
-    if (*cm).show_frame != 0 {
-        (*cm).current_video_frame += 1;
+    if pbi.common.show_frame != 0 {
+        pbi.common.current_video_frame += 1;
     }
 
-    // CONFIG_ERROR_CONCEALMENT block omitted on this build.
-
-    (*pbi).ready_for_new_data = 0;
-
-    // decode_exit:
+    pbi.ready_for_new_data = 0;
     vpx_clear_system_state();
     Ok(())
 }
