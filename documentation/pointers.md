@@ -151,7 +151,16 @@ Cascade cleanups: the three big bool-reader `unsafe { }` blocks in `vp8_decode_f
 What's left of the original §1 raw-pointer surface:
 - **FFI-shaped sub-calls** (`init_frame`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vp8_loop_filter_*`) — still take `*mut Vp8dComp` / `*mut Vp8Common`. Called inside scoped `unsafe { }`.
 - **`vp8dx_start_decode` lifetime escape hatch** — its `'a` unifies `BoolDecoder<'a>` with the decrypt-callback lifetime; the two callers route through a raw `*mut Vp8dComp` to dodge a borrow-checker false positive (documented at each site). A real fix needs `BoolDecoder<'buf, 'cb>` with split lifetimes.
-- **`GetCoeffs` / `decodemv.rs` prob-pointer arithmetic** — `*const Prob` (`ProbaArray`) table walking and `out: *mut i16` coefficient scatter stay in scoped `unsafe`. This is *the* token hot loop; safe-able by indexing the typed `fc.coef_probs` nested array, but needs codegen verification rather than a blind rewrite.
+- **`decodemv.rs` prob-pointer arithmetic** — `read_mvcomponent`/`read_mvcontexts`/`decode_split_mv` still walk `*const Prob` / `*mut Prob` MV-context tables in scoped `unsafe`; same treatment as `GetCoeffs` would apply.
+
+### Token hot-loop fully safe (`GetCoeffs` / `vp8_decode_mb_tokens`)
+
+The innermost coefficient decoder is now **100% safe**, no `unsafe` blocks:
+- `kCat3456` went from `CatPtrs([*const u8; 4])` + a manual `unsafe impl Sync` to plain `[&[u8]; 4]` slices; the extra-bit walk is a `for &t in kCat3456[cat] { if t == 0 { break } ... }` iterator.
+- `ProbaArray` changed from `*const [[Prob;11];3]` to `&'a [[[Prob;11];3]; COEF_BANDS]`. `GetCoeffs`'s `p` cursor is a `&[Prob; 11]` reborrowed per band/ctx re-seat; `out` is `&mut [i16]`. All `prob[band][ctx][node]` / `out[zigzag]` accesses are bounds-checked.
+- `vp8_decode_mb_tokens` passes `&fc.coef_probs[k]` (no `.as_ptr() as` cast) and `&mut qcoeff[block*16..+16]`; `eobs` is now safe `&mut mb.eobs` indexing. `qcoeff`/`eobs` coexist as disjoint `&mut` fields of `mb`.
+
+The concern was bounds checks on the runtime-value `kBands[n]` index into `[COEF_BANDS]`. Measured: **within noise** (480p −0.4% p=0.06, 720p −0.4% p=0.10 vs the pre-change point) — LLVM elides them. 125/125 conformance pass.
 - **Loop filter row callees / pixel kernels** — intentionally raw-ptr-shaped (pixel-side, doc-excluded).
 
 ---

@@ -12,7 +12,7 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
-use crate::tables::Prob;
+use crate::tables::{COEF_BANDS, Prob};
 use crate::types::{
     BD_VALUE_BITS, BdValue, BoolDecoder, ECTX_UV, ECTX_Y2, EntropyContext, EntropyContextPlanes,
     FrameContext, Macroblockd, ModeInfo,
@@ -53,10 +53,10 @@ static kZigzag: [u8; 16] = [0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15
 const NUM_PROBAS: usize = 11;
 const NUM_CTX: usize = 3;
 
-/// `ProbaArray` (`detokenize.c:54`) — pointer-to-array such that
-/// `prob[band][ctx][node]` indexes naturally. The underlying storage is
-/// `FRAME_CONTEXT.coef_probs[block_type]`, a `[[[Prob; 11]; 3]; 8]`.
-type ProbaArray = *const [[Prob; NUM_PROBAS]; NUM_CTX];
+/// `ProbaArray` (`detokenize.c:54`) — one block type's coefficient
+/// probabilities, indexed `prob[band][ctx][node]`. Borrowed directly from
+/// `FRAME_CONTEXT.coef_probs[block_type]` (a `[[[Prob; 11]; 3]; 8]`).
+type ProbaArray<'a> = &'a [[[Prob; NUM_PROBAS]; NUM_CTX]; COEF_BANDS];
 
 // ===========================================================================
 // `VP8GetBit` — thin macro rename (`detokenize.c:49`).
@@ -112,40 +112,40 @@ fn GetSigned(br: &mut BoolDecoder<'static>, value_to_sign: i32) -> i32 {
 /// 4x4 block. Scatters magnitudes through `kZigzag` into `out[0..16]`
 /// and returns the zig-zag position of the last non-zero coefficient
 /// plus one (0 if the block has no coefficients).
-unsafe fn GetCoeffs(
+fn GetCoeffs(
     br: &mut BoolDecoder<'static>,
     prob: ProbaArray,
     ctx: i32,
     mut n: i32,
-    out: *mut i16,
+    out: &mut [i16],
 ) -> i32 {
-    // `p = prob[n][ctx]` — pointer to a row of NUM_PROBAS probabilities.
-    let mut p: *const Prob = (*prob.offset(n as isize))[ctx as usize].as_ptr();
-    if VP8GetBit(br, *p.offset(0) as i32) == 0 {
+    // `p = prob[band][ctx]` — a row of NUM_PROBAS token-tree probabilities.
+    let mut p: &[Prob; NUM_PROBAS] = &prob[n as usize][ctx as usize];
+    if VP8GetBit(br, p[0] as i32) == 0 {
         /* first EOB is more a 'CBP' bit. */
         return 0;
     }
     loop {
         n += 1;
-        if VP8GetBit(br, *p.offset(1) as i32) == 0 {
-            p = (*prob.offset(kBands[n as usize] as isize))[0].as_ptr();
+        if VP8GetBit(br, p[1] as i32) == 0 {
+            p = &prob[kBands[n as usize] as usize][0];
         } else {
             /* non zero coeff */
             let v: i32;
-            let j: i32;
-            if VP8GetBit(br, *p.offset(2) as i32) == 0 {
-                p = (*prob.offset(kBands[n as usize] as isize))[1].as_ptr();
+            let j: usize;
+            if VP8GetBit(br, p[2] as i32) == 0 {
+                p = &prob[kBands[n as usize] as usize][1];
                 v = 1;
             } else {
-                if VP8GetBit(br, *p.offset(3) as i32) == 0 {
-                    if VP8GetBit(br, *p.offset(4) as i32) == 0 {
+                if VP8GetBit(br, p[3] as i32) == 0 {
+                    if VP8GetBit(br, p[4] as i32) == 0 {
                         v = 2;
                     } else {
-                        v = 3 + VP8GetBit(br, *p.offset(5) as i32);
+                        v = 3 + VP8GetBit(br, p[5] as i32);
                     }
                 } else {
-                    if VP8GetBit(br, *p.offset(6) as i32) == 0 {
-                        if VP8GetBit(br, *p.offset(7) as i32) == 0 {
+                    if VP8GetBit(br, p[6] as i32) == 0 {
+                        if VP8GetBit(br, p[7] as i32) == 0 {
                             v = 5 + VP8GetBit(br, 159);
                         } else {
                             let mut vv = 7 + 2 * VP8GetBit(br, 165);
@@ -153,8 +153,8 @@ unsafe fn GetCoeffs(
                             v = vv;
                         }
                     } else {
-                        let bit1 = VP8GetBit(br, *p.offset(8) as i32);
-                        let bit0 = VP8GetBit(br, *p.offset(9 + bit1 as isize) as i32);
+                        let bit1 = VP8GetBit(br, p[8] as i32);
+                        let bit0 = VP8GetBit(br, p[9 + bit1 as usize] as i32);
                         let cat = (2 * bit1 + bit0) as usize;
                         let mut vv: i32 = 0;
                         for &t in kCat3456[cat] {
@@ -167,13 +167,13 @@ unsafe fn GetCoeffs(
                         v = vv;
                     }
                 }
-                p = (*prob.offset(kBands[n as usize] as isize))[2].as_ptr();
+                p = &prob[kBands[n as usize] as usize][2];
             }
-            j = kZigzag[(n - 1) as usize] as i32;
+            j = kZigzag[(n - 1) as usize] as usize;
 
-            *out.offset(j as isize) = GetSigned(br, v) as i16;
+            out[j] = GetSigned(br, v) as i16;
 
-            if n == 16 || VP8GetBit(br, *p.offset(0) as i32) == 0 {
+            if n == 16 || VP8GetBit(br, p[0] as i32) == 0 {
                 /* EOB */
                 return n;
             }
@@ -224,77 +224,84 @@ pub fn vp8_decode_mb_tokens(
     mi: &ModeInfo,
     bc: &mut BoolDecoder<'static>,
 ) -> i32 {
-    let eobs: *mut i8 = mb.eobs.as_mut_ptr();
-
     let mut nonzeros: i32;
     let mut eobtotal: i32 = 0;
 
     let mut coef_probs: ProbaArray;
-    // Entropy-context cursors are now bounds-checked indices into the
-    // flat `[i8; 9]` planes (Y at 0..4, U/V at 4..8, Y2 at 8). The C code
-    // walked these as raw `ENTROPY_CONTEXT *` with `.offset()`; the index
-    // arithmetic below is the exact equivalent.
+    // Entropy-context cursors are bounds-checked indices into the flat
+    // `[i8; 9]` planes (Y at ECTX_Y1, U/V at ECTX_UV, Y2 at ECTX_Y2). The
+    // C code walked these as raw `ENTROPY_CONTEXT *` with `.offset()`; the
+    // index arithmetic below is the exact equivalent.
     let a = &mut above_slot.ctx;
     let l = &mut left_context.ctx;
     let skip_dc: i32;
 
-    let mut qcoeff_ptr: *mut i16 = mb.qcoeff.as_mut_ptr();
+    // `qcoeff`/`eobs` are disjoint fields of `mb`; the per-block coefficient
+    // slice is `qcoeff[block * 16 .. block * 16 + 16]`.
+    let qcoeff = &mut mb.qcoeff;
+    let eobs = &mut mb.eobs;
 
-    // SAFETY: qcoeff_ptr / eobs are owned by `mb`; coef_probs is a raw view
-    // of `fc.coef_probs`; GetCoeffs walks them within their bounds.
-    unsafe {
-        if !mi.mbmi.is_4x4 {
-            coef_probs = fc.coef_probs[1].as_ptr() as ProbaArray;
+    if !mi.mbmi.is_4x4 {
+        coef_probs = &fc.coef_probs[1];
 
-            nonzeros = GetCoeffs(
-                bc,
-                coef_probs,
-                (a[ECTX_Y2] + l[ECTX_Y2]) as i32,
-                0,
-                qcoeff_ptr.offset(24 * 16),
-            );
-            a[ECTX_Y2] = (nonzeros > 0) as EntropyContext;
-            l[ECTX_Y2] = (nonzeros > 0) as EntropyContext;
+        nonzeros = GetCoeffs(
+            bc,
+            coef_probs,
+            (a[ECTX_Y2] + l[ECTX_Y2]) as i32,
+            0,
+            &mut qcoeff[24 * 16..24 * 16 + 16],
+        );
+        a[ECTX_Y2] = (nonzeros > 0) as EntropyContext;
+        l[ECTX_Y2] = (nonzeros > 0) as EntropyContext;
 
-            *eobs.offset(24) = nonzeros as i8;
-            eobtotal += nonzeros - 16;
+        eobs[24] = nonzeros as i8;
+        eobtotal += nonzeros - 16;
 
-            coef_probs = fc.coef_probs[0].as_ptr() as ProbaArray;
-            skip_dc = 1;
-        } else {
-            coef_probs = fc.coef_probs[3].as_ptr() as ProbaArray;
-            skip_dc = 0;
-        }
+        coef_probs = &fc.coef_probs[0];
+        skip_dc = 1;
+    } else {
+        coef_probs = &fc.coef_probs[3];
+        skip_dc = 0;
+    }
 
-        for i in 0..16i32 {
-            let ai = (i & 3) as usize;
-            let li = ((i & 0xc) >> 2) as usize;
+    for i in 0..16usize {
+        let ai = i & 3;
+        let li = (i & 0xc) >> 2;
 
-            nonzeros = GetCoeffs(bc, coef_probs, (a[ai] + l[li]) as i32, skip_dc, qcoeff_ptr);
-            a[ai] = (nonzeros > 0) as EntropyContext;
-            l[li] = (nonzeros > 0) as EntropyContext;
+        nonzeros = GetCoeffs(
+            bc,
+            coef_probs,
+            (a[ai] + l[li]) as i32,
+            skip_dc,
+            &mut qcoeff[i * 16..i * 16 + 16],
+        );
+        a[ai] = (nonzeros > 0) as EntropyContext;
+        l[li] = (nonzeros > 0) as EntropyContext;
 
-            nonzeros += skip_dc;
-            *eobs.offset(i as isize) = nonzeros as i8;
-            eobtotal += nonzeros;
-            qcoeff_ptr = qcoeff_ptr.offset(16);
-        }
+        nonzeros += skip_dc;
+        eobs[i] = nonzeros as i8;
+        eobtotal += nonzeros;
+    }
 
-        coef_probs = fc.coef_probs[2].as_ptr() as ProbaArray;
+    coef_probs = &fc.coef_probs[2];
 
-        // UV blocks address the U/V region at base offset ECTX_UV.
-        for i in 16..24i32 {
-            let ai = ECTX_UV + (((i > 19) as i32) << 1) as usize + (i & 1) as usize;
-            let li = ECTX_UV + (((i > 19) as i32) << 1) as usize + ((i & 3) > 1) as usize;
+    // UV blocks address the U/V region at base offset ECTX_UV.
+    for i in 16..24usize {
+        let ai = ECTX_UV + (((i > 19) as usize) << 1) + (i & 1);
+        let li = ECTX_UV + (((i > 19) as usize) << 1) + ((i & 3) > 1) as usize;
 
-            nonzeros = GetCoeffs(bc, coef_probs, (a[ai] + l[li]) as i32, 0, qcoeff_ptr);
-            a[ai] = (nonzeros > 0) as EntropyContext;
-            l[li] = (nonzeros > 0) as EntropyContext;
+        nonzeros = GetCoeffs(
+            bc,
+            coef_probs,
+            (a[ai] + l[li]) as i32,
+            0,
+            &mut qcoeff[i * 16..i * 16 + 16],
+        );
+        a[ai] = (nonzeros > 0) as EntropyContext;
+        l[li] = (nonzeros > 0) as EntropyContext;
 
-            *eobs.offset(i as isize) = nonzeros as i8;
-            eobtotal += nonzeros;
-            qcoeff_ptr = qcoeff_ptr.offset(16);
-        }
+        eobs[i] = nonzeros as i8;
+        eobtotal += nonzeros;
     }
 
     eobtotal
