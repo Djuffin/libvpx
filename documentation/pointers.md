@@ -173,14 +173,9 @@ The last structural raw-pointer cluster on the entropy-decode path. The grid-wal
 
 A fresh grep-and-read pass over `rust/src/` (functions that take `*mut`/`*const` of a *kernel struct* — `Vp8dComp` / `Vp8Common` / `Macroblockd` / `ModeInfo`, excluding pixel-`u8`, coeff-`i16`, bitstream-`u8`, bool-reader `Vp8Reader`, and threading) finds the following still outstanding. The whole entropy-decode hot path (`decodemv.rs`, `detokenize.rs`, `treereader.rs`, `dboolhuff.rs` API, `decode_macroblock`, `decode_mb_rows`, `vp8_decode_frame`, `vp8dx_receive_compressed_data`) is now reference-shaped; what remains is **frame setup, the control/reference API, and pixel-side row filters**.
 
-> **Update:** the frame-setup cluster below has since been converted — see "Resolved: frame-setup cluster" at the end of this section. What remains outstanding is the control-API pair, the bitstream/decrypt-shaped functions, and the genuine blockers.
+> **Update:** the frame-setup cluster and the control/reference + resolution-change functions have since been converted — see "Resolved: frame-setup cluster" and "Resolved: control/reference + resolution-change `pbi`" at the end of this section. What remains outstanding is the bitstream-shaped functions and the pixel-side row filters.
 
-**Field-disjoint convertible (aliases `&mut common` + `&mut/& mb`, both disjoint fields) — LOW–MEDIUM effort, same pattern as Phase 3/5:**
-- `vp8dx_get_reference` / `vp8dx_set_reference(*mut Vp8dComp, …)` (`onyxd_if.rs`) — control-API; body is `cm = &mut common` + a `vp8_yv12_copy_frame` (pixel) in a scoped block, plus a `sd: *mut Yv12BufferConfig` user buffer (pixel-side), so the fn stays `unsafe fn` even after `pbi` becomes `&mut`. Lives in the iface control path (`vp8_dx_iface.rs` reaches it via `pbi_ptr()` + null check, which would become `pbi.as_deref_mut()` + `None`). Deferred — not frame-setup.
-
-**Bitstream-shaped (the `*mut Vp8dComp` is really just a handle to `fragments` + bytestream pointer arithmetic) — keep raw or thread a narrow borrow:**
-- `setup_token_decoder(*mut Vp8dComp, *const u8)` — walks a `*mut Vp8Reader` partition cursor; FFI/bitstream-shaped.
-- `read_available_partition_size(*mut Vp8dComp, …)` — reaches `pbi.common.error` + `pbi.ec_active`; the rest is `*const u8` bytestream math. (`read_partition_size` shed its `*mut Vp8dComp` in the decrypt removal below — it is now `fn(*const u8)`.)
+**Bitstream-shaped — converted (see "Resolved: bitstream-shaped `pbi`" below).** `setup_token_decoder` and `read_available_partition_size` had their `*mut Vp8dComp` replaced with `&mut Vp8dComp`; only their `*const u8` bytestream pointers (genuine input cursors) remain, which is the doc-excluded data category.
 
 **Genuine blockers / intentionally raw (unchanged):**
 - **`vp8_loop_filter_row_normal` / `_simple(*mut Vp8Common, …, *mut u8 …)`** — pixel-side row filters; `cm` is read for `lf_info` + the per-row `mi_row`, but the function is dominated by plane-pointer arithmetic. Pixel-adjacent; lower priority.
@@ -199,7 +194,7 @@ A fresh grep-and-read pass over `rust/src/` (functions that take `*mut`/`*const`
 | `init_frame` | `unsafe fn(*mut Vp8dComp)` | `fn(&mut Vp8dComp)` — the `pc = &mut common` / `xd = &mut mb` raw aliases are gone; everything is a direct `pbi.common.*` / `pbi.mb.*` field path (disjoint, so the interleaved reads/writes coexist). The three `ptr::write_bytes(..)` array zeroings became `= Default::default()`. Fully safe. |
 | `create_decompressor_inner` | `unsafe fn(*mut Vp8dComp, …)` | `fn(&mut Vp8dComp, …)` with one internal `unsafe { once(initialize_dec) }` (RTCD one-shot). The `pbi_ptr` round-trip in `create_decompressor` is deleted — it just passes `&mut pbi`. |
 
-This is cold code (decoder creation + once-per-frame setup; none of it runs in the per-MB loop), so it is **not perf-sensitive** — no bench is reported (a steady-state decode microbench cannot attribute to it, and cross-session machine drift of ~1–1.5% would dominate any reading regardless). 125/125 conformance bit-exact; all unit/API suites pass. Remaining §1 surface after this: the control-API pair (`vp8dx_get/set_reference`, deferred — stays `unsafe fn` for its pixel `sd` buffer anyway), the bitstream/decrypt-shaped functions (`setup_token_decoder`, `read_partition_size`), the `vp8dx_start_decode` lifetime hatch, and the pixel-side kernels.
+This is cold code (decoder creation + once-per-frame setup; none of it runs in the per-MB loop), so it is **not perf-sensitive** — no bench is reported (a steady-state decode microbench cannot attribute to it, and cross-session machine drift of ~1–1.5% would dominate any reading regardless). 125/125 conformance bit-exact; all unit/API suites pass. (For the §1 surface remaining after *all* of the resolutions in this section, see the final paragraph below.)
 
 **Resolved as a Phase 5 follow-up:** `decode_mb_rows`'s `*mut ModeInfo` round-trip is gone. The reconstruct loop used to call `common.mi_mut(row,col)` (a `&mut self` method → whole-`common` borrow), cast the result to `*mut ModeInfo`, drop the borrow to take the other disjoint `common` sub-field borrows for `decode_macroblock`, then resurrect `mi` via `unsafe { &mut *mi_ptr }`. It now indexes `common.mip` as a **direct field path** once at the top of the per-MB body and holds that `&mut ModeInfo` across the rest of the iteration; the intervening code touches only `pbi.mb` and disjoint `common` sub-fields, so the borrow coexists cleanly. The single `&mut mi` is reused for the `ref_frame` read, so the grid is indexed once per MB (not twice). The `let common = &mut pbi.common` aggregation was unrolled into per-field borrows. **Bench (same-session A/B vs the committed Phase 5 state): 480p −0.77% (p=0.01, faster), 720p +0.57% (p=0.04, slower)** — both sub-1% and in opposite directions, i.e. net neutral. (A first measurement against an older baseline showed a misleading 720p +0.68%; a same-session A/B isolated that as cross-session machine drift — the committed state itself ran ~1.5% slower in the later session.) 125/125 conformance bit-exact. `decode_mb_rows` now holds no raw `ModeInfo` pointer (only the pixel-plane `*mut u8` / `*mut Yv12BufferConfig` snapshots remain, which are doc-excluded).
 
@@ -213,6 +208,30 @@ This is cold code (decoder creation + once-per-frame setup; none of it runs in t
 - **Public API preserved for ABI shape**: `VpxDecryptInit`, `VpxDecryptCb`, the `VPXD_SET_DECRYPTOR` control id, and `ControlCmd::SetDecryptor` remain; the control handler now returns `VPX_CODEC_INCAPABLE`. `tests/vp8_decrypt_test.rs` was deleted.
 
 The bool reader is now fully reference-shaped except the `buffer: &[u8]` slice borrow. 125/125 conformance bit-exact; all remaining suites pass. No bench (this removes branches from `fill`; not a perf-motivated change).
+
+**Resolved: control/reference + resolution-change `pbi`.** Four functions dropped their `*mut Vp8dComp` param for `&mut Vp8dComp<'static>`:
+
+| Function | File | Notes |
+|---|---|---|
+| `vp8dx_get_reference` | onyxd_if.rs | Stays `unsafe fn` — `sd: *mut Yv12BufferConfig` (user pixel buffer) + `vp8_yv12_copy_frame` raw call. Body now reaches the DPB via `pbi.common.*` field paths. |
+| `vp8dx_set_reference` | onyxd_if.rs | Same. The `cm`-aliased ref-count dance became field-disjoint borrows: the targeted index field (`lst/gld/alt_fb_idx`) and `fb_idx_ref_cnt` are distinct fields of `common`, so `ref_cnt_fb(&mut common.fb_idx_ref_cnt, &mut common.<idx>, …)` holds both `&mut` at once. The pre-update index is copied out for the dim-check to avoid aliasing. |
+| `vp8dx_get_raw_frame` | onyxd_if.rs | Stays `unsafe fn` — `sd`/`flags` raw + `ptr::copy_nonoverlapping`. Body is `pbi.*` field access. |
+| `vp8_decode_resolution_change` | vp8_dx_iface.rs | The `pc`/`xd` raw aliases are gone; `pbi.common.*` / `pbi.mb.*` field paths (disjoint). `vp8_alloc_frame_buffers(&mut pbi.common, …)`; the YV12 descriptor copies stay in `unsafe` (pixel). |
+
+Call sites: the control handlers replaced `pbi_ptr()` + null-check with `ctx.yv12_frame_buffers.pbi.as_deref_mut()` + `None`; `vp8_get_frame` uses `.as_deref_mut().expect(...)` (guarded by `pbi.is_some()`); the resolution-change caller passes `&mut *pbi`. These functions remain `unsafe fn` because their `sd`/`flags` pixel-buffer params and the YV12 copy calls are raw — but the **god-object `*mut Vp8dComp` is gone** from each. 125/125 conformance; all suites pass.
+
+After this, the remaining god-object `*mut Vp8dComp`/`*mut Vp8Common` was just the two bitstream-shaped header helpers and the pixel-side row filters — see the two notes below.
+
+**Resolved: bitstream-shaped `pbi`.** The two per-frame header helpers dropped `*mut Vp8dComp` for `&mut Vp8dComp<'static>`; both stay `unsafe fn` because their input-bytestream `*const u8` pointers and arithmetic remain (doc-excluded data category):
+
+| Function | File | Notes |
+|---|---|---|
+| `read_available_partition_size` | decodeframe.rs | Body reaches `pbi.common.error` + `pbi.ec_active` via field paths. The `token_part_sizes` / `fragment_*` `*const u8` cursors stay raw. |
+| `setup_token_decoder` | decodeframe.rs | `pbi.*` field access throughout. The `bool_decoder: *mut Vp8Reader` cursor that walked `mbc` via `++` became a **bounds-checked index** `mbc[partition_idx - 1]` (same conversion as the old MI-grid / `above_context` cursors). The inner `read_available_partition_size` call hoists `fragment_start` (a `Copy` `*const u8`) into a local so the `&mut pbi` reborrow doesn't alias the `pbi.fragments` read. Input fragment/bytestream `*const u8` pointers stay raw. |
+
+Caller (`vp8_decode_frame`) passes `pbi` (already `&mut`); the `data.offset(...)` bytestream arithmetic + the still-`unsafe fn` call sit in one `unsafe {}`. 125/125 conformance (incl. the `vp80-04-partitions` multi-partition vectors); all suites pass.
+
+**The §1 god-object surface is now empty except the pixel-side row filters.** Every `*mut Vp8dComp` / `*mut Vp8Common` / `*mut Macroblockd` / `*mut ModeInfo` that aliased a kernel struct on the decode/control/setup paths has been converted to a reference or removed. The sole remaining kernel-struct raw pointers are `vp8_loop_filter_row_normal`/`_simple(cm: *mut Vp8Common, …)` — pixel-side row filters dominated by plane-pointer arithmetic (`cm` is read for `lf_info` + the per-row `mi_row`); converting `cm` there is low-value and pixel-adjacent. Everything else left in the codebase is the **doc-excluded data category**: pixel-plane `*mut u8` (`Yv12BufferConfig`, predictor/IDCT/loop-filter kernels), coeff `*mut i16`, bitstream-input `*const u8` (the bool reader + the two header helpers above), threshold-table `*const u8` (`LoopFilterInfo`), and the threading/mem/FFI shims.
 
 ### Token hot-loop fully safe (`GetCoeffs` / `vp8_decode_mb_tokens`)
 

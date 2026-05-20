@@ -269,31 +269,28 @@ fn check_fragments_for_errors(pbi: &mut Vp8dComp<'static>) -> i32 {
 
 /// `vp8dx_get_reference` — `vp8/decoder/onyxd_if.c:123`.
 pub unsafe fn vp8dx_get_reference(
-    pbi: *mut Vp8dComp<'static>,
+    pbi: &mut Vp8dComp<'static>,
     ref_frame_flag: VpxRefFrameType,
     sd: *mut Yv12BufferConfig,
 ) -> VpxResult<()> {
-    let cm: *mut Vp8Common = &mut (*pbi).common;
-    let ref_fb_idx: i32;
-
-    if ref_frame_flag == VP8_LAST_FRAME {
-        ref_fb_idx = (*cm).lst_fb_idx;
+    let ref_fb_idx: i32 = if ref_frame_flag == VP8_LAST_FRAME {
+        pbi.common.lst_fb_idx
     } else if ref_frame_flag == VP8_GOLD_FRAME {
-        ref_fb_idx = (*cm).gld_fb_idx;
+        pbi.common.gld_fb_idx
     } else if ref_frame_flag == VP8_ALTR_FRAME {
-        ref_fb_idx = (*cm).alt_fb_idx;
+        pbi.common.alt_fb_idx
     } else {
-        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
-    }
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_ERROR);
+    };
 
     let slot: *mut Yv12BufferConfig =
-        &mut (*cm).yv12_fb[ref_fb_idx as usize] as *mut Yv12BufferConfig;
+        &mut pbi.common.yv12_fb[ref_fb_idx as usize] as *mut Yv12BufferConfig;
     if (*slot).y_height != (*sd).y_height
         || (*slot).y_width != (*sd).y_width
         || (*slot).uv_height != (*sd).uv_height
         || (*slot).uv_width != (*sd).uv_width
     {
-        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_ERROR);
     }
     vp8_yv12_copy_frame(slot, sd);
     Ok(())
@@ -301,44 +298,54 @@ pub unsafe fn vp8dx_get_reference(
 
 /// `vp8dx_set_reference` — `vp8/decoder/onyxd_if.c:153`.
 pub unsafe fn vp8dx_set_reference(
-    pbi: *mut Vp8dComp<'static>,
+    pbi: &mut Vp8dComp<'static>,
     ref_frame_flag: VpxRefFrameType,
     sd: *mut Yv12BufferConfig,
 ) -> VpxResult<()> {
-    let cm: *mut Vp8Common = &mut (*pbi).common;
-    let ref_fb_ptr: *mut i32;
-    let free_fb: i32;
-
-    if ref_frame_flag == VP8_LAST_FRAME {
-        ref_fb_ptr = &mut (*cm).lst_fb_idx;
+    // Current index value for the targeted slot (copied out so the
+    // dim-check + the later disjoint-field borrows don't conflict).
+    let cur_idx: i32 = if ref_frame_flag == VP8_LAST_FRAME {
+        pbi.common.lst_fb_idx
     } else if ref_frame_flag == VP8_GOLD_FRAME {
-        ref_fb_ptr = &mut (*cm).gld_fb_idx;
+        pbi.common.gld_fb_idx
     } else if ref_frame_flag == VP8_ALTR_FRAME {
-        ref_fb_ptr = &mut (*cm).alt_fb_idx;
+        pbi.common.alt_fb_idx
     } else {
-        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
-    }
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_ERROR);
+    };
 
-    let slot: *mut Yv12BufferConfig =
-        &mut (*cm).yv12_fb[*ref_fb_ptr as usize] as *mut Yv12BufferConfig;
+    let slot: *const Yv12BufferConfig =
+        &pbi.common.yv12_fb[cur_idx as usize] as *const Yv12BufferConfig;
     if (*slot).y_height != (*sd).y_height
         || (*slot).y_width != (*sd).y_width
         || (*slot).uv_height != (*sd).uv_height
         || (*slot).uv_width != (*sd).uv_width
     {
-        return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_ERROR);
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_ERROR);
     }
     // Find an empty frame buffer.
-    free_fb = get_free_fb(&mut *cm);
+    let free_fb = get_free_fb(&mut pbi.common);
     // Decrease fb_idx_ref_cnt since it will be increased again in
     // ref_cnt_fb() below.
-    (*cm).fb_idx_ref_cnt[free_fb as usize] -= 1;
+    pbi.common.fb_idx_ref_cnt[free_fb as usize] -= 1;
 
-    // Manage the reference counters and copy image.
-    ref_cnt_fb(&mut (*cm).fb_idx_ref_cnt, &mut *ref_fb_ptr, free_fb);
+    // Manage the reference counters. `fb_idx_ref_cnt` and the targeted
+    // index field are disjoint fields of `common`, so they coexist as
+    // `&mut`. ref_cnt_fb sets `*idx = free_fb`, so the copy destination
+    // below is `yv12_fb[free_fb]`.
+    {
+        let ref_fb_ptr: &mut i32 = if ref_frame_flag == VP8_LAST_FRAME {
+            &mut pbi.common.lst_fb_idx
+        } else if ref_frame_flag == VP8_GOLD_FRAME {
+            &mut pbi.common.gld_fb_idx
+        } else {
+            &mut pbi.common.alt_fb_idx
+        };
+        ref_cnt_fb(&mut pbi.common.fb_idx_ref_cnt, ref_fb_ptr, free_fb);
+    }
     vp8_yv12_copy_frame(
         sd,
-        &mut (*cm).yv12_fb[*ref_fb_ptr as usize] as *mut Yv12BufferConfig,
+        &mut pbi.common.yv12_fb[free_fb as usize] as *mut Yv12BufferConfig,
     );
     Ok(())
 }
@@ -398,33 +405,33 @@ pub fn vp8dx_receive_compressed_data(pbi: &mut Vp8dComp<'static>) -> VpxResult<(
 /// `vp8dx_get_raw_frame` — `vp8/decoder/onyxd_if.c:376`.
 
 pub unsafe fn vp8dx_get_raw_frame(
-    pbi: *mut Vp8dComp<'static>,
+    pbi: &mut Vp8dComp<'static>,
     sd: *mut Yv12BufferConfig,
     flags: *mut Vp8PpFlags,
 ) -> i32 {
-    if (*pbi).ready_for_new_data == 1 {
+    if pbi.ready_for_new_data == 1 {
         return -1;
     }
 
     // ie no raw frame to show!!!
-    if (*pbi).common.show_frame == 0 {
+    if pbi.common.show_frame == 0 {
         return -1;
     }
 
-    (*pbi).ready_for_new_data = 1;
+    pbi.ready_for_new_data = 1;
 
     // CONFIG_POSTPROC is disabled — cast flags to void as the C source does.
     let _ = flags;
 
-    let ret = if (*pbi).common.frame_to_show_idx >= 0 {
+    let ret = if pbi.common.frame_to_show_idx >= 0 {
         // Shallow descriptor copy — *sd shares plane buffers with the
         // decoder's frame_to_show until the next call to
         // vp8dx_receive_compressed_data.
-        let idx = (*pbi).common.frame_to_show_idx as usize;
-        ptr::copy_nonoverlapping(&(*pbi).common.yv12_fb[idx], sd, 1);
-        (*sd).y_width = (*pbi).common.width;
-        (*sd).y_height = (*pbi).common.height;
-        (*sd).uv_height = (*pbi).common.height / 2;
+        let idx = pbi.common.frame_to_show_idx as usize;
+        ptr::copy_nonoverlapping(&pbi.common.yv12_fb[idx], sd, 1);
+        (*sd).y_width = pbi.common.width;
+        (*sd).y_height = pbi.common.height;
+        (*sd).uv_height = pbi.common.height / 2;
         0
     } else {
         -1

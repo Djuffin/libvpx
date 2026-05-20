@@ -404,7 +404,7 @@ pub unsafe fn vp8_decode(
         if resolution_change != 0 {
             (*pc).width = (*ctx).si.w as i32;
             (*pc).height = (*ctx).si.h as i32;
-            if vp8_decode_resolution_change(pbi, w, h).is_err() {
+            if vp8_decode_resolution_change(&mut *pbi, w, h).is_err() {
                 res = update_error_state(&(*pbi).common.error);
                 (*ctx).fragments.count = 0;
                 return res;
@@ -435,41 +435,41 @@ pub unsafe fn vp8_decode(
 /// Returns `Err` if any width/height validation or `vp8_alloc_frame_buffers`
 /// fails.
 unsafe fn vp8_decode_resolution_change(
-    pbi: *mut Vp8dComp<'static>,
+    pbi: &mut Vp8dComp<'static>,
     w: u32,
     h: u32,
 ) -> VpxResult<()> {
-    let pc = &mut (*pbi).common as *mut crate::types::Vp8Common;
-    let xd = &mut (*pbi).mb as *mut crate::types::Macroblockd;
-
-    if (*pc).width <= 0 {
-        (*pc).width = w as i32;
-        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+    if pbi.common.width <= 0 {
+        pbi.common.width = w as i32;
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
     }
 
-    if (*pc).height <= 0 {
-        (*pc).height = h as i32;
-        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+    if pbi.common.height <= 0 {
+        pbi.common.height = h as i32;
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
     }
 
-    if vp8_alloc_frame_buffers(&mut *pc, (*pc).width, (*pc).height) != 0 {
-        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_MEM_ERROR);
+    let (cw, ch) = (pbi.common.width, pbi.common.height);
+    if vp8_alloc_frame_buffers(&mut pbi.common, cw, ch) != 0 {
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
     }
 
     // xd->pre = pc->yv12_fb[pc->lst_fb_idx];
+    let lst = pbi.common.lst_fb_idx as usize;
     ptr::copy_nonoverlapping(
-        &(*pc).yv12_fb[(*pc).lst_fb_idx as usize] as *const Yv12BufferConfig,
-        &mut (*xd).pre as *mut Yv12BufferConfig,
+        &pbi.common.yv12_fb[lst] as *const Yv12BufferConfig,
+        &mut pbi.mb.pre as *mut Yv12BufferConfig,
         1,
     );
     // xd->dst = pc->yv12_fb[pc->new_fb_idx];
+    let new = pbi.common.new_fb_idx as usize;
     ptr::copy_nonoverlapping(
-        &(*pc).yv12_fb[(*pc).new_fb_idx as usize] as *const Yv12BufferConfig,
-        &mut (*xd).dst as *mut Yv12BufferConfig,
+        &pbi.common.yv12_fb[new] as *const Yv12BufferConfig,
+        &mut pbi.mb.dst as *mut Yv12BufferConfig,
         1,
     );
 
-    vp8_build_block_doffsets(&mut (*pbi).mb);
+    vp8_build_block_doffsets(&mut pbi.mb);
 
     // CONFIG_ERROR_CONCEALMENT / CONFIG_MULTITHREAD blocks
     // omitted in the minimal build.
@@ -495,7 +495,12 @@ pub unsafe fn vp8_get_frame(
             flags.noise_level = (*ctx).postproc_cfg.noise_level;
         }
 
-        if vp8dx_get_raw_frame((*ctx).yv12_frame_buffers.pbi_ptr(), &mut sd, &mut flags) == 0 {
+        let pbi = (*ctx)
+            .yv12_frame_buffers
+            .pbi
+            .as_deref_mut()
+            .expect("pbi present (guarded by pbi.is_some() above)");
+        if vp8dx_get_raw_frame(pbi, &mut sd, &mut flags) == 0 {
             yuvconfig2image(&mut (*ctx).img, &sd, (*ctx).user_priv);
 
             img = &mut (*ctx).img;
@@ -648,19 +653,19 @@ impl Decoder for Vp8Decoder {
                 ControlCmd::SetReference(frame) => {
                     let mut sd: Yv12BufferConfig = core::mem::zeroed();
                     image2yuvconfig(&frame.img, &mut sd);
-                    let pbi = ctx.yv12_frame_buffers.pbi_ptr();
-                    if pbi.is_null() {
-                        return Err(VPX_CODEC_CORRUPT_FRAME);
-                    }
+                    let pbi = match ctx.yv12_frame_buffers.pbi.as_deref_mut() {
+                        Some(b) => b,
+                        None => return Err(VPX_CODEC_CORRUPT_FRAME),
+                    };
                     vp8dx_set_reference(pbi, frame.frame_type, &mut sd)
                 }
                 ControlCmd::CopyReference(frame) => {
                     let mut sd: Yv12BufferConfig = core::mem::zeroed();
                     image2yuvconfig(&frame.img, &mut sd);
-                    let pbi = ctx.yv12_frame_buffers.pbi_ptr();
-                    if pbi.is_null() {
-                        return Err(VPX_CODEC_CORRUPT_FRAME);
-                    }
+                    let pbi = match ctx.yv12_frame_buffers.pbi.as_deref_mut() {
+                        Some(b) => b,
+                        None => return Err(VPX_CODEC_CORRUPT_FRAME),
+                    };
                     vp8dx_get_reference(pbi, frame.frame_type, &mut sd)
                 }
                 ControlCmd::SetPostproc(_cfg) => {

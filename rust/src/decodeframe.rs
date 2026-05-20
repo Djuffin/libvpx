@@ -880,7 +880,7 @@ fn read_is_valid(start: *const u8, len: usize, end: *const u8) -> c_int {
 /// `read_available_partition_size` (vp8/decoder/decodeframe.c:678).
 /// Static helper.
 unsafe fn read_available_partition_size(
-    pbi: *mut Vp8dComp<'static>,
+    pbi: &mut Vp8dComp<'static>,
     token_part_sizes: *const u8,
     fragment_start: *const u8,
     first_fragment_end: *const u8,
@@ -888,21 +888,20 @@ unsafe fn read_available_partition_size(
     i: c_int,
     num_part: c_int,
 ) -> VpxResult<c_uint> {
-    let pc: *mut Vp8Common = &mut (*pbi).common;
     let partition_size_ptr: *const u8 = token_part_sizes.offset((i * 3) as isize);
     let mut partition_size: c_uint;
     let bytes_left: isize = (fragment_end as isize) - (fragment_start as isize);
     if bytes_left < 0 {
-        return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
     }
     /* Calculate the length of this partition. */
     if i < num_part - 1 {
         if read_is_valid(partition_size_ptr, 3, first_fragment_end) != 0 {
             partition_size = read_partition_size(partition_size_ptr);
-        } else if (*pbi).ec_active != 0 {
+        } else if pbi.ec_active != 0 {
             partition_size = bytes_left as c_uint;
         } else {
-            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
         }
     } else {
         partition_size = bytes_left as c_uint;
@@ -910,10 +909,10 @@ unsafe fn read_available_partition_size(
 
     /* Validate the calculated partition length. */
     if read_is_valid(fragment_start, partition_size as usize, fragment_end) == 0 {
-        if (*pbi).ec_active != 0 {
+        if pbi.ec_active != 0 {
             partition_size = bytes_left as c_uint;
         } else {
-            return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
         }
     }
     Ok(partition_size)
@@ -925,95 +924,96 @@ unsafe fn read_available_partition_size(
 
 /// `setup_token_decoder` (vp8/decoder/decodeframe.c:728). Static helper.
 unsafe fn setup_token_decoder(
-    pbi: *mut Vp8dComp<'static>,
+    pbi: &mut Vp8dComp<'static>,
     token_part_sizes: *const u8,
 ) -> VpxResult<()> {
-    let mut bool_decoder: *mut Vp8Reader<'static> = &mut (*pbi).mbc[0] as *mut Vp8Reader<'static>;
     let mut partition_idx: c_uint;
     let mut fragment_idx: c_uint;
     let num_token_partitions: c_uint;
     let first_fragment_end: *const u8 =
-        (*pbi).fragments.ptrs[0].offset((*pbi).fragments.sizes[0] as isize);
+        pbi.fragments.ptrs[0].offset(pbi.fragments.sizes[0] as isize);
 
-    let multi_token_partition_val: c_int = vp8_read_literal(&mut (*pbi).mbc[8], 2);
+    let multi_token_partition_val: c_int = vp8_read_literal(&mut pbi.mbc[8], 2);
     let multi_token_partition: TokenPartition = match multi_token_partition_val & 0x3 {
         0 => TokenPartition::One,
         1 => TokenPartition::Two,
         2 => TokenPartition::Four,
         _ => TokenPartition::Eight,
     };
-    if vp8dx_bool_error(&(*pbi).mbc[8]) == 0 {
-        (*pbi).common.multi_token_partition = multi_token_partition;
+    if vp8dx_bool_error(&pbi.mbc[8]) == 0 {
+        pbi.common.multi_token_partition = multi_token_partition;
     }
-    num_token_partitions = 1u32 << ((*pbi).common.multi_token_partition as c_int);
+    num_token_partitions = 1u32 << (pbi.common.multi_token_partition as c_int);
 
     /* Walk the fragments and split each one into one-per-partition chunks. */
     fragment_idx = 0;
-    while fragment_idx < (*pbi).fragments.count {
-        let mut fragment_size: c_uint = (*pbi).fragments.sizes[fragment_idx as usize];
+    while fragment_idx < pbi.fragments.count {
+        let mut fragment_size: c_uint = pbi.fragments.sizes[fragment_idx as usize];
         let fragment_end: *const u8 =
-            (*pbi).fragments.ptrs[fragment_idx as usize].offset(fragment_size as isize);
+            pbi.fragments.ptrs[fragment_idx as usize].offset(fragment_size as isize);
         /* Special case for handling the first partition since we have already
          * read its size. */
         if fragment_idx == 0 {
             /* Size of first partition + token partition sizes element */
             let ext_first_part_size: isize = (token_part_sizes as isize)
-                - ((*pbi).fragments.ptrs[0] as isize)
+                - (pbi.fragments.ptrs[0] as isize)
                 + (3 * (num_token_partitions as isize - 1));
             if (fragment_size as isize) < ext_first_part_size {
-                return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
+                return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
             }
             fragment_size = (fragment_size as isize - ext_first_part_size) as c_uint;
             if fragment_size > 0 {
-                (*pbi).fragments.sizes[0] = ext_first_part_size as c_uint;
+                pbi.fragments.sizes[0] = ext_first_part_size as c_uint;
                 /* The fragment contains an additional partition. */
                 fragment_idx += 1;
-                (*pbi).fragments.ptrs[fragment_idx as usize] =
-                    (*pbi).fragments.ptrs[0].offset((*pbi).fragments.sizes[0] as isize);
+                pbi.fragments.ptrs[fragment_idx as usize] =
+                    pbi.fragments.ptrs[0].offset(pbi.fragments.sizes[0] as isize);
             }
         }
         /* Split the chunk into partitions read from the bitstream */
         while fragment_size > 0 {
+            // `fragment_start` is a bytestream pointer (Copy); hoist it out
+            // so the `&mut pbi` reborrow for the call doesn't alias the
+            // `pbi.fragments` read.
+            let fragment_start = pbi.fragments.ptrs[fragment_idx as usize];
             let partition_size: c_uint = read_available_partition_size(
                 pbi,
                 token_part_sizes,
-                (*pbi).fragments.ptrs[fragment_idx as usize],
+                fragment_start,
                 first_fragment_end,
                 fragment_end,
                 fragment_idx as c_int - 1,
                 num_token_partitions as c_int,
             )?;
-            (*pbi).fragments.sizes[fragment_idx as usize] = partition_size;
+            pbi.fragments.sizes[fragment_idx as usize] = partition_size;
             if fragment_size < partition_size {
-                return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_CORRUPT_FRAME);
+                return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
             }
             fragment_size -= partition_size;
             debug_assert!(fragment_idx <= num_token_partitions);
             if fragment_size > 0 {
                 /* The fragment contains an additional partition. */
                 fragment_idx += 1;
-                (*pbi).fragments.ptrs[fragment_idx as usize] = (*pbi).fragments.ptrs
-                    [(fragment_idx - 1) as usize]
-                    .offset(partition_size as isize);
+                pbi.fragments.ptrs[fragment_idx as usize] =
+                    pbi.fragments.ptrs[(fragment_idx - 1) as usize].offset(partition_size as isize);
             }
         }
         fragment_idx += 1;
     }
 
-    (*pbi).fragments.count = num_token_partitions + 1;
+    pbi.fragments.count = num_token_partitions + 1;
 
+    // Seed one bool reader per token partition. The C source walks a
+    // `mbc` cursor with `++bool_decoder`; here it is a bounds-checked
+    // index — `mbc[partition_idx - 1]` (cursor started at `mbc[0]` for
+    // `partition_idx == 1`).
     partition_idx = 1;
-    while partition_idx < (*pbi).fragments.count {
-        if vp8dx_start_decode(
-            &mut *bool_decoder,
-            (*pbi).fragments.ptrs[partition_idx as usize],
-            (*pbi).fragments.sizes[partition_idx as usize],
-        ) != 0
-        {
-            return vpx_internal_error(&mut (*pbi).common.error, VPX_CODEC_MEM_ERROR);
+    while partition_idx < pbi.fragments.count {
+        let src = pbi.fragments.ptrs[partition_idx as usize];
+        let sz = pbi.fragments.sizes[partition_idx as usize];
+        if vp8dx_start_decode(&mut pbi.mbc[(partition_idx - 1) as usize], src, sz) != 0 {
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
         }
-
-        bool_decoder = bool_decoder.add(1);
         partition_idx += 1;
     }
 
@@ -1295,9 +1295,13 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         }
     }
 
-    // SAFETY: setup_token_decoder takes *mut Vp8dComp; data offset is
-    // pre-validated against first_partition_length_in_bytes.
-    unsafe { setup_token_decoder(pbi, data.offset(first_partition_length_in_bytes as isize))?; }
+    // SAFETY: bytestream pointer arithmetic + setup_token_decoder's raw
+    // `*const u8` reads; data offset is pre-validated against
+    // first_partition_length_in_bytes.
+    unsafe {
+        let token_part_sizes = data.offset(first_partition_length_in_bytes as isize);
+        setup_token_decoder(pbi, token_part_sizes)?;
+    }
 
     /* Read the default quantizers. */
     {
