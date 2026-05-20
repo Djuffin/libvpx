@@ -169,10 +169,33 @@ The last structural raw-pointer cluster on the entropy-decode path. The grid-wal
 
 **Bench delta vs. baseline** (taken with the helper present but unused): 480p **+0.83%** (p<0.01), 720p **flat** (+0.38%, p=0.09 — no change). The first cut measured +1.81% on 480p; rewriting the neighbour indices as `row*stride+col (+offsets)` rather than `idx - stride - 1` removed the `usize`-underflow that was blocking LLVM from eliding the per-MB bounds checks, recovering ~1%. The residual sub-1% on 480p is the honest cost of `split_at_mut`'s checked split + the per-MB scalar copies on intra-heavy content; 720p absorbs it. 125/125 conformance bit-exact.
 
-What's left of the original §1 raw-pointer surface:
-- **FFI-shaped sub-calls** (`init_frame`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vp8_loop_filter_*`) — still take `*mut Vp8dComp` / `*mut Vp8Common`. Called inside scoped `unsafe { }`.
-- **`vp8dx_start_decode` lifetime escape hatch** — its `'a` unifies `BoolDecoder<'a>` with the decrypt-callback lifetime; the two callers route through a raw `*mut Vp8dComp` to dodge a borrow-checker false positive (documented at each site). A real fix needs `BoolDecoder<'buf, 'cb>` with split lifetimes.
-- **Structural raw-pointer drivers in `decodemv.rs`** — **resolved in Phase 5 (see §0 below).** The grid-walk chain (`vp8_decode_mode_mvs` → `decode_mb_mode_mvs` → `read_mb_modes_mv` / `read_kf_modes` / `decode_split_mv`, plus `mb_mode_mv_init`) is now safe `fn`. The neighbour-aliasing blocker was retired with `Vp8Common::mi_split_neighbors` (a `split_at_mut` partition), and the god-object dissolved into field-disjoint borrows.
+### §1 raw-pointer surface — audit as of the Phase 5 commit
+
+A fresh grep-and-read pass over `rust/src/` (functions that take `*mut`/`*const` of a *kernel struct* — `Vp8dComp` / `Vp8Common` / `Macroblockd` / `ModeInfo`, excluding pixel-`u8`, coeff-`i16`, bitstream-`u8`, bool-reader `Vp8Reader`, and threading) finds the following still outstanding. The whole entropy-decode hot path (`decodemv.rs`, `detokenize.rs`, `treereader.rs`, `dboolhuff.rs` API, `decode_macroblock`, `decode_mb_rows`, `vp8_decode_frame`, `vp8dx_receive_compressed_data`) is now reference-shaped; what remains is **frame setup, the control/reference API, and pixel-side row filters**.
+
+**Trivially convertible (body touches one struct, no aliasing) — LOW effort:**
+- `entropy::vp8_default_coef_probs(*mut Vp8Common)` — a single `(*pc).fc.coef_probs = …` assignment. → `&mut Vp8Common`.
+- `vp8cx_init_de_quantizer(*mut Vp8dComp)` (`decodeframe.rs`) — writes only `common.{y1,y2,uv}_dequant`. → `&mut Vp8Common`.
+- `vp8_loop_filter_init(*mut Vp8Common)` (`vp8_loopfilter.rs`) — touches only `(*cm)`. → `&mut Vp8Common`.
+
+**Field-disjoint convertible (aliases `&mut common` + `&mut/& mb`, both disjoint fields) — LOW–MEDIUM effort, same pattern as Phase 3/5:**
+- `init_frame(*mut Vp8dComp)` (`decodeframe.rs`) — binds `pc = &mut common`, `xd = &mut mb`; gated on its callees (`vp8_default_coef_probs`, `vp8_loop_filter_*`) converting first.
+- `vp8_loop_filter_frame_init(*mut Vp8Common, *mut Macroblockd, i32)` — `cm` + `mbd` are disjoint fields.
+- `vp8dx_get_reference` / `vp8dx_set_reference(*mut Vp8dComp, …)` (`onyxd_if.rs`) — control-API; body is `cm = &mut common` + a `vp8_yv12_copy_frame` (pixel) in a scoped block.
+- `create_decompressor_inner(*mut Vp8dComp, …)` (`onyxd_if.rs`) — init orchestrator; the `pbi_ptr` round-trip in `create_decompressor` disappears once the callees above are references.
+
+**Bitstream / decrypt-shaped (the `*mut Vp8dComp` is really just a handle to `fragments` / `decrypt` + bytestream pointer arithmetic) — keep raw or thread a narrow borrow:**
+- `setup_token_decoder(*mut Vp8dComp, *const u8)` — also walks a `*mut Vp8Reader` partition cursor; FFI/bitstream-shaped.
+- `read_partition_size` / `read_available_partition_size(*mut Vp8dComp, …)` — only reach `pbi.decrypt`; the rest is `*const u8` bytestream math.
+
+**Genuine blockers / intentionally raw (unchanged):**
+- **`vp8dx_start_decode` lifetime escape hatch** — its `'a` unifies `BoolDecoder<'a>` with the decrypt-callback lifetime; the receive-data caller routes through a raw `*mut Vp8dComp` (`pbi_raw`, `decodeframe.rs:1245`) to dodge a borrow-checker false positive (documented at the site). A real fix needs `BoolDecoder<'buf, 'cb>` with split lifetimes.
+- **`vp8_loop_filter_row_normal` / `_simple(*mut Vp8Common, …, *mut u8 …)`** — pixel-side row filters; `cm` is read for `lf_info` + the per-row `mi_row`, but the function is dominated by plane-pointer arithmetic. Pixel-adjacent; lower priority.
+- **Pixel / IDCT / predictor / threading / mem kernels** (`reconinter`, `intrapred`, `reconintra*`, `filter`, `loopfilter_filters`, `idct*`, `yv12*`, `vpx_image`, `vpx_mem`, `vpx_thread`) — `*mut u8` / `*mut i16` data access, explicitly out of scope.
+
+**Resolved in Phase 5 (see §0 above):** the grid-walk chain (`vp8_decode_mode_mvs` → `decode_mb_mode_mvs` → `read_mb_modes_mv` / `read_kf_modes` / `decode_split_mv`, plus `mb_mode_mv_init`) is safe `fn` — neighbour aliasing retired via `Vp8Common::mi_split_neighbors`, god-object dissolved into field-disjoint borrows. `decodemv.rs` has **zero `unsafe fn` and zero raw kernel-struct pointers**.
+
+**Resolved as a Phase 5 follow-up:** `decode_mb_rows`'s `*mut ModeInfo` round-trip is gone. The reconstruct loop used to call `common.mi_mut(row,col)` (a `&mut self` method → whole-`common` borrow), cast the result to `*mut ModeInfo`, drop the borrow to take the other disjoint `common` sub-field borrows for `decode_macroblock`, then resurrect `mi` via `unsafe { &mut *mi_ptr }`. It now indexes `common.mip` as a **direct field path** once at the top of the per-MB body and holds that `&mut ModeInfo` across the rest of the iteration; the intervening code touches only `pbi.mb` and disjoint `common` sub-fields, so the borrow coexists cleanly. The single `&mut mi` is reused for the `ref_frame` read, so the grid is indexed once per MB (not twice). The `let common = &mut pbi.common` aggregation was unrolled into per-field borrows. **Bench (same-session A/B vs the committed Phase 5 state): 480p −0.77% (p=0.01, faster), 720p +0.57% (p=0.04, slower)** — both sub-1% and in opposite directions, i.e. net neutral. (A first measurement against an older baseline showed a misleading 720p +0.68%; a same-session A/B isolated that as cross-session machine drift — the committed state itself ran ~1.5% slower in the later session.) 125/125 conformance bit-exact. `decode_mb_rows` now holds no raw `ModeInfo` pointer (only the pixel-plane `*mut u8` / `*mut Yv12BufferConfig` snapshots remain, which are doc-excluded).
 
 ### Token hot-loop fully safe (`GetCoeffs` / `vp8_decode_mb_tokens`)
 

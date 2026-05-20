@@ -678,11 +678,18 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
                 pbi.mb.dst.v_buffer = dst_buffer[2].offset(recon_uvoffset as isize);
             }
 
-            // Look up the ref_frame of this MB (sub-borrow of pbi.common.mip).
-            let (ref_frame, mi_ptr): (MvReferenceFrame, *mut ModeInfo) = {
-                let mi = pbi.common.mi_mut(mb_row, mb_col);
-                (mi.mbmi.ref_frame, mi as *mut _)
+            // Current MB's MI cell, borrowed once as a direct field path
+            // (`common.mip`, not the `mi_mut` method) and held across the
+            // rest of the loop body. The intervening code touches only
+            // `pbi.mb` and disjoint `pbi.common` sub-fields, so this `&mut`
+            // coexists with all of them — and reusing it for the ref_frame
+            // read avoids a second bounds-checked grid index per MB.
+            let mi: &mut ModeInfo = {
+                let stride = pbi.common.mode_info_stride as usize;
+                let idx = ((mb_row + 1) as usize) * stride + ((mb_col + 1) as usize);
+                &mut pbi.common.mip.as_deref_mut().expect("MI grid not allocated")[idx]
             };
+            let ref_frame = mi.mbmi.ref_frame;
 
             if ref_frame as u8 >= LAST_FRAME as u8 {
                 let ref_idx = ref_frame as usize;
@@ -701,25 +708,22 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
             /* propagate errors from reference frames */
             pbi.mb.corrupted |= ref_fb_corrupted[ref_frame as usize];
 
-            // Field-disjoint borrows for decode_macroblock. We split
-            // pbi.common via the helper so all sub-borrows live
-            // simultaneously alongside pbi.mb and pbi.mbc[bc_idx].
-            let common = &mut pbi.common;
-            let above_slot = &mut common
+            // Field-disjoint borrows for decode_macroblock: every source
+            // is a distinct field path off `pbi`, so the `&mut` into the
+            // current MI cell (`common.mip`, taken above) coexists with the
+            // `common.above_context` / `left_context` / `fc` / dequant
+            // borrows and with `pbi.mb` / `pbi.mbc[bc_idx]`.
+            let above_slot = &mut pbi
+                .common
                 .above_context
                 .as_deref_mut()
                 .expect("above_context allocated")[mb_col as usize];
-            let left_context = &mut common.left_context;
-            let fc = &common.fc;
-            let y1_dq = &common.y1_dequant;
-            let y2_dq = &common.y2_dequant;
-            let uv_dq = &common.uv_dequant;
-            let base_qi = common.base_qindex;
-            // SAFETY: mi_ptr was just derived from common.mi_mut; it
-            // remains valid for this iteration. We re-create the &mut
-            // here so it doesn't conflict with the disjoint common
-            // borrows above (common.mip is a separate field).
-            let mi: &mut ModeInfo = unsafe { &mut *mi_ptr };
+            let left_context = &mut pbi.common.left_context;
+            let fc = &pbi.common.fc;
+            let y1_dq = &pbi.common.y1_dequant;
+            let y2_dq = &pbi.common.y2_dequant;
+            let uv_dq = &pbi.common.uv_dequant;
+            let base_qi = pbi.common.base_qindex;
             let mb = &mut pbi.mb;
             let bc = &mut pbi.mbc[bc_idx];
 
