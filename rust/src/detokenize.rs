@@ -14,8 +14,8 @@
 
 use crate::tables::Prob;
 use crate::types::{
-    BD_VALUE_BITS, BdValue, BoolDecoder, EntropyContext, EntropyContextPlanes, FrameContext,
-    Macroblockd, ModeInfo,
+    BD_VALUE_BITS, BdValue, BoolDecoder, ECTX_UV, ECTX_Y2, EntropyContext, EntropyContextPlanes,
+    FrameContext, Macroblockd, ModeInfo,
 };
 
 // ===========================================================================
@@ -210,19 +210,11 @@ pub fn vp8_reset_mb_tokens_context(
     left_context: &mut EntropyContextPlanes,
     mi: &ModeInfo,
 ) {
-    let a_ctx: *mut EntropyContext = above_slot as *mut _ as *mut EntropyContext;
-    let l_ctx: *mut EntropyContext = left_context as *mut _ as *mut EntropyContext;
-
-    unsafe {
-        core::ptr::write_bytes(a_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
-        core::ptr::write_bytes(l_ctx, 0u8, core::mem::size_of::<EntropyContextPlanes>() - 1);
-
-        /* Clear entropy contexts for Y2 blocks */
-        if !mi.mbmi.is_4x4 {
-            *a_ctx.offset(8) = 0;
-            *l_ctx.offset(8) = 0;
-        }
-    }
+    // Always clear Y/U/V (bytes 0..ECTX_Y2); also clear Y2 (byte ECTX_Y2)
+    // unless this is a B_PRED MB, which preserves the previous Y2 context.
+    let n = if mi.mbmi.is_4x4 { ECTX_Y2 } else { ECTX_Y2 + 1 };
+    above_slot.ctx[..n].fill(0);
+    left_context.ctx[..n].fill(0);
 }
 
 // ===========================================================================
@@ -249,30 +241,31 @@ pub fn vp8_decode_mb_tokens(
     let mut eobtotal: i32 = 0;
 
     let mut coef_probs: ProbaArray;
-    let mut a_ctx: *mut EntropyContext = above_slot as *mut _ as *mut EntropyContext;
-    let mut l_ctx: *mut EntropyContext = left_context as *mut _ as *mut EntropyContext;
-    let mut a: *mut EntropyContext;
-    let mut l: *mut EntropyContext;
+    // Entropy-context cursors are now bounds-checked indices into the
+    // flat `[i8; 9]` planes (Y at 0..4, U/V at 4..8, Y2 at 8). The C code
+    // walked these as raw `ENTROPY_CONTEXT *` with `.offset()`; the index
+    // arithmetic below is the exact equivalent.
+    let a = &mut above_slot.ctx;
+    let l = &mut left_context.ctx;
     let skip_dc: i32;
 
     let mut qcoeff_ptr: *mut i16 = mb.qcoeff.as_mut_ptr();
 
+    // SAFETY: qcoeff_ptr / eobs are owned by `mb`; coef_probs is a raw view
+    // of `fc.coef_probs`; GetCoeffs walks them within their bounds.
     unsafe {
         if !mi.mbmi.is_4x4 {
-            a = a_ctx.offset(8);
-            l = l_ctx.offset(8);
-
             coef_probs = fc.coef_probs[1].as_ptr() as ProbaArray;
 
             nonzeros = GetCoeffs(
                 bc,
                 coef_probs,
-                (*a + *l) as i32,
+                (a[ECTX_Y2] + l[ECTX_Y2]) as i32,
                 0,
                 qcoeff_ptr.offset(24 * 16),
             );
-            *a = (nonzeros > 0) as EntropyContext;
-            *l = (nonzeros > 0) as EntropyContext;
+            a[ECTX_Y2] = (nonzeros > 0) as EntropyContext;
+            l[ECTX_Y2] = (nonzeros > 0) as EntropyContext;
 
             *eobs.offset(24) = nonzeros as i8;
             eobtotal += nonzeros - 16;
@@ -285,12 +278,12 @@ pub fn vp8_decode_mb_tokens(
         }
 
         for i in 0..16i32 {
-            a = a_ctx.offset((i & 3) as isize);
-            l = l_ctx.offset(((i & 0xc) >> 2) as isize);
+            let ai = (i & 3) as usize;
+            let li = ((i & 0xc) >> 2) as usize;
 
-            nonzeros = GetCoeffs(bc, coef_probs, (*a + *l) as i32, skip_dc, qcoeff_ptr);
-            *a = (nonzeros > 0) as EntropyContext;
-            *l = (nonzeros > 0) as EntropyContext;
+            nonzeros = GetCoeffs(bc, coef_probs, (a[ai] + l[li]) as i32, skip_dc, qcoeff_ptr);
+            a[ai] = (nonzeros > 0) as EntropyContext;
+            l[li] = (nonzeros > 0) as EntropyContext;
 
             nonzeros += skip_dc;
             *eobs.offset(i as isize) = nonzeros as i8;
@@ -300,15 +293,14 @@ pub fn vp8_decode_mb_tokens(
 
         coef_probs = fc.coef_probs[2].as_ptr() as ProbaArray;
 
-        a_ctx = a_ctx.offset(4);
-        l_ctx = l_ctx.offset(4);
+        // UV blocks address the U/V region at base offset ECTX_UV.
         for i in 16..24i32 {
-            a = a_ctx.offset((((i > 19) as i32) << 1) as isize + (i & 1) as isize);
-            l = l_ctx.offset((((i > 19) as i32) << 1) as isize + ((i & 3) > 1) as isize);
+            let ai = ECTX_UV + (((i > 19) as i32) << 1) as usize + (i & 1) as usize;
+            let li = ECTX_UV + (((i > 19) as i32) << 1) as usize + ((i & 3) > 1) as usize;
 
-            nonzeros = GetCoeffs(bc, coef_probs, (*a + *l) as i32, 0, qcoeff_ptr);
-            *a = (nonzeros > 0) as EntropyContext;
-            *l = (nonzeros > 0) as EntropyContext;
+            nonzeros = GetCoeffs(bc, coef_probs, (a[ai] + l[li]) as i32, 0, qcoeff_ptr);
+            a[ai] = (nonzeros > 0) as EntropyContext;
+            l[li] = (nonzeros > 0) as EntropyContext;
 
             *eobs.offset(i as isize) = nonzeros as i8;
             eobtotal += nonzeros;

@@ -246,11 +246,16 @@ pub type EntropyContext = i8;
 #[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub struct EntropyContextPlanes {
-    pub y1: [EntropyContext; 4],
-    pub u: [EntropyContext; 2],
-    pub v: [EntropyContext; 2],
-    pub y2: EntropyContext,
+    pub ctx: [EntropyContext; 9],
 }
+
+/// Region offsets into [`EntropyContextPlanes::ctx`] (RFC 6386 §13.3).
+/// These name the byte ranges the old C struct exposed as fields:
+/// `y1[4]` at 0, `u[2]`+`v[2]` at 4 (addressed together as one 4-byte
+/// chroma region), `y2` at 8.
+pub const ECTX_Y1: usize = 0;
+pub const ECTX_UV: usize = 4;
+pub const ECTX_Y2: usize = 8;
 
 // ===========================================================================
 // `MB_MODE_INFO` / `MODE_INFO`

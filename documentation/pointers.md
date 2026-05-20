@@ -142,10 +142,16 @@ Cascade cleanups: the three big bool-reader `unsafe { }` blocks in `vp8_decode_f
 
 **Bench delta vs. baseline**: 480p **−1.7%**, 720p **−2.8%**. 125/125 conformance + idct/predict/decode-api suites pass.
 
+### `EntropyContextPlanes` → flat array
+
+`EntropyContextPlanes` was `{ y1:[i8;4], u:[i8;2], v:[i8;2], y2:i8 }` but the detokenizer never read those names — it cast `&mut EntropyContextPlanes` to `*mut EntropyContext` and walked it as a flat `[i8;9]` by `.offset()`. Redefined the struct as `{ ctx: [EntropyContext; 9] }` (layout-identical: `#[repr(C)]`, all-`i8`). Now:
+- `vp8_reset_mb_tokens_context` is **fully safe** — `above_slot.ctx[..n].fill(0)` instead of a `*mut EntropyContext` cast + `write_bytes`.
+- `vp8_decode_mb_tokens` replaces the `a_ctx`/`l_ctx` raw cursors with bounds-checked index variables into `above_slot.ctx` / `left_context.ctx` (Y at 0..4, U/V at 4..8, Y2 at 8). The `as *mut EntropyContext` casts are gone; the surrounding `unsafe` block now covers only the coefficient/`qcoeff`/`coef_probs` side. Indices are provably `< 9`, so LLVM elides the bounds checks (no regression: 480p −1.4%, 720p −1.8% vs baseline).
+
 What's left of the original §1 raw-pointer surface:
 - **FFI-shaped sub-calls** (`init_frame`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vp8_loop_filter_*`) — still take `*mut Vp8dComp` / `*mut Vp8Common`. Called inside scoped `unsafe { }`.
-- **`vp8dx_start_decode` lifetime escape hatch** — its `'a` unifies `BoolDecoder<'a>` with the decrypt-callback lifetime; the two callers route through a raw `*mut Vp8dComp` to dodge a borrow-checker false positive (documented at each site).
-- **`GetCoeffs` / `vp8_decode_mb_tokens` / `decodemv.rs` prob-pointer arithmetic** — `*const Prob` / `*mut EntropyContext` table walking stays in scoped `unsafe`; a follow-on pass could index these safely.
+- **`vp8dx_start_decode` lifetime escape hatch** — its `'a` unifies `BoolDecoder<'a>` with the decrypt-callback lifetime; the two callers route through a raw `*mut Vp8dComp` to dodge a borrow-checker false positive (documented at each site). A real fix needs `BoolDecoder<'buf, 'cb>` with split lifetimes.
+- **`GetCoeffs` / `decodemv.rs` prob-pointer arithmetic** — `*const Prob` (`ProbaArray`) table walking and `out: *mut i16` coefficient scatter stay in scoped `unsafe`. This is *the* token hot loop; safe-able by indexing the typed `fc.coef_probs` nested array, but needs codegen verification rather than a blind rewrite.
 - **Loop filter row callees / pixel kernels** — intentionally raw-ptr-shaped (pixel-side, doc-excluded).
 
 ---
