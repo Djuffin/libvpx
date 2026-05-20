@@ -766,7 +766,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
                 unsafe {
                     if pbi.common.filter_type == NORMAL_LOOPFILTER {
                         vp8_loop_filter_row_normal(
-                            &mut pbi.common,
+                            &pbi.common,
                             mb_row - 1,
                             recon_y_stride,
                             recon_uv_stride,
@@ -776,7 +776,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
                         );
                     } else {
                         vp8_loop_filter_row_simple(
-                            &mut pbi.common,
+                            &pbi.common,
                             mb_row - 1,
                             recon_y_stride,
                             lf_dst[0],
@@ -818,7 +818,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
         unsafe {
             if pbi.common.filter_type == NORMAL_LOOPFILTER {
                 vp8_loop_filter_row_normal(
-                    &mut pbi.common,
+                    &pbi.common,
                     mb_row - 1,
                     recon_y_stride,
                     recon_uv_stride,
@@ -828,7 +828,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
                 );
             } else {
                 vp8_loop_filter_row_simple(
-                    &mut pbi.common,
+                    &pbi.common,
                     mb_row - 1,
                     recon_y_stride,
                     lf_dst[0],

@@ -296,7 +296,7 @@ pub fn vp8_loop_filter_frame_init(
 /// Row-granular normal-filter walker — used by the threaded build
 /// (`vp8/decoder/threading.c`). One MB-row's worth of edge dispatches.
 pub unsafe fn vp8_loop_filter_row_normal(
-    cm: *mut Vp8Common,
+    cm: &Vp8Common,
     mb_row: i32,
     post_ystride: i32,
     post_uvstride: i32,
@@ -304,16 +304,16 @@ pub unsafe fn vp8_loop_filter_row_normal(
     mut u_ptr: *mut u8,
     mut v_ptr: *mut u8,
 ) {
-    let frame_type: FrameType = (*cm).frame_type;
-    let mb_cols = (*cm).mb_cols;
-    let lfi_n: &LoopFilterInfoN = &(*cm).lf_info;
+    let frame_type: FrameType = cm.frame_type;
+    let mb_cols = cm.mb_cols;
+    let lfi_n: &LoopFilterInfoN = &cm.lf_info;
     let mut lfi = LoopFilterInfo {
         mblim: ptr::null(),
         blim: ptr::null(),
         lim: ptr::null(),
         hev_thr: ptr::null(),
     };
-    let mi_row = (*cm).mi_row(mb_row);
+    let mi_row = cm.mi_row(mb_row);
 
     for mb_col in 0..mb_cols {
         let mi = &mi_row[mb_col as usize];
@@ -362,14 +362,14 @@ pub unsafe fn vp8_loop_filter_row_normal(
 ///
 /// Row-granular simple-filter walker — luma-only, no `hev_thr`.
 pub unsafe fn vp8_loop_filter_row_simple(
-    cm: *mut Vp8Common,
+    cm: &Vp8Common,
     mb_row: i32,
     post_ystride: i32,
     mut y_ptr: *mut u8,
 ) {
-    let mb_cols = (*cm).mb_cols;
-    let lfi_n: &LoopFilterInfoN = &(*cm).lf_info;
-    let mi_row = (*cm).mi_row(mb_row);
+    let mb_cols = cm.mb_cols;
+    let lfi_n: &LoopFilterInfoN = &cm.lf_info;
+    let mi_row = cm.mi_row(mb_row);
 
     for mb_col in 0..mb_cols {
         let mi = &mi_row[mb_col as usize];
