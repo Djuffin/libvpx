@@ -13,7 +13,6 @@
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
 
-use core::ffi::{c_int, c_uint};
 use core::ptr;
 
 use crate::tables::{
@@ -100,7 +99,7 @@ use crate::vpx_codec::vpx_internal_error;
 
 /// `vp8cx_init_de_quantizer` (vp8/decoder/decodeframe.c:42).
 pub fn vp8cx_init_de_quantizer(pc: &mut Vp8Common) {
-    for Q in 0..crate::tables::QINDEX_RANGE as c_int {
+    for Q in 0..crate::tables::QINDEX_RANGE as i32 {
         pc.y1_dequant[Q as usize][0] = vp8_dc_quant(Q, pc.y1dc_delta_q) as i16;
         pc.y2_dequant[Q as usize][0] = vp8_dc2quant(Q, pc.y2dc_delta_q) as i16;
         pc.uv_dequant[Q as usize][0] = vp8_dc_uv_quant(Q, pc.uvdc_delta_q) as i16;
@@ -120,7 +119,7 @@ pub fn vp8_mb_init_dequantizer(
     y1_dequant: &[[i16; 2]; QINDEX_RANGE],
     y2_dequant: &[[i16; 2]; QINDEX_RANGE],
     uv_dequant: &[[i16; 2]; QINDEX_RANGE],
-    base_qindex: c_int,
+    base_qindex: i32,
     mb: &mut Macroblockd,
     mi: &ModeInfo,
 ) {
@@ -129,11 +128,11 @@ pub fn vp8_mb_init_dequantizer(
     /* Decide whether to use the default or alternate baseline Q value. */
     let qi: usize = (if mb.segmentation_enabled != 0 {
         let q = if mb.mb_segment_abs_delta == SEGMENT_ABSDATA {
-            mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as c_int
+            mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as i32
         } else {
-            base_qindex + mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as c_int
+            base_qindex + mb.segment_feature_data[MB_LVL_ALT_Q][segment_id] as i32
         };
-        q.clamp(0, MAXQ as c_int)
+        q.clamp(0, MAXQ as i32)
     } else {
         base_qindex
     }) as usize;
@@ -165,7 +164,7 @@ fn decode_macroblock(
     y1_dequant: &[[i16; 2]; QINDEX_RANGE],
     y2_dequant: &[[i16; 2]; QINDEX_RANGE],
     uv_dequant: &[[i16; 2]; QINDEX_RANGE],
-    base_qindex: c_int,
+    base_qindex: i32,
     xd: &mut Macroblockd,
     mi: &mut ModeInfo,
     bc: &mut Vp8Reader<'static>,
@@ -175,7 +174,7 @@ fn decode_macroblock(
     if mi.mbmi.mb_skip_coeff {
         vp8_reset_mb_tokens_context(above_slot, left_context, mi);
     } else if vp8dx_bool_error(bc) == 0 {
-        let eobtotal: c_int =
+        let eobtotal: i32 =
             vp8_decode_mb_tokens(above_slot, left_context, fc, xd, mi, bc);
 
         /* Special case:  Force the loopfilter to skip when eobtotal is zero */
@@ -215,7 +214,7 @@ fn decode_macroblock(
                 xd, mi, yabove, yleft, xd.dst.y_stride, xd.dst.y_buffer, xd.dst.y_stride,
             );
         } else {
-            let dst_stride: c_int = xd.dst.y_stride;
+            let dst_stride: i32 = xd.dst.y_stride;
 
             /* clear out residual eob info */
             if mi.mbmi.mb_skip_coeff {
@@ -342,8 +341,8 @@ fn decode_macroblock(
 // ---------------------------------------------------------------------------
 
 /// `get_delta_q` (vp8/decoder/decodeframe.c:235). Static helper.
-fn get_delta_q(bc: &mut Vp8Reader<'static>, prev: c_int, q_update: &mut c_int) -> c_int {
-    let mut ret_val: c_int = 0;
+fn get_delta_q(bc: &mut Vp8Reader<'static>, prev: i32, q_update: &mut i32) -> i32 {
+    let mut ret_val: i32 = 0;
 
     if vp8_read_bit(bc) != 0 {
         ret_val = vp8_read_literal(bc, 4);
@@ -371,16 +370,16 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     let mut src_ptr1: *mut u8;
     let mut dest_ptr1: *mut u8;
 
-    let mut Border: c_uint;
-    let mut plane_stride: c_int;
+    let mut Border: u32;
+    let mut plane_stride: i32;
 
     /* Y Plane */
-    Border = (*ybf).border as c_uint;
+    Border = (*ybf).border as u32;
     plane_stride = (*ybf).y_stride;
     src_ptr1 = (*ybf).y_buffer.offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
-    for _ in 0..Border as c_int {
+    for _ in 0..Border as i32 {
         ptr::copy_nonoverlapping(src_ptr1, dest_ptr1, plane_stride as usize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
     }
@@ -391,7 +390,7 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     src_ptr1 = (*ybf).u_buffer.offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
-    for _ in 0..Border as c_int {
+    for _ in 0..Border as i32 {
         ptr::copy_nonoverlapping(src_ptr1, dest_ptr1, plane_stride as usize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
     }
@@ -400,7 +399,7 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     src_ptr1 = (*ybf).v_buffer.offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
-    for _ in 0..Border as c_int {
+    for _ in 0..Border as i32 {
         ptr::copy_nonoverlapping(src_ptr1, dest_ptr1, plane_stride as usize);
         dest_ptr1 = dest_ptr1.offset(plane_stride as isize);
     }
@@ -416,12 +415,12 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
     let mut src_ptr2: *mut u8;
     let mut dest_ptr2: *mut u8;
 
-    let mut Border: c_uint;
-    let mut plane_stride: c_int;
-    let mut plane_height: c_int;
+    let mut Border: u32;
+    let mut plane_stride: i32;
+    let mut plane_height: i32;
 
     /* Y Plane */
-    Border = (*ybf).border as c_uint;
+    Border = (*ybf).border as u32;
     plane_stride = (*ybf).y_stride;
     plane_height = (*ybf).y_height;
 
@@ -431,7 +430,7 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
         .offset(-(plane_stride as isize));
     dest_ptr2 = src_ptr2.offset(plane_stride as isize);
 
-    for _ in 0..Border as c_int {
+    for _ in 0..Border as i32 {
         ptr::copy_nonoverlapping(src_ptr2, dest_ptr2, plane_stride as usize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
     }
@@ -447,7 +446,7 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
         .offset(-(plane_stride as isize));
     dest_ptr2 = src_ptr2.offset(plane_stride as isize);
 
-    for _ in 0..Border as c_int {
+    for _ in 0..Border as i32 {
         ptr::copy_nonoverlapping(src_ptr2, dest_ptr2, plane_stride as usize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
     }
@@ -459,7 +458,7 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
         .offset(-(plane_stride as isize));
     dest_ptr2 = src_ptr2.offset(plane_stride as isize);
 
-    for _ in 0..Border as c_int {
+    for _ in 0..Border as i32 {
         ptr::copy_nonoverlapping(src_ptr2, dest_ptr2, plane_stride as usize);
         dest_ptr2 = dest_ptr2.offset(plane_stride as isize);
     }
@@ -481,13 +480,13 @@ unsafe fn yv12_extend_frame_left_right_c(
     let mut dest_ptr1: *mut u8;
     let mut dest_ptr2: *mut u8;
 
-    let mut Border: c_uint;
-    let mut plane_stride: c_int;
-    let mut plane_height: c_int;
-    let mut plane_width: c_int;
+    let mut Border: u32;
+    let mut plane_stride: i32;
+    let mut plane_height: i32;
+    let mut plane_width: i32;
 
     /* Y Plane */
-    Border = (*ybf).border as c_uint;
+    Border = (*ybf).border as u32;
     plane_stride = (*ybf).y_stride;
     plane_height = 16;
     plane_width = (*ybf).y_width;
@@ -549,15 +548,15 @@ unsafe fn yv12_extend_frame_left_right_c(
 
 /// `decode_mb_rows` (vp8/decoder/decodeframe.c:436). Static helper.
 fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
-    let num_part: c_int = 1 << (pbi.common.multi_token_partition as c_int);
-    let mut ibc: c_int = 0;
+    let num_part: i32 = 1 << (pbi.common.multi_token_partition as i32);
+    let mut ibc: i32 = 0;
 
     let new_idx = pbi.dec_fb_ref_idx[INTRA_FRAME] as usize;
 
     // Snapshot reference frame plane pointers + corrupted flags up front.
     // These come from yv12_fb slots distinct from the new (output) slot.
     let mut ref_buffer: [[*mut u8; 3]; MAX_REF_FRAMES] = [[ptr::null_mut(); 3]; MAX_REF_FRAMES];
-    let mut ref_fb_corrupted: [c_int; MAX_REF_FRAMES] = [0; MAX_REF_FRAMES];
+    let mut ref_fb_corrupted: [i32; MAX_REF_FRAMES] = [0; MAX_REF_FRAMES];
     for i in 1..MAX_REF_FRAMES {
         let this_fb = &pbi.common.yv12_fb[pbi.dec_fb_ref_idx[i] as usize];
         ref_buffer[i][0] = this_fb.y_buffer;
@@ -593,7 +592,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
     let mb_cols = pbi.common.mb_cols;
 
     /* Decode the individual macro block */
-    let mut mb_row: c_int = 0;
+    let mut mb_row: i32 = 0;
     while mb_row < mb_rows {
         // Pick the bool reader for this row: cycle through N token
         // partitions when multi-partition, else always the lone reader.
@@ -608,8 +607,8 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
             0
         };
 
-        let mut recon_yoffset: c_int = mb_row * recon_y_stride * 16;
-        let mut recon_uvoffset: c_int = mb_row * recon_uv_stride * 8;
+        let mut recon_yoffset: i32 = mb_row * recon_y_stride * 16;
+        let mut recon_uvoffset: i32 = mb_row * recon_uv_stride * 8;
 
         /* reset contexts */
         pbi.common.left_context = EntropyContextPlanes::default();
@@ -825,10 +824,10 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
 // ---------------------------------------------------------------------------
 
 /// `read_partition_size` (vp8/decoder/decodeframe.c:663). Static helper.
-unsafe fn read_partition_size(cx_size: *const u8) -> c_uint {
-    (*cx_size.add(0) as c_uint)
-        + ((*cx_size.add(1) as c_uint) << 8)
-        + ((*cx_size.add(2) as c_uint) << 16)
+unsafe fn read_partition_size(cx_size: *const u8) -> u32 {
+    (*cx_size.add(0) as u32)
+        + ((*cx_size.add(1) as u32) << 8)
+        + ((*cx_size.add(2) as u32) << 16)
 }
 
 // ---------------------------------------------------------------------------
@@ -839,9 +838,9 @@ unsafe fn read_partition_size(cx_size: *const u8) -> c_uint {
 ///
 /// Body performs only pointer comparisons / address arithmetic (no
 /// dereferences), so it is safe to call from safe contexts.
-fn read_is_valid(start: *const u8, len: usize, end: *const u8) -> c_int {
+fn read_is_valid(start: *const u8, len: usize, end: *const u8) -> i32 {
     let valid = len != 0 && end > start && len <= (end as usize).wrapping_sub(start as usize);
-    valid as c_int
+    valid as i32
 }
 
 // ---------------------------------------------------------------------------
@@ -856,11 +855,11 @@ unsafe fn read_available_partition_size(
     fragment_start: *const u8,
     first_fragment_end: *const u8,
     fragment_end: *const u8,
-    i: c_int,
-    num_part: c_int,
-) -> VpxResult<c_uint> {
+    i: i32,
+    num_part: i32,
+) -> VpxResult<u32> {
     let partition_size_ptr: *const u8 = token_part_sizes.offset((i * 3) as isize);
-    let mut partition_size: c_uint;
+    let mut partition_size: u32;
     let bytes_left: isize = (fragment_end as isize) - (fragment_start as isize);
     if bytes_left < 0 {
         return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
@@ -870,18 +869,18 @@ unsafe fn read_available_partition_size(
         if read_is_valid(partition_size_ptr, 3, first_fragment_end) != 0 {
             partition_size = read_partition_size(partition_size_ptr);
         } else if pbi.ec_active != 0 {
-            partition_size = bytes_left as c_uint;
+            partition_size = bytes_left as u32;
         } else {
             return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
         }
     } else {
-        partition_size = bytes_left as c_uint;
+        partition_size = bytes_left as u32;
     }
 
     /* Validate the calculated partition length. */
     if read_is_valid(fragment_start, partition_size as usize, fragment_end) == 0 {
         if pbi.ec_active != 0 {
-            partition_size = bytes_left as c_uint;
+            partition_size = bytes_left as u32;
         } else {
             return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
         }
@@ -898,12 +897,12 @@ unsafe fn setup_token_decoder(
     pbi: &mut Vp8dComp<'static>,
     token_part_sizes: *const u8,
 ) -> VpxResult<()> {
-    let mut fragment_idx: c_uint;
-    let num_token_partitions: c_uint;
+    let mut fragment_idx: u32;
+    let num_token_partitions: u32;
     let first_fragment_end: *const u8 =
         pbi.fragments.ptrs[0].offset(pbi.fragments.sizes[0] as isize);
 
-    let multi_token_partition_val: c_int = vp8_read_literal(&mut pbi.mbc[8], 2);
+    let multi_token_partition_val: i32 = vp8_read_literal(&mut pbi.mbc[8], 2);
     let multi_token_partition: TokenPartition = match multi_token_partition_val & 0x3 {
         0 => TokenPartition::One,
         1 => TokenPartition::Two,
@@ -913,12 +912,12 @@ unsafe fn setup_token_decoder(
     if vp8dx_bool_error(&pbi.mbc[8]) == 0 {
         pbi.common.multi_token_partition = multi_token_partition;
     }
-    num_token_partitions = 1u32 << (pbi.common.multi_token_partition as c_int);
+    num_token_partitions = 1u32 << (pbi.common.multi_token_partition as i32);
 
     /* Walk the fragments and split each one into one-per-partition chunks. */
     fragment_idx = 0;
     while fragment_idx < pbi.fragments.count {
-        let mut fragment_size: c_uint = pbi.fragments.sizes[fragment_idx as usize];
+        let mut fragment_size: u32 = pbi.fragments.sizes[fragment_idx as usize];
         let fragment_end: *const u8 =
             pbi.fragments.ptrs[fragment_idx as usize].offset(fragment_size as isize);
         /* Special case for handling the first partition since we have already
@@ -931,9 +930,9 @@ unsafe fn setup_token_decoder(
             if (fragment_size as isize) < ext_first_part_size {
                 return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
             }
-            fragment_size = (fragment_size as isize - ext_first_part_size) as c_uint;
+            fragment_size = (fragment_size as isize - ext_first_part_size) as u32;
             if fragment_size > 0 {
-                pbi.fragments.sizes[0] = ext_first_part_size as c_uint;
+                pbi.fragments.sizes[0] = ext_first_part_size as u32;
                 /* The fragment contains an additional partition. */
                 fragment_idx += 1;
                 pbi.fragments.ptrs[fragment_idx as usize] =
@@ -946,14 +945,14 @@ unsafe fn setup_token_decoder(
             // so the `&mut pbi` reborrow for the call doesn't alias the
             // `pbi.fragments` read.
             let fragment_start = pbi.fragments.ptrs[fragment_idx as usize];
-            let partition_size: c_uint = read_available_partition_size(
+            let partition_size: u32 = read_available_partition_size(
                 pbi,
                 token_part_sizes,
                 fragment_start,
                 first_fragment_end,
                 fragment_end,
-                fragment_idx as c_int - 1,
-                num_token_partitions as c_int,
+                fragment_idx as i32 - 1,
+                num_token_partitions as i32,
             )?;
             pbi.fragments.sizes[fragment_idx as usize] = partition_size;
             if fragment_size < partition_size {
@@ -1064,13 +1063,13 @@ fn init_frame(pbi: &mut Vp8dComp<'static>) {
 /// `vp8_decode_frame` (vp8/decoder/decodeframe.c:879). Public entry point.
 pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
     let mut data: *const u8 = pbi.fragments.ptrs[0];
-    let data_sz: c_uint = pbi.fragments.sizes[0];
+    let data_sz: u32 = pbi.fragments.sizes[0];
     // SAFETY: data_sz bytes are guaranteed valid past `data` by the caller.
     let data_end: *const u8 = unsafe { data.offset(data_sz as isize) };
-    let first_partition_length_in_bytes: c_int;
+    let first_partition_length_in_bytes: i32;
 
-    let mut corrupt_tokens: c_int = 0;
-    let prev_independent_partitions: c_int = pbi.independent_partitions;
+    let mut corrupt_tokens: i32 = 0;
+    let prev_independent_partitions: i32 = pbi.independent_partitions;
 
     let new_idx = pbi.dec_fb_ref_idx[INTRA_FRAME] as usize;
 
@@ -1100,7 +1099,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         pbi.common.version = ((b0 >> 1) & 7) as i32;
         pbi.common.show_frame = ((b0 >> 4) & 1) as i32;
         first_partition_length_in_bytes =
-            (((b0 as c_int) | ((b1 as c_int) << 8) | ((b2 as c_int) << 16)) >> 5) as c_int;
+            (((b0 as i32) | ((b1 as i32) << 8) | ((b2 as i32) << 16)) >> 5) as i32;
 
         if pbi.ec_active == 0 && first_partition_length_in_bytes == 0 {
             return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
@@ -1131,10 +1130,10 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
                     };
                 }
 
-                pbi.common.width = ((w0 as c_int) | ((w1 as c_int) << 8)) & 0x3fff;
-                pbi.common.horiz_scale = (w1 >> 6) as c_int;
-                pbi.common.height = ((h0 as c_int) | ((h1 as c_int) << 8)) & 0x3fff;
-                pbi.common.vert_scale = (h1 >> 6) as c_int;
+                pbi.common.width = ((w0 as i32) | ((w1 as i32) << 8)) & 0x3fff;
+                pbi.common.horiz_scale = (w1 >> 6) as i32;
+                pbi.common.height = ((h0 as i32) | ((h1 as i32) << 8)) & 0x3fff;
+                pbi.common.vert_scale = (h1 >> 6) as i32;
                 // SAFETY: 7 bytes confirmed available.
                 data = unsafe { data.add(7) };
             } else if pbi.ec_active == 0 {
@@ -1169,7 +1168,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
 
     init_frame(pbi);
 
-    let data_remaining = ((data_end as isize) - (data as isize)) as c_uint;
+    let data_remaining = ((data_end as isize) - (data as isize)) as u32;
     let start_rc = vp8dx_start_decode(&mut pbi.mbc[8], data, data_remaining);
     if start_rc != 0 {
         return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR) };
@@ -1278,7 +1277,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         let q_update = {
             let bc = &mut pbi.mbc[8];
             pbi.common.base_qindex = vp8_read_literal(bc, 7);
-            let mut q_upd: c_int = 0;
+            let mut q_upd: i32 = 0;
             pbi.common.y1dc_delta_q = get_delta_q(bc, pbi.common.y1dc_delta_q, &mut q_upd);
             pbi.common.y2dc_delta_q = get_delta_q(bc, pbi.common.y2dc_delta_q, &mut q_upd);
             pbi.common.y2ac_delta_q = get_delta_q(bc, pbi.common.y2ac_delta_q, &mut q_upd);
@@ -1343,7 +1342,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
             for j in 0..COEF_BANDS {
                 for k in 0..PREV_COEF_CONTEXTS {
                     for l in 0..ENTROPY_NODES {
-                        if vp8_read(bc, VP8_COEF_UPDATE_PROBS[i][j][k][l] as c_int) != 0 {
+                        if vp8_read(bc, VP8_COEF_UPDATE_PROBS[i][j][k][l] as i32) != 0 {
                             pbi.common.fc.coef_probs[i][j][k][l] = vp8_read_literal(bc, 8) as Prob;
                         }
                         if k > 0
