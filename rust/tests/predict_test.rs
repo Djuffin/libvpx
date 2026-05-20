@@ -64,11 +64,21 @@ impl PaddedDst {
     }
 
     fn dst_ptr(&mut self) -> *mut u8 {
-        unsafe { self.buf.as_mut_ptr().add(BORDER * self.stride + BORDER) }
+        // Safe: bounds-checked indexing + `slice::as_mut_ptr`. The raw
+        // pointer is only handed to the C-ABI kernel.
+        let off = BORDER * self.stride + BORDER;
+        self.buf[off..].as_mut_ptr()
     }
 
     fn dst_stride(&self) -> c_int {
         self.stride as c_int
+    }
+
+    /// Raw pointer `off` bytes past the active top-left corner, used to
+    /// exercise unaligned destinations. Safe: bounds-checked indexing.
+    fn dst_ptr_offset(&mut self, off: usize) -> *mut u8 {
+        let base = BORDER * self.stride + BORDER + off;
+        self.buf[base..].as_mut_ptr()
     }
 
     /// Reset every byte to `BORDER_FILL`.
@@ -120,7 +130,7 @@ fn test_with_random_data(width: usize, height: usize, predict: PredictFn) {
             padded.reset();
             dst_c.iter_mut().for_each(|b| *b = 0);
 
-            let src_base = unsafe { src.as_mut_ptr().add(SRC_STRIDE * 2 + 2) };
+            let src_base = src[SRC_STRIDE * 2 + 2..].as_mut_ptr();
 
             // Reference (= same function in our build).
             unsafe {
@@ -178,7 +188,7 @@ fn test_with_unaligned_dst(width: usize, height: usize, predict: PredictFn) {
             for b in src.iter_mut() {
                 *b = rng.rand_u8();
             }
-            let src_base = unsafe { src.as_mut_ptr().add(SRC_STRIDE * 2 + 2) };
+            let src_base = src[SRC_STRIDE * 2 + 2..].as_mut_ptr();
             unsafe {
                 predict(
                     src_base,
@@ -191,7 +201,7 @@ fn test_with_unaligned_dst(width: usize, height: usize, predict: PredictFn) {
             }
             for i in 1..4 {
                 padded.reset();
-                let dst_off = unsafe { padded.dst_ptr().add(i) };
+                let dst_off = padded.dst_ptr_offset(i);
                 let dst_stride = (padded.dst_stride() as usize) + i;
                 unsafe {
                     predict(
@@ -336,7 +346,7 @@ const PRESET_EXPECTED: [u8; 256] = [
 fn sixtap_preset_16x16() {
     let mut padded = PaddedDst::new(16, 16);
     let mut input = PRESET_INPUT;
-    let src_base = unsafe { input.as_mut_ptr().add(SRC_STRIDE * 2 + 2) };
+    let src_base = input[SRC_STRIDE * 2 + 2..].as_mut_ptr();
 
     unsafe {
         vp8_sixtap_predict16x16_c(

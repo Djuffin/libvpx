@@ -30,11 +30,10 @@ impl<T: Copy + PartialEq + std::fmt::Debug> Buf<T> {
     }
 
     fn top_left(&mut self) -> *mut T {
-        unsafe {
-            self.data
-                .as_mut_ptr()
-                .add(self.pad * self.stride + self.pad)
-        }
+        // Safe: bounds-checked indexing followed by `slice::as_mut_ptr`.
+        // The raw pointer is only needed to feed the C-ABI kernel below.
+        let off = self.pad * self.stride + self.pad;
+        self.data[off..].as_mut_ptr()
     }
 
     fn stride(&self) -> i32 {
@@ -44,9 +43,13 @@ impl<T: Copy + PartialEq + std::fmt::Debug> Buf<T> {
     fn set(&mut self, val: T) {
         for y in 0..SIZE {
             for x in 0..SIZE {
-                self.data[(self.pad + y) * self.stride + (self.pad + x)] = val;
+                self.set_at(x, y, val);
             }
         }
+    }
+
+    fn set_at(&mut self, x: usize, y: usize, val: T) {
+        self.data[(self.pad + y) * self.stride + (self.pad + x)] = val;
     }
 
     fn at(&self, x: usize, y: usize) -> T {
@@ -112,7 +115,7 @@ fn test_all_ones() {
     let mut output = make_u8();
     input.set(0);
     // input[0] = 4 → IDCT output is uniform 1 → predict 0 + 1 = 1.
-    unsafe { input.top_left().write(4) };
+    input.set_at(0, 0, 4);
     predict.set(0);
     output.set(0);
 
@@ -135,18 +138,13 @@ fn test_add_one() {
     let mut predict = make_u8();
     let mut output = make_u8();
     input.set(0);
-    unsafe { input.top_left().write(4) };
+    input.set_at(0, 0, 4);
     output.set(0);
 
     // predict[y][x] = y * 4 + x → 0..15.
     for y in 0..SIZE {
         for x in 0..SIZE {
-            unsafe {
-                predict
-                    .top_left()
-                    .add(y * predict.stride() as usize + x)
-                    .write((y * 4 + x) as u8);
-            }
+            predict.set_at(x, y, (y * 4 + x) as u8);
         }
     }
 
@@ -185,12 +183,7 @@ fn test_with_data() {
 
     for y in 0..SIZE {
         for x in 0..SIZE {
-            unsafe {
-                input
-                    .top_left()
-                    .add(y * input.stride() as usize + x)
-                    .write((y * 4 + x) as i16);
-            }
+            input.set_at(x, y, (y * 4 + x) as i16);
         }
     }
 
