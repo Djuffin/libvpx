@@ -192,10 +192,10 @@ pub fn vp8_loop_filter_update_sharpness(lfi: &mut LoopFilterInfoN, sharpness_lvl
 /// One-time setup at `VP8_COMMON` allocation: populates the sharpness-
 /// dependent threshold tables, the mode/hev-threshold LUTs, and the
 /// four broadcast `hev_thr` vectors.
-pub unsafe fn vp8_loop_filter_init(cm: *mut Vp8Common) {
-    let sharpness_level = (*cm).sharpness_level;
-    (*cm).last_sharpness_level = sharpness_level;
-    let lfi: &mut LoopFilterInfoN = &mut (*cm).lf_info;
+pub fn vp8_loop_filter_init(cm: &mut Vp8Common) {
+    let sharpness_level = cm.sharpness_level;
+    cm.last_sharpness_level = sharpness_level;
+    let lfi: &mut LoopFilterInfoN = &mut cm.lf_info;
 
     /* init limits for given sharpness*/
     vp8_loop_filter_update_sharpness(lfi, sharpness_level);
@@ -213,17 +213,17 @@ pub unsafe fn vp8_loop_filter_init(cm: *mut Vp8Common) {
 ///
 /// Per-frame derivation of the `lvl[seg][ref][mode]` per-MB strength
 /// table. Refreshes the sharpness tables if `sharpness_level` changed.
-pub unsafe fn vp8_loop_filter_frame_init(
-    cm: *mut Vp8Common,
-    mbd: *mut Macroblockd,
+pub fn vp8_loop_filter_frame_init(
+    cm: &mut Vp8Common,
+    mbd: &Macroblockd,
     default_filt_lvl: i32,
 ) {
-    let sharpness_level = (*cm).sharpness_level;
-    let sharpness_changed = (*cm).last_sharpness_level != sharpness_level;
+    let sharpness_level = cm.sharpness_level;
+    let sharpness_changed = cm.last_sharpness_level != sharpness_level;
     if sharpness_changed {
-        (*cm).last_sharpness_level = sharpness_level;
+        cm.last_sharpness_level = sharpness_level;
     }
-    let lfi: &mut LoopFilterInfoN = &mut (*cm).lf_info;
+    let lfi: &mut LoopFilterInfoN = &mut cm.lf_info;
 
     /* update limits if sharpness has changed */
     if sharpness_changed {
@@ -236,17 +236,17 @@ pub unsafe fn vp8_loop_filter_frame_init(
         let mut lvl_mode: i32;
 
         /* Note the baseline filter values for each segment */
-        if (*mbd).segmentation_enabled != 0 {
-            if (*mbd).mb_segment_abs_delta == SEGMENT_ABSDATA {
-                lvl_seg = (*mbd).segment_feature_data[MB_LVL_ALT_LF][seg] as i32;
+        if mbd.segmentation_enabled != 0 {
+            if mbd.mb_segment_abs_delta == SEGMENT_ABSDATA {
+                lvl_seg = mbd.segment_feature_data[MB_LVL_ALT_LF][seg] as i32;
             } else {
                 /* Delta Value */
-                lvl_seg += (*mbd).segment_feature_data[MB_LVL_ALT_LF][seg] as i32;
+                lvl_seg += mbd.segment_feature_data[MB_LVL_ALT_LF][seg] as i32;
             }
             lvl_seg = lvl_seg.clamp(0, 63);
         }
 
-        if (*mbd).mode_ref_lf_delta_enabled == 0 {
+        if mbd.mode_ref_lf_delta_enabled == 0 {
             /* we could get rid of this if we assume that deltas are set to
              * zero when not in use; encoder always uses deltas
              */
@@ -260,11 +260,11 @@ pub unsafe fn vp8_loop_filter_frame_init(
         let intra_ref = INTRA_FRAME as usize;
 
         /* Apply delta for reference frame */
-        lvl_ref = lvl_seg + (*mbd).ref_lf_deltas[intra_ref] as i32;
+        lvl_ref = lvl_seg + mbd.ref_lf_deltas[intra_ref] as i32;
 
         /* Apply delta for Intra modes */
         /* mode = 0: B_PRED — only the split mode BPRED has a further special case */
-        lvl_mode = lvl_ref + (*mbd).mode_lf_deltas[0] as i32;
+        lvl_mode = lvl_ref + mbd.mode_lf_deltas[0] as i32;
         /* clamp */
         lvl_mode = lvl_mode.clamp(0, 63);
 
@@ -277,11 +277,11 @@ pub unsafe fn vp8_loop_filter_frame_init(
         /* LAST, GOLDEN, ALT */
         for r#ref in 1..MAX_REF_FRAMES as usize {
             /* Apply delta for reference frame */
-            lvl_ref = lvl_seg + (*mbd).ref_lf_deltas[r#ref] as i32;
+            lvl_ref = lvl_seg + mbd.ref_lf_deltas[r#ref] as i32;
 
             /* Apply delta for Inter modes */
             for mode in 1..4usize {
-                lvl_mode = lvl_ref + (*mbd).mode_lf_deltas[mode] as i32;
+                lvl_mode = lvl_ref + mbd.mode_lf_deltas[mode] as i32;
                 /* clamp */
                 lvl_mode = lvl_mode.clamp(0, 63);
 

@@ -97,12 +97,8 @@ fn create_decompressor(oxcf: &Vp8dConfig) -> Option<Box<Vp8dComp<'static>>> {
     // policy here.
     let mut pbi: Box<Vp8dComp<'static>> =
         unsafe { Box::<Vp8dComp<'static>>::new_zeroed().assume_init() };
-    let pbi_ptr: *mut Vp8dComp<'static> = &mut *pbi;
 
-    // SAFETY: `pbi_ptr` is a valid, exclusive pointer to a freshly
-    // zero-initialised `Vp8dComp` (the `Box` is uniquely owned and
-    // not aliased before this call returns).
-    match unsafe { create_decompressor_inner(pbi_ptr, oxcf) } {
+    match create_decompressor_inner(&mut pbi, oxcf) {
         Ok(()) => Some(pbi),
         Err(_) => {
             vp8_remove_common(&mut pbi.common);
@@ -112,38 +108,39 @@ fn create_decompressor(oxcf: &Vp8dConfig) -> Option<Box<Vp8dComp<'static>>> {
 }
 
 /// Body of [`create_decompressor`].
-unsafe fn create_decompressor_inner(
-    pbi: *mut Vp8dComp<'static>,
+fn create_decompressor_inner(
+    pbi: &mut Vp8dComp<'static>,
     oxcf: &Vp8dConfig,
 ) -> VpxResult<()> {
-    vp8_create_common(&mut (*pbi).common);
+    vp8_create_common(&mut pbi.common);
 
-    (*pbi).common.current_video_frame = 0;
-    (*pbi).ready_for_new_data = 1;
+    pbi.common.current_video_frame = 0;
+    pbi.ready_for_new_data = 1;
 
     // vp8cx_init_de_quantizer() is first called here. Add check in
     // frame_init_dequantizer() to avoid unnecessary calling of
     // vp8cx_init_de_quantizer() for every frame.
-    vp8cx_init_de_quantizer(pbi);
+    vp8cx_init_de_quantizer(&mut pbi.common);
 
-    vp8_loop_filter_init(&mut (*pbi).common as *mut Vp8Common);
+    vp8_loop_filter_init(&mut pbi.common);
 
     // CONFIG_ERROR_CONCEALMENT is disabled on this build.
     let _ = oxcf;
-    (*pbi).ec_enabled = 0;
+    pbi.ec_enabled = 0;
 
     // Error concealment is activated after a key frame has been decoded
     // without errors when error concealment is enabled.
-    (*pbi).ec_active = 0;
+    pbi.ec_active = 0;
 
-    (*pbi).decoded_key_frame = 0;
+    pbi.decoded_key_frame = 0;
 
     // Independent partitions is activated when a frame updates the token
     // probability table to have equal probabilities over the PREV_COEF
     // context.
-    (*pbi).independent_partitions = 0;
+    pbi.independent_partitions = 0;
 
-    once(initialize_dec);
+    // SAFETY: one-time RTCD dispatch-table init (still an `unsafe fn`).
+    unsafe { once(initialize_dec); }
 
     Ok(())
 }

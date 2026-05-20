@@ -98,9 +98,9 @@ pub use crate::tables::DEFAULT_COEF_PROBS as default_coef_probs;
 /// `pc` must be a valid, properly-aligned pointer to a [`Vp8Common`] for
 /// the duration of the call. Mirrors the C signature
 /// (`void vp8_default_coef_probs(struct VP8Common *)`).
-pub unsafe fn vp8_default_coef_probs(pc: *mut Vp8Common) {
+pub fn vp8_default_coef_probs(pc: &mut Vp8Common) {
     // `memcpy(dst, src, sizeof(default_coef_probs))` — the two arrays
     // are the same shape (`[[[[Prob; 11]; 3]; 8]; 4]`), so a direct
     // assignment is the literal Rust equivalent.
-    (*pc).fc.coef_probs = default_coef_probs;
+    pc.fc.coef_probs = default_coef_probs;
 }

@@ -99,19 +99,18 @@ use crate::vpx_codec::vpx_internal_error;
 // ---------------------------------------------------------------------------
 
 /// `vp8cx_init_de_quantizer` (vp8/decoder/decodeframe.c:42).
-pub unsafe fn vp8cx_init_de_quantizer(pbi: *mut Vp8dComp<'static>) {
+pub fn vp8cx_init_de_quantizer(pc: &mut Vp8Common) {
     let mut Q: c_int;
-    let pc: *mut Vp8Common = &mut (*pbi).common;
 
     Q = 0;
     while Q < crate::tables::QINDEX_RANGE as c_int {
-        (*pc).y1_dequant[Q as usize][0] = vp8_dc_quant(Q, (*pc).y1dc_delta_q) as i16;
-        (*pc).y2_dequant[Q as usize][0] = vp8_dc2quant(Q, (*pc).y2dc_delta_q) as i16;
-        (*pc).uv_dequant[Q as usize][0] = vp8_dc_uv_quant(Q, (*pc).uvdc_delta_q) as i16;
+        pc.y1_dequant[Q as usize][0] = vp8_dc_quant(Q, pc.y1dc_delta_q) as i16;
+        pc.y2_dequant[Q as usize][0] = vp8_dc2quant(Q, pc.y2dc_delta_q) as i16;
+        pc.uv_dequant[Q as usize][0] = vp8_dc_uv_quant(Q, pc.uvdc_delta_q) as i16;
 
-        (*pc).y1_dequant[Q as usize][1] = vp8_ac_yquant(Q) as i16;
-        (*pc).y2_dequant[Q as usize][1] = vp8_ac2quant(Q, (*pc).y2ac_delta_q) as i16;
-        (*pc).uv_dequant[Q as usize][1] = vp8_ac_uv_quant(Q, (*pc).uvac_delta_q) as i16;
+        pc.y1_dequant[Q as usize][1] = vp8_ac_yquant(Q) as i16;
+        pc.y2_dequant[Q as usize][1] = vp8_ac2quant(Q, pc.y2ac_delta_q) as i16;
+        pc.uv_dequant[Q as usize][1] = vp8_ac_uv_quant(Q, pc.uvac_delta_q) as i16;
 
         Q += 1;
     }
@@ -610,10 +609,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
     /* Initialize the loop filter for this frame. */
     if pbi.common.filter_level != 0 {
         let filter_level = pbi.common.filter_level;
-        // SAFETY: cm/mbd raw ptrs are taken from live &mut Vp8dComp fields.
-        unsafe {
-            vp8_loop_filter_frame_init(&mut pbi.common, &mut pbi.mb, filter_level);
-        }
+        vp8_loop_filter_frame_init(&mut pbi.common, &pbi.mb, filter_level);
     }
 
     // SAFETY: yv12_fb_new points to the live new-frame slot in pbi.common.
@@ -1038,47 +1034,35 @@ unsafe fn setup_token_decoder(
 // ---------------------------------------------------------------------------
 
 /// `init_frame` (vp8/decoder/decodeframe.c:818). Static helper.
-unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
-    let pc: *mut Vp8Common = &mut (*pbi).common;
-    let xd: *mut Macroblockd = &mut (*pbi).mb;
-
-    if (*pc).frame_type == KEY_FRAME {
+///
+/// `common` and `mb` are disjoint fields of `pbi`, so all accesses go
+/// through direct field paths — no raw-pointer aliases needed.
+fn init_frame(pbi: &mut Vp8dComp<'static>) {
+    if pbi.common.frame_type == KEY_FRAME {
         /* Various keyframe initializations */
-        (*pc).fc.mvc = VP8_DEFAULT_MV_CONTEXT;
+        pbi.common.fc.mvc = VP8_DEFAULT_MV_CONTEXT;
 
-        vp8_init_mbmode_probs(&mut *pc);
+        vp8_init_mbmode_probs(&mut pbi.common);
 
-        vp8_default_coef_probs(pc);
+        vp8_default_coef_probs(&mut pbi.common);
 
         /* reset the segment feature data */
-        ptr::write_bytes(
-            (*xd).segment_feature_data.as_mut_ptr() as *mut u8,
-            0,
-            core::mem::size_of_val(&(*xd).segment_feature_data),
-        );
-        (*xd).mb_segment_abs_delta = SEGMENT_DELTADATA;
+        pbi.mb.segment_feature_data = Default::default();
+        pbi.mb.mb_segment_abs_delta = SEGMENT_DELTADATA;
 
         /* reset the mode ref deltas for loop filter */
-        ptr::write_bytes(
-            (*xd).ref_lf_deltas.as_mut_ptr() as *mut u8,
-            0,
-            core::mem::size_of_val(&(*xd).ref_lf_deltas),
-        );
-        ptr::write_bytes(
-            (*xd).mode_lf_deltas.as_mut_ptr() as *mut u8,
-            0,
-            core::mem::size_of_val(&(*xd).mode_lf_deltas),
-        );
+        pbi.mb.ref_lf_deltas = Default::default();
+        pbi.mb.mode_lf_deltas = Default::default();
 
         /* All buffers are implicitly updated on key frames. */
-        (*pc).refresh_golden_frame = 1;
-        (*pc).refresh_alt_ref_frame = 1;
-        (*pc).copy_buffer_to_gf = 0;
-        (*pc).copy_buffer_to_arf = 0;
+        pbi.common.refresh_golden_frame = 1;
+        pbi.common.refresh_alt_ref_frame = 1;
+        pbi.common.copy_buffer_to_gf = 0;
+        pbi.common.copy_buffer_to_arf = 0;
 
         /* Sign bias for Golden/Altref is meaningless on a key frame. */
-        (*pc).ref_frame_sign_bias[GOLDEN_FRAME] = 0;
-        (*pc).ref_frame_sign_bias[ALTREF_FRAME] = 0;
+        pbi.common.ref_frame_sign_bias[GOLDEN_FRAME] = 0;
+        pbi.common.ref_frame_sign_bias[ALTREF_FRAME] = 0;
     } else {
         /* To enable choice of different interpolation filters */
         use crate::filter::{
@@ -1086,30 +1070,30 @@ unsafe fn init_frame(pbi: *mut Vp8dComp<'static>) {
             vp8_bilinear_predict16x16_c, vp8_sixtap_predict4x4_c, vp8_sixtap_predict8x4_c,
             vp8_sixtap_predict8x8_c, vp8_sixtap_predict16x16_c,
         };
-        if (*pc).use_bilinear_mc_filter == 0 {
-            (*xd).subpixel_predict = vp8_sixtap_predict4x4_c;
-            (*xd).subpixel_predict8x4 = vp8_sixtap_predict8x4_c;
-            (*xd).subpixel_predict8x8 = vp8_sixtap_predict8x8_c;
-            (*xd).subpixel_predict16x16 = vp8_sixtap_predict16x16_c;
+        if pbi.common.use_bilinear_mc_filter == 0 {
+            pbi.mb.subpixel_predict = vp8_sixtap_predict4x4_c;
+            pbi.mb.subpixel_predict8x4 = vp8_sixtap_predict8x4_c;
+            pbi.mb.subpixel_predict8x8 = vp8_sixtap_predict8x8_c;
+            pbi.mb.subpixel_predict16x16 = vp8_sixtap_predict16x16_c;
         } else {
-            (*xd).subpixel_predict = vp8_bilinear_predict4x4_c;
-            (*xd).subpixel_predict8x4 = vp8_bilinear_predict8x4_c;
-            (*xd).subpixel_predict8x8 = vp8_bilinear_predict8x8_c;
-            (*xd).subpixel_predict16x16 = vp8_bilinear_predict16x16_c;
+            pbi.mb.subpixel_predict = vp8_bilinear_predict4x4_c;
+            pbi.mb.subpixel_predict8x4 = vp8_bilinear_predict8x4_c;
+            pbi.mb.subpixel_predict8x8 = vp8_bilinear_predict8x8_c;
+            pbi.mb.subpixel_predict16x16 = vp8_bilinear_predict16x16_c;
         }
 
         // Minimal build: CONFIG_ERROR_CONCEALMENT is off, so the
         // decoded_key_frame/ec_enabled/ec_active toggle is also off.
     }
 
-    (*xd).frame_type = (*pc).frame_type;
-    (*pc).mi_mut(0, 0).mbmi.mode = DC_PRED;
-    (*xd).mode_info_stride = (*pc).mode_info_stride;
-    (*xd).corrupted = 0; /* init without corruption */
+    pbi.mb.frame_type = pbi.common.frame_type;
+    pbi.common.mi_mut(0, 0).mbmi.mode = DC_PRED;
+    pbi.mb.mode_info_stride = pbi.common.mode_info_stride;
+    pbi.mb.corrupted = 0; /* init without corruption */
 
-    (*xd).fullpixel_mask = !0;
-    if (*pc).full_pixel != 0 {
-        (*xd).fullpixel_mask = !7;
+    pbi.mb.fullpixel_mask = !0;
+    if pbi.common.full_pixel != 0 {
+        pbi.mb.fullpixel_mask = !7;
     }
 }
 
@@ -1236,8 +1220,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
     }
 
-    // SAFETY: init_frame takes `*mut Vp8dComp` (legacy ABI). Pass the &mut as raw.
-    unsafe { init_frame(pbi); }
+    init_frame(pbi);
 
     // SAFETY: vp8dx_start_decode initializes the bool reader from `data`/`sz`.
     // Routing the decrypt callback through a raw `*mut Vp8dComp` bypasses
@@ -1367,8 +1350,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         };
 
         if q_update != 0 {
-            // SAFETY: vp8cx_init_de_quantizer takes *mut Vp8dComp.
-            unsafe { vp8cx_init_de_quantizer(pbi); }
+            vp8cx_init_de_quantizer(&mut pbi.common);
         }
 
         /* MB level dequantizer setup */
