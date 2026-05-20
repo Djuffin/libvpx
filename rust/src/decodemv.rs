@@ -20,7 +20,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::tables::{
-    MV_LONG_WIDTH, MVP_BITS, Prob, TreeIndex, VP8_BMODE_TREE, VP8_KF_BMODE_PROB,
+    MV_LONG_WIDTH, MVP_BITS, MvContext, Prob, TreeIndex, VP8_BMODE_TREE, VP8_KF_BMODE_PROB,
     VP8_KF_UV_MODE_PROB, VP8_KF_YMODE_PROB, VP8_KF_YMODE_TREE, VP8_MODE_CONTEXTS,
     VP8_MV_UPDATE_PROBS, VP8_SMALL_MVTREE, VP8_SUBMVREFS, VP8_UV_MODE_TREE, VP8_YMODE_TREE,
 };
@@ -60,7 +60,7 @@ use crate::treereader::{
 /// Slice-friendly wrapper around [`vp8_treed_read`] — most local call
 /// sites pass a static array reference.
 #[inline]
-unsafe fn vp8_treed_read(r: &mut Vp8Reader<'_>, t: &[TreeIndex], p: *const Prob) -> i32 {
+fn vp8_treed_read(r: &mut Vp8Reader<'_>, t: &[TreeIndex], p: *const Prob) -> i32 {
     vp8_treed_read_raw(r, t.as_ptr(), p)
 }
 
@@ -211,29 +211,66 @@ fn bmi_mv_as_int(bmi: BModeInfo) -> u32 {
 // Tree-decoding wrappers (decodemv.c:18..40).
 // ===========================================================================
 
+/// Map a mode-tree leaf index to [`MbPredictionMode`]. The tree arrays
+/// are static and only encode in-range leaves, so every index produced
+/// by `vp8_treed_read` is a valid discriminant; the `unreachable!` arm
+/// can only fire on a corrupted *tree table*, not a corrupted bitstream.
+#[inline]
+fn mb_mode_from_index(i: i32) -> MbPredictionMode {
+    use MbPredictionMode::*;
+    match i {
+        0 => DcPred,
+        1 => VPred,
+        2 => HPred,
+        3 => TmPred,
+        4 => BPred,
+        5 => NearestMv,
+        6 => NearMv,
+        7 => ZeroMv,
+        8 => NewMv,
+        9 => SplitMv,
+        _ => unreachable!("mode-tree leaf out of range: {i}"),
+    }
+}
+
+/// Map a 4x4 mode-tree leaf index to [`BPredictionMode`] (intra modes
+/// `0..=9`). Same totality argument as [`mb_mode_from_index`].
+#[inline]
+fn b_mode_from_index(i: i32) -> BPredictionMode {
+    use BPredictionMode::*;
+    match i {
+        0 => DcPred,
+        1 => TmPred,
+        2 => VePred,
+        3 => HePred,
+        4 => LdPred,
+        5 => RdPred,
+        6 => VrPred,
+        7 => VlPred,
+        8 => HdPred,
+        9 => HuPred,
+        _ => unreachable!("b-mode-tree leaf out of range: {i}"),
+    }
+}
+
 /// `read_bmode` (decodemv.c:18).
-unsafe fn read_bmode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> BPredictionMode {
-    let i = vp8_treed_read(bc, &VP8_BMODE_TREE, p);
-    // Maps to BPredictionMode::DcPred..HuPred (0..9).
-    core::mem::transmute::<u8, BPredictionMode>(i as u8)
+fn read_bmode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> BPredictionMode {
+    b_mode_from_index(vp8_treed_read(bc, &VP8_BMODE_TREE, p))
 }
 
 /// `read_ymode` (decodemv.c:24).
-unsafe fn read_ymode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
-    let i = vp8_treed_read(bc, &VP8_YMODE_TREE, p);
-    core::mem::transmute::<u8, MbPredictionMode>(i as u8)
+fn read_ymode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
+    mb_mode_from_index(vp8_treed_read(bc, &VP8_YMODE_TREE, p))
 }
 
 /// `read_kf_ymode` (decodemv.c:30).
-unsafe fn read_kf_ymode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
-    let i = vp8_treed_read(bc, &VP8_KF_YMODE_TREE, p);
-    core::mem::transmute::<u8, MbPredictionMode>(i as u8)
+fn read_kf_ymode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
+    mb_mode_from_index(vp8_treed_read(bc, &VP8_KF_YMODE_TREE, p))
 }
 
 /// `read_uv_mode` (decodemv.c:36).
-unsafe fn read_uv_mode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
-    let i = vp8_treed_read(bc, &VP8_UV_MODE_TREE, p);
-    core::mem::transmute::<u8, MbPredictionMode>(i as u8)
+fn read_uv_mode(bc: &mut Vp8Reader<'_>, p: *const Prob) -> MbPredictionMode {
+    mb_mode_from_index(vp8_treed_read(bc, &VP8_UV_MODE_TREE, p))
 }
 
 // ===========================================================================
@@ -265,32 +302,30 @@ unsafe fn read_kf_modes(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mb_row: i32, 
 // `read_mvcomponent` (decodemv.c:64).
 // ===========================================================================
 
-unsafe fn read_mvcomponent(r: &mut Vp8Reader<'_>, mvc: *const Prob) -> i32 {
-    // The C code casts MV_CONTEXT* to vp8_prob* — `mvc` here is the
-    // resulting flat probability array.
-    let p: *const Prob = mvc;
+fn read_mvcomponent(r: &mut Vp8Reader<'_>, p: &[Prob; MVP_COUNT]) -> i32 {
     let mut x: i32 = 0;
 
-    if vp8_read(r, *p.add(MVPIS_SHORT) as i32) != 0 {
+    if vp8_read(r, p[MVPIS_SHORT] as i32) != 0 {
         /* Large */
         for i in 0..3i32 {
-            x += vp8_read(r, *p.add(MVP_BITS + i as usize) as i32) << i;
+            x += vp8_read(r, p[MVP_BITS + i as usize] as i32) << i;
         }
 
         /* Skip bit 3, which is sometimes implicit */
         for i in (4..MVLONG_WIDTH as i32).rev() {
-            x += vp8_read(r, *p.add(MVP_BITS + i as usize) as i32) << i;
+            x += vp8_read(r, p[MVP_BITS + i as usize] as i32) << i;
         }
 
-        if (x & 0xFFF0) == 0 || vp8_read(r, *p.add(MVP_BITS + 3) as i32) != 0 {
+        if (x & 0xFFF0) == 0 || vp8_read(r, p[MVP_BITS + 3] as i32) != 0 {
             x += 8;
         }
     } else {
-        /* small */
-        x = vp8_treed_read(r, &VP8_SMALL_MVTREE, p.add(MVP_SHORT));
+        /* small — `vp8_treed_read` takes a raw `*const Prob`; obtaining the
+         * pointer from a slice is safe, the deref happens inside it. */
+        x = vp8_treed_read(r, &VP8_SMALL_MVTREE, p[MVP_SHORT..].as_ptr());
     }
 
-    if x != 0 && vp8_read(r, *p.add(MVP_SIGN) as i32) != 0 {
+    if x != 0 && vp8_read(r, p[MVP_SIGN] as i32) != 0 {
         x = -x;
     }
 
@@ -301,37 +336,23 @@ unsafe fn read_mvcomponent(r: &mut Vp8Reader<'_>, mvc: *const Prob) -> i32 {
 // `read_mv` (decodemv.c:91).
 // ===========================================================================
 
-unsafe fn read_mv(r: &mut Vp8Reader<'_>, mv: *mut Mv, mvc: *const Prob) {
-    // `mvc` points at the row-component prob vector; `mvc + MVPcount`
-    // is the col-component vector (the equivalent of `++mvc` over an
-    // array of `MV_CONTEXT`).
-    (*mv).row = (read_mvcomponent(r, mvc) * 2) as i16;
-    (*mv).col = (read_mvcomponent(r, mvc.add(MVP_COUNT)) * 2) as i16;
+fn read_mv(r: &mut Vp8Reader<'_>, mv: &mut Mv, mvc: &[MvContext; 2]) {
+    // `mvc[0]` is the row-component context, `mvc[1]` the column.
+    mv.row = (read_mvcomponent(r, &mvc[0].prob) * 2) as i16;
+    mv.col = (read_mvcomponent(r, &mvc[1].prob) * 2) as i16;
 }
 
 // ===========================================================================
 // `read_mvcontexts` (decodemv.c:96).
 // ===========================================================================
 
-unsafe fn read_mvcontexts(bc: &mut Vp8Reader<'_>, mvc: *mut Prob) {
-    // `mvc` is the flat probability array of the two MV_CONTEXT records
-    // (length 2 * MVP_COUNT).
+fn read_mvcontexts(bc: &mut Vp8Reader<'_>, mvc: &mut [MvContext; 2]) {
     for i in 0..2usize {
-        let mut up: *const Prob = VP8_MV_UPDATE_PROBS[i].prob.as_ptr();
-        let mut p: *mut Prob = mvc.add(i * MVP_COUNT);
-        let pstop: *mut Prob = p.add(MVP_COUNT);
-
-        loop {
-            if vp8_read(bc, *up as i32) != 0 {
-                up = up.add(1);
+        let up = &VP8_MV_UPDATE_PROBS[i].prob;
+        for j in 0..MVP_COUNT {
+            if vp8_read(bc, up[j] as i32) != 0 {
                 let x: Prob = vp8_read_literal(bc, 7) as Prob;
-                *p = if x != 0 { x << 1 } else { 1 };
-            } else {
-                up = up.add(1);
-            }
-            p = p.add(1);
-            if p >= pstop {
-                break;
+                mvc[i].prob[j] = if x != 0 { x << 1 } else { 1 };
             }
         }
     }
@@ -355,7 +376,6 @@ static MBSPLIT_FILL_OFFSET: [[u8; 16]; 4] = [
 
 unsafe fn mb_mode_mv_init(pbi: *mut Vp8dComp<'_>) {
     let bc = &mut (*pbi).mbc[8];
-    let mvc: *mut Prob = (*pbi).common.fc.mvc.as_mut_ptr() as *mut Prob;
 
     // (CONFIG_ERROR_CONCEALMENT branch omitted — minimal build.)
 
@@ -384,7 +404,7 @@ unsafe fn mb_mode_mv_init(pbi: *mut Vp8dComp<'_>) {
             }
         }
 
-        read_mvcontexts(bc, mvc);
+        read_mvcontexts(bc, &mut (*pbi).common.fc.mvc);
     }
 }
 
@@ -428,7 +448,7 @@ unsafe fn decode_split_mv(
     above_mb: *const ModeInfo,
     mbmi: *mut MbModeInfo,
     best_mv: Mv,
-    mvc: *mut crate::tables::MvContext,
+    mvc: &[MvContext; 2],
     mb_to_left_edge: i32,
     mb_to_right_edge: i32,
     mb_to_top_edge: i32,
@@ -488,12 +508,10 @@ unsafe fn decode_split_mv(
             if vp8_read(bc, *prob.add(1) as i32) != 0 {
                 blockmv = 0;
                 if vp8_read(bc, *prob.add(2) as i32) != 0 {
-                    let mvc_row: *const Prob = (*mvc.add(0)).prob.as_ptr();
-                    let mvc_col: *const Prob = (*mvc.add(1)).prob.as_ptr();
                     let mut tmp = Mv { row: 0, col: 0 };
-                    tmp.row = (read_mvcomponent(bc, mvc_row) * 2) as i16;
+                    tmp.row = (read_mvcomponent(bc, &mvc[0].prob) * 2) as i16;
                     tmp.row = tmp.row.wrapping_add(best_mv.row);
-                    tmp.col = (read_mvcomponent(bc, mvc_col) * 2) as i16;
+                    tmp.col = (read_mvcomponent(bc, &mvc[1].prob) * 2) as i16;
                     tmp.col = tmp.col.wrapping_add(best_mv.col);
                     blockmv = mv_as_int(tmp);
                 }
@@ -675,7 +693,7 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
                     let mut mb_to_bottom_edge: i32;
                     let mut mb_to_left_edge: i32;
                     let mut mb_to_right_edge: i32;
-                    let mvc: *mut crate::tables::MvContext = (*pbi).common.fc.mvc.as_mut_ptr();
+                    let mvc: &[MvContext; 2] = &(*pbi).common.fc.mvc;
                     let near_index: usize;
 
                     mb_to_top_edge = (*pbi).mb.mb_to_top_edge;
@@ -721,10 +739,11 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
                         (*mbmi).mode = MbPredictionMode::SplitMv;
                         (*mbmi).is_4x4 = true;
                     } else {
-                        let mbmi_mv: *mut Mv = &mut (*mbmi).mv as *mut Mv;
-                        read_mv(bc, mbmi_mv, mvc as *const Prob);
-                        (*mbmi_mv).row = (*mbmi_mv).row.wrapping_add(near_mvs[near_index].row);
-                        (*mbmi_mv).col = (*mbmi_mv).col.wrapping_add(near_mvs[near_index].col);
+                        read_mv(bc, &mut (*mbmi).mv, mvc);
+                        (*mbmi).mv.row =
+                            (*mbmi).mv.row.wrapping_add(near_mvs[near_index].row);
+                        (*mbmi).mv.col =
+                            (*mbmi).mv.col.wrapping_add(near_mvs[near_index].col);
 
                         /* Don't need to check this on NEARMV and NEARESTMV
                          * modes since those modes clamp the MV. The NEWMV mode
@@ -732,7 +751,7 @@ unsafe fn read_mb_modes_mv(pbi: *mut Vp8dComp<'_>, mi: *mut ModeInfo, mbmi: *mut
                          * special handling may be required.
                          */
                         (*mbmi).need_to_clamp_mvs = vp8_check_mv_bounds(
-                            &*mbmi_mv,
+                            &(*mbmi).mv,
                             mb_to_left_edge,
                             mb_to_right_edge,
                             mb_to_top_edge,

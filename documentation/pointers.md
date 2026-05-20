@@ -151,7 +151,7 @@ Cascade cleanups: the three big bool-reader `unsafe { }` blocks in `vp8_decode_f
 What's left of the original §1 raw-pointer surface:
 - **FFI-shaped sub-calls** (`init_frame`, `setup_token_decoder`, `vp8cx_init_de_quantizer`, `vp8_decode_mode_mvs`, `vp8_loop_filter_*`) — still take `*mut Vp8dComp` / `*mut Vp8Common`. Called inside scoped `unsafe { }`.
 - **`vp8dx_start_decode` lifetime escape hatch** — its `'a` unifies `BoolDecoder<'a>` with the decrypt-callback lifetime; the two callers route through a raw `*mut Vp8dComp` to dodge a borrow-checker false positive (documented at each site). A real fix needs `BoolDecoder<'buf, 'cb>` with split lifetimes.
-- **`decodemv.rs` prob-pointer arithmetic** — `read_mvcomponent`/`read_mvcontexts`/`decode_split_mv` still walk `*const Prob` / `*mut Prob` MV-context tables in scoped `unsafe`; same treatment as `GetCoeffs` would apply.
+- **Structural raw-pointer drivers in `decodemv.rs`** — `read_kf_modes`, `mb_mode_mv_init`, `decode_split_mv`, `read_mb_modes_mv`, `decode_mb_mode_mvs`, `vp8_decode_mode_mvs` still take `*mut Vp8dComp` / `*mut ModeInfo` / `*mut MbModeInfo` (the §1 god-object category). The prob-pointer and transmute residue is gone (see below).
 
 ### Token hot-loop fully safe (`GetCoeffs` / `vp8_decode_mb_tokens`)
 
@@ -161,6 +161,21 @@ The innermost coefficient decoder is now **100% safe**, no `unsafe` blocks:
 - `vp8_decode_mb_tokens` passes `&fc.coef_probs[k]` (no `.as_ptr() as` cast) and `&mut qcoeff[block*16..+16]`; `eobs` is now safe `&mut mb.eobs` indexing. `qcoeff`/`eobs` coexist as disjoint `&mut` fields of `mb`.
 
 The concern was bounds checks on the runtime-value `kBands[n]` index into `[COEF_BANDS]`. Measured: **within noise** (480p −0.4% p=0.06, 720p −0.4% p=0.10 vs the pre-change point) — LLVM elides them. 125/125 conformance pass.
+
+### MV-context decoding fully safe (`decodemv.rs`)
+
+The motion-vector probability readers no longer reinterpret `[MvContext; 2]` as a flat `*mut Prob`:
+- `read_mvcomponent(r, mvc: &[Prob; MVP_COUNT])` — safe `fn`; indexes `mvc[MVPIS_SHORT]` etc. The small-MV tree call hands `mvc[MVP_SHORT..].as_ptr()` to `vp8_treed_read` (pointer creation is safe; deref stays inside the tree walker, which is also now a safe `fn`).
+- `read_mv(r, mv: &mut Mv, mvc: &[MvContext; 2])` — safe `fn`; row from `mvc[0].prob`, col from `mvc[1].prob`.
+- `read_mvcontexts(bc, mvc: &mut [MvContext; 2])` — safe `fn`; the dual-cursor `(up, p)` pointer walk became `for j in 0..MVP_COUNT { ... mvc[i].prob[j] }`.
+- `decode_split_mv`'s `mvc` param went `*mut MvContext` → `&[MvContext; 2]`.
+
+Callers pass `&mut (*pbi).common.fc.mvc` / `&(*pbi).common.fc.mvc` — field-disjoint from the `bc = &mut (*pbi).mbc[8]` borrow. Bench within noise (480p +0.7% "within noise threshold", 720p p=0.21); 125/125 conformance. MV decoding is header + per-inter-MB, not the inner coefficient loop, so it's not perf-sensitive.
+
+### Mode-tree readers — `transmute` eliminated (`decodemv.rs`)
+
+`read_bmode`/`read_ymode`/`read_kf_ymode`/`read_uv_mode` decoded a tree leaf and did `core::mem::transmute::<u8, …PredictionMode>(i as u8)` to turn the index into an enum — the reason they were `unsafe fn`. Replaced with two total `match` helpers, `mb_mode_from_index` / `b_mode_from_index`, that map index → enum variant explicitly (with an `unreachable!` arm that can only fire on a corrupt static *tree table*, never a corrupt bitstream — the trees encode only in-range leaves). All four readers are now safe `fn`; **zero `transmute` remain in `decodemv.rs`**. Bench within noise (p=0.09 / p=0.44); 125/125 conformance.
+
 - **Loop filter row callees / pixel kernels** — intentionally raw-ptr-shaped (pixel-side, doc-excluded).
 
 ---
