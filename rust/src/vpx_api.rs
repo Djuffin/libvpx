@@ -390,17 +390,6 @@ pub struct VpxCodecPriv {
 }
 pub type vpx_codec_priv_t = VpxCodecPriv;
 
-/// `vpx_codec_ctx_t::config` union (`vpx/vpx_codec.h:206`). We expose
-/// the union with its three arms (dec / enc / raw); all are pointer
-/// sized so the layout matches the C union.
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union VpxCodecCtxConfig {
-    pub dec: *const VpxCodecDecCfg,
-    pub enc: *const VpxCodecEncCfg,
-    pub raw: *const c_void,
-}
-
 /// `vpx_codec_ctx_t` (`vpx/vpx_codec.h:200`).
 pub struct VpxCodecCtx {
     pub name: Option<&'static str>,
@@ -410,7 +399,13 @@ pub struct VpxCodecCtx {
     pub iface: Option<&'static VpxCodecIface>,
     pub err: VpxCodecErr,
     pub init_flags: VpxCodecFlags,
-    pub config: VpxCodecCtxConfig,
+    // No `config` field. In libvpx, `vpx_codec_ctx_t::config` is a
+    // pointer-aliasing union used only as the generic-dispatcher →
+    // codec-`init(ctx)` hand-off channel for the caller's `cfg`, which
+    // the codec then copies inward and re-points at its internal copy
+    // (`vp8/vp8_dx_iface.c:78-81`). This port hands `cfg` to
+    // `Vp8Decoder::new` / `set_cfg` directly as a typed parameter, so
+    // the channel — and the field — carry nothing anyone reads back.
     /// Non-null sentinel pointer into the boxed decoder's
     /// `Vp8AlgPriv`. Used only as an "is initialized?" flag for the
     /// public-API guards; dispatch goes through `trait_obj`.

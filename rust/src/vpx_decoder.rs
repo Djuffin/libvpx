@@ -73,9 +73,6 @@ pub fn vpx_codec_dec_init_ver(
     ctx.name = Some(iface.name);
     ctx.priv_ = ptr::null_mut();
     ctx.init_flags = flags;
-    ctx.config.dec = cfg
-        .map(|c| c as *const VpxCodecDecCfg)
-        .unwrap_or(ptr::null());
     ctx.trait_obj = None;
 
     // VP8 is currently the only algorithm; when VP9 lands a small
