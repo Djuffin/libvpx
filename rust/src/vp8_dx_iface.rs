@@ -604,6 +604,12 @@ impl Vp8Decoder {
     pub fn as_ptr(&mut self) -> *mut Vp8AlgPriv<'static> {
         &raw mut *self.priv_
     }
+
+    /// Store the caller's decoder configuration. Used by
+    /// `vpx_codec_dec_init_ver` when a `cfg` is supplied.
+    pub fn set_cfg(&mut self, cfg: VpxCodecDecCfg) {
+        self.priv_.cfg = cfg;
+    }
 }
 
 impl Drop for Vp8Decoder {

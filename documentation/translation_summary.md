@@ -210,17 +210,21 @@ destructor execution. The port replaces all of it with **idiomatic
 pub type VpxResult<T> = Result<T, VpxCodecErr>;
 
 #[inline]
-pub unsafe fn vpx_internal_error<T>(
-    info: *mut VpxInternalErrorInfo,
+pub fn vpx_internal_error<T>(
+    info: &mut VpxInternalErrorInfo,
     error: VpxCodecErr,
 ) -> VpxResult<T> {
-    (*info).error_code = error;
+    info.error_code = error;
     Err(error)
 }
 
 // at a throw site:
-return vpx_internal_error(&mut (*pc).error, VPX_CODEC_CORRUPT_FRAME);
+return vpx_internal_error(&mut pc.error, VPX_CODEC_CORRUPT_FRAME);
 ```
+
+`info` is a plain `&mut` rather than `*mut`: every throw site already
+holds a `&mut …error`, so the function is safe and the `unsafe { … }`
+wrappers around it are gone.
 
 ### 4.1 What was dropped
 
@@ -392,7 +396,7 @@ pub unsafe extern "C" fn vpx_codec_decode(
 
 // After:
 pub fn vpx_codec_decode(
-    ctx: Option<&mut VpxCodecCtx>,
+    ctx: &mut VpxCodecCtx,
     data: &[u8],
     _user_priv: *mut c_void,
     _deadline: i64,
@@ -405,8 +409,16 @@ Inside, dispatch goes through the trait:
 - `#[unsafe(no_mangle)]` removed from every public function.
 - `extern "C"` removed from public API; kept on RTCD-table-pointed
   kernel `_c` functions for SIMD future-compatibility.
-- Null pointers expressible as `None`; the structurally-invalid
-  combinations (null buffer + nonzero length, etc.) are gone.
+- The `ctx` parameter is a plain `&mut VpxCodecCtx`, not
+  `Option<&mut …>`: a reference can't be null, so the C API's
+  null-`ctx` → `INVALID_PARAM` arm is unrepresentable (the same way
+  the null-buffer + nonzero-length `&[u8]` combos are). This applies
+  to every `ctx`-mutating entry point (`dec_init_ver`, `decode`,
+  `get_frame`, `get_stream_info`, `destroy`, `control_`, the cb
+  registrars). The error-query helpers (`vpx_codec_error`,
+  `vpx_codec_error_detail`) keep `Option<&VpxCodecCtx>` because a
+  `None` there is meaningful — it returns a fallback description,
+  matching C's `vpx_codec_error(NULL)`.
 
 ### 6.4 `VpxCodecCtx.trait_obj`
 

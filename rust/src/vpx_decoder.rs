@@ -16,18 +16,16 @@ use crate::vp8_dx_iface::Vp8Decoder;
 use crate::vpx_api::*;
 use crate::vpx_codec::vpx_codec_destroy;
 
-/// Stash `var` into `ctx.err` (if `ctx` is `Some`) and return it.
+/// Stash `var` into `ctx.err` and return it.
 #[inline]
-fn save_status(ctx: Option<&mut VpxCodecCtx>, var: VpxCodecErr) -> VpxCodecErr {
-    if let Some(c) = ctx {
-        c.err = var;
-    }
+fn save_status(ctx: &mut VpxCodecCtx, var: VpxCodecErr) -> VpxCodecErr {
+    ctx.err = var;
     var
 }
 
 /// `vpx_codec_dec_init_ver` — bind a context to an algorithm.
-pub unsafe fn vpx_codec_dec_init_ver(
-    ctx: Option<&mut VpxCodecCtx>,
+pub fn vpx_codec_dec_init_ver(
+    ctx: &mut VpxCodecCtx,
     iface: Option<&'static VpxCodecIface>,
     cfg: Option<&VpxCodecDecCfg>,
     flags: VpxCodecFlags,
@@ -36,9 +34,6 @@ pub unsafe fn vpx_codec_dec_init_ver(
     if ver != VPX_DECODER_ABI_VERSION {
         return save_status(ctx, VPX_CODEC_ABI_MISMATCH);
     }
-    let Some(ctx) = ctx else {
-        return VPX_CODEC_INVALID_PARAM;
-    };
     let Some(iface) = iface else {
         ctx.err = VPX_CODEC_INVALID_PARAM;
         return VPX_CODEC_INVALID_PARAM;
@@ -87,25 +82,20 @@ pub unsafe fn vpx_codec_dec_init_ver(
     // per-algo registry will choose between constructors.
     match Vp8Decoder::new(flags) {
         Ok(mut dec) => {
-            let priv_ptr = dec.as_ptr();
             if let Some(c) = cfg {
-                // SAFETY: `priv_ptr` was just produced by `as_ptr()` on
-                // a live `Vp8Decoder` we still own and have unique
-                // access to; no aliases exist yet (ctx.priv_/trait_obj
-                // are assigned below).
-                (*priv_ptr).cfg = *c;
+                dec.set_cfg(*c);
             }
             // priv_ is a non-null sentinel for initialized-state
             // checks elsewhere; it points at the same Vp8AlgPriv the
             // boxed trait object owns.
-            ctx.priv_ = priv_ptr as *mut VpxCodecPriv;
+            ctx.priv_ = dec.as_ptr() as *mut VpxCodecPriv;
             ctx.trait_obj = Some(Box::new(dec));
             ctx.err = VPX_CODEC_OK;
             VPX_CODEC_OK
         }
         Err(e) => {
             ctx.err = e;
-            vpx_codec_destroy(Some(ctx));
+            vpx_codec_destroy(ctx);
             e
         }
     }
@@ -142,13 +132,10 @@ pub fn vpx_codec_peek_stream_info(
 }
 
 /// `vpx_codec_get_stream_info` — query an active context.
-pub unsafe fn vpx_codec_get_stream_info(
-    ctx: Option<&mut VpxCodecCtx>,
+pub fn vpx_codec_get_stream_info(
+    ctx: &mut VpxCodecCtx,
     si: Option<&mut VpxCodecStreamInfo>,
 ) -> VpxCodecErr {
-    let Some(ctx) = ctx else {
-        return VPX_CODEC_INVALID_PARAM;
-    };
     let Some(si) = si else {
         ctx.err = VPX_CODEC_INVALID_PARAM;
         return VPX_CODEC_INVALID_PARAM;
@@ -179,14 +166,11 @@ pub unsafe fn vpx_codec_get_stream_info(
 /// flush. `user_priv` is stashed on the next emitted [`VpxImage`]'s
 /// `user_priv` field for per-frame caller tagging.
 pub fn vpx_codec_decode(
-    ctx: Option<&mut VpxCodecCtx>,
+    ctx: &mut VpxCodecCtx,
     data: &[u8],
     user_priv: *mut c_void,
     _deadline: i64,
 ) -> VpxCodecErr {
-    let Some(ctx) = ctx else {
-        return VPX_CODEC_INVALID_PARAM;
-    };
     if ctx.iface.is_none() || ctx.trait_obj.is_none() {
         ctx.err = VPX_CODEC_ERROR;
         return VPX_CODEC_ERROR;
@@ -206,10 +190,9 @@ pub fn vpx_codec_decode(
 /// returns the new image and toggles iter; subsequent calls return
 /// `None`.
 pub fn vpx_codec_get_frame<'a>(
-    ctx: Option<&'a mut VpxCodecCtx>,
+    ctx: &'a mut VpxCodecCtx,
     iter: &mut VpxCodecIter,
 ) -> Option<&'a VpxImage> {
-    let ctx = ctx?;
     if ctx.iface.is_none() || ctx.trait_obj.is_none() {
         return None;
     }
@@ -226,7 +209,7 @@ pub fn vpx_codec_get_frame<'a>(
 /// `vpx_codec_register_put_frame_cb`. The VP8 build lacks
 /// `VPX_CODEC_CAP_PUT_FRAME`, so this always returns `INCAPABLE`.
 pub fn vpx_codec_register_put_frame_cb(
-    ctx: Option<&mut VpxCodecCtx>,
+    ctx: &mut VpxCodecCtx,
     cb: VpxCodecPutFrameCbFnT,
     _user_priv: *mut c_void,
 ) -> VpxCodecErr {
@@ -239,7 +222,7 @@ pub fn vpx_codec_register_put_frame_cb(
 /// `vpx_codec_register_put_slice_cb`. The VP8 build lacks
 /// `VPX_CODEC_CAP_PUT_SLICE`, so this always returns `INCAPABLE`.
 pub fn vpx_codec_register_put_slice_cb(
-    ctx: Option<&mut VpxCodecCtx>,
+    ctx: &mut VpxCodecCtx,
     cb: VpxCodecPutSliceCbFnT,
     _user_priv: *mut c_void,
 ) -> VpxCodecErr {
@@ -254,7 +237,7 @@ pub fn vpx_codec_register_put_slice_cb(
 /// `FrameBufferAllocator` hook in `crate::codec` is the future
 /// replacement.
 pub fn vpx_codec_set_frame_buffer_functions(
-    ctx: Option<&mut VpxCodecCtx>,
+    ctx: &mut VpxCodecCtx,
     cb_get: VpxGetFrameBufferCbFnT,
     cb_release: VpxReleaseFrameBufferCbFnT,
     _cb_priv: *mut c_void,

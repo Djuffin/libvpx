@@ -177,7 +177,7 @@ unsafe fn init_dec() -> vpx_codec_ctx_t {
     let iface = vpx_codec_vp8_dx();
     let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
     let init_res = vpx_codec_dec_init_ver(
-        Some(dec.assume_init_mut()),
+        dec.assume_init_mut(),
         Some(iface),
         None,
         0,
@@ -211,7 +211,7 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
         if matches!(max_packets, Some(limit) if packets_decoded >= limit) {
             break;
         }
-        let res = vpx_codec_decode(Some(&mut dec), &packet, ptr::null_mut(), 0);
+        let res = vpx_codec_decode(&mut dec, &packet, ptr::null_mut(), 0);
         assert_eq!(
             res, VPX_CODEC_OK,
             "vpx_codec_decode failed on {name} packet {packets_decoded}"
@@ -220,7 +220,7 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
 
         let mut iter: *const core::ffi::c_void = ptr::null();
         loop {
-            match vpx_codec_get_frame(Some(&mut dec), &mut iter) {
+            match vpx_codec_get_frame(&mut dec, &mut iter) {
                 Some(img) => {
                     assert!(
                         frame_no < expected.len(),
@@ -247,7 +247,7 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
         );
     }
 
-    assert_eq!(vpx_codec_destroy(Some(&mut dec)), VPX_CODEC_OK);
+    assert_eq!(vpx_codec_destroy(&mut dec), VPX_CODEC_OK);
 }
 
 /// Generates one `#[test] fn keyframe_NNN()` per VP8 conformance vector.

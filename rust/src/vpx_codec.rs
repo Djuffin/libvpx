@@ -1,9 +1,12 @@
 //! Codec-agnostic public API dispatcher (`vpx_codec_*` entry points).
 //!
 //! Dispatch routes through the `Decoder` trait stashed on
-//! `VpxCodecCtx::trait_obj`. Function signatures take
-//! `Option<&mut VpxCodecCtx>` etc. so the null-pointer arms of the
-//! original C API are still expressible as `None`.
+//! `VpxCodecCtx::trait_obj`. Entry points take `&mut VpxCodecCtx`
+//! directly — a reference can't be null, so the C API's
+//! null-`ctx` → `INVALID_PARAM` arm is unrepresentable here. The
+//! error-query helpers keep `Option<&VpxCodecCtx>` because a `None`
+//! there is meaningful (returns a fallback description, matching
+//! C's `vpx_codec_error(NULL)`).
 
 #![allow(dead_code)]
 #![allow(non_snake_case)]
@@ -80,11 +83,7 @@ pub fn vpx_codec_error_detail(ctx: Option<&VpxCodecCtx>) -> &'static str {
 /// which in turn runs `Vp8Decoder::Drop` (frees the YV12 frame buffer
 /// pool and the inner `Vp8dComp` instances; the `Box` drop reclaims
 /// the `Vp8AlgPriv` shell).
-pub fn vpx_codec_destroy(ctx: Option<&mut VpxCodecCtx>) -> VpxCodecErr {
-    let Some(c) = ctx else {
-        return VPX_CODEC_INVALID_PARAM;
-    };
-
+pub fn vpx_codec_destroy(c: &mut VpxCodecCtx) -> VpxCodecErr {
     if c.iface.is_none() || c.priv_.is_null() {
         c.err = VPX_CODEC_ERROR;
         return VPX_CODEC_ERROR;
@@ -106,14 +105,10 @@ pub fn vpx_codec_get_caps(iface: Option<&VpxCodecIface>) -> VpxCodecCaps {
 /// maps it to a typed [`ControlCmd`], and dispatches via the trait.
 /// `ap` stays raw — it's a caller-owned, caller-typed payload.
 pub unsafe fn vpx_codec_control_(
-    ctx: Option<&mut VpxCodecCtx>,
+    c: &mut VpxCodecCtx,
     ctrl_id: c_int,
     ap: *mut c_void,
 ) -> VpxCodecErr {
-    let Some(c) = ctx else {
-        return VPX_CODEC_INVALID_PARAM;
-    };
-
     let res = if ctrl_id == 0 {
         VPX_CODEC_INVALID_PARAM
     } else if c.iface.is_none() || c.trait_obj.is_none() {
@@ -176,10 +171,7 @@ pub unsafe fn vpx_codec_control_(
 
 /// Records `error` into `info` and returns it as `Err`.
 #[inline]
-pub unsafe fn vpx_internal_error<T>(
-    info: *mut VpxInternalErrorInfo,
-    error: VpxCodecErr,
-) -> VpxResult<T> {
-    (*info).error_code = error;
+pub fn vpx_internal_error<T>(info: &mut VpxInternalErrorInfo, error: VpxCodecErr) -> VpxResult<T> {
+    info.error_code = error;
     Err(error)
 }

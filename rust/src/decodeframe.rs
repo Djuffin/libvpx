@@ -1079,8 +1079,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
 
     if (data_end as isize) - (data as isize) < 3 {
         if pbi.ec_active == 0 {
-            // SAFETY: vpx_internal_error writes an error code and returns.
-            return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
         }
 
         /* Declare the missing frame as an inter frame. */
@@ -1102,7 +1101,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
             (((b0 as i32) | ((b1 as i32) << 8) | ((b2 as i32) << 16)) >> 5) as i32;
 
         if pbi.ec_active == 0 && first_partition_length_in_bytes == 0 {
-            return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
         }
 
         // SAFETY: advance past the 3 header bytes we just consumed.
@@ -1125,9 +1124,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
                     )
                 };
                 if s0 != 0x9d || s1 != 0x01 || s2 != 0x2a {
-                    return unsafe {
-                        vpx_internal_error(&mut pbi.common.error, VPX_CODEC_UNSUP_BITSTREAM)
-                    };
+                    return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_UNSUP_BITSTREAM);
                 }
 
                 pbi.common.width = ((w0 as i32) | ((w1 as i32) << 8)) & 0x3fff;
@@ -1137,9 +1134,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
                 // SAFETY: 7 bytes confirmed available.
                 data = unsafe { data.add(7) };
             } else if pbi.ec_active == 0 {
-                return unsafe {
-                    vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME)
-                };
+                return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
             } else {
                 /* Error concealment is active, clear the frame. */
                 data = data_end;
@@ -1163,7 +1158,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
     if pbi.ec_active == 0
         && ((data_end as isize) - (data as isize)) < first_partition_length_in_bytes as isize
     {
-        return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
     }
 
     init_frame(pbi);
@@ -1171,7 +1166,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
     let data_remaining = ((data_end as isize) - (data as isize)) as u32;
     let start_rc = vp8dx_start_decode(&mut pbi.mbc[8], data, data_remaining);
     if start_rc != 0 {
-        return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR) };
+        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
     }
 
     // Bool-reader-driven header parsing. `bc` borrows pbi.mbc[8]; the
@@ -1386,7 +1381,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         if pbi.common.frame_type == KEY_FRAME && pbi.common.yv12_fb[new_idx].corrupted == 0 {
             pbi.decoded_key_frame = 1;
         } else {
-            return unsafe { vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME) };
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_CORRUPT_FRAME);
         }
     }
 

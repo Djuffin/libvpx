@@ -106,7 +106,7 @@ unsafe fn decode_all(packets: &[Vec<u8>]) {
     let iface = vpx_codec_vp8_dx();
     let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
     let init_res = vpx_codec_dec_init_ver(
-        Some(dec.assume_init_mut()),
+        dec.assume_init_mut(),
         Some(iface),
         None,
         0,
@@ -116,16 +116,16 @@ unsafe fn decode_all(packets: &[Vec<u8>]) {
     let mut dec = dec.assume_init();
 
     for packet in packets {
-        let res = vpx_codec_decode(Some(&mut dec), packet, ptr::null_mut(), 0);
+        let res = vpx_codec_decode(&mut dec, packet, ptr::null_mut(), 0);
         assert_eq!(res, VPX_CODEC_OK);
 
         let mut iter: *const core::ffi::c_void = ptr::null();
-        while let Some(img) = vpx_codec_get_frame(Some(&mut dec), &mut iter) {
+        while let Some(img) = vpx_codec_get_frame(&mut dec, &mut iter) {
             black_box(img);
         }
     }
 
-    assert_eq!(vpx_codec_destroy(Some(&mut dec)), VPX_CODEC_OK);
+    assert_eq!(vpx_codec_destroy(&mut dec), VPX_CODEC_OK);
 }
 
 fn bench_decoder(b: &mut criterion::Bencher, packets: &[Vec<u8>]) {

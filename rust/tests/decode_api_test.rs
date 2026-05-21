@@ -14,7 +14,7 @@ use vp8_decoder_rs::vpx_api::{
 };
 
 unsafe fn dec_init(
-    ctx: Option<&mut vpx_codec_ctx_t>,
+    ctx: &mut vpx_codec_ctx_t,
     iface: Option<&'static VpxCodecIface>,
     flags: VpxCodecFlags,
 ) -> VpxCodecErr {
@@ -23,30 +23,26 @@ unsafe fn dec_init(
 
 /// C: `TEST(DecodeAPI, InvalidParams)` — null-pointer arm only. The
 /// iface-loop arm is in `invalid_params_via_iface` below.
+///
+/// The C test also passes `NULL` for `ctx` to `dec_init` / `decode` /
+/// `destroy`. Those arms are gone here: the Rust entry points take
+/// `&mut VpxCodecCtx`, which can't be null, so a null-`ctx` call is
+/// unrepresentable (same reason the null+nonzero `&[u8]` combos
+/// dropped out). Only the null-`iface` arm and the `Option<&ctx>`
+/// error queries remain exercisable.
 #[test]
 fn invalid_params_null_ptrs() {
-    let buf = [0u8; 1];
     let mut dec_storage = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
 
     unsafe {
-        assert_eq!(dec_init(None, None, 0), VPX_CODEC_INVALID_PARAM);
+        // Valid ctx, null iface → INVALID_PARAM.
         assert_eq!(
-            dec_init(Some(dec_storage.assume_init_mut()), None, 0),
+            dec_init(dec_storage.assume_init_mut(), None, 0),
             VPX_CODEC_INVALID_PARAM
         );
 
-        // ctx == None
-        assert_eq!(
-            vpx_codec_decode(None, &[], core::ptr::null_mut(), 0),
-            VPX_CODEC_INVALID_PARAM
-        );
-        assert_eq!(
-            vpx_codec_decode(None, &buf, core::ptr::null_mut(), 0),
-            VPX_CODEC_INVALID_PARAM
-        );
-        assert_eq!(vpx_codec_destroy(None), VPX_CODEC_INVALID_PARAM);
-
-        // Error queries handle None: both return a fallback description.
+        // Error queries still accept `None` and return a fallback
+        // description.
         assert!(!vpx_codec_error(None).is_empty());
         assert!(!vpx_codec_error_detail(None).is_empty());
     }
@@ -72,22 +68,18 @@ fn invalid_params_via_iface() {
         let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
         let buf = [0u8; 1];
 
-        assert_eq!(dec_init(None, Some(iface), 0), VPX_CODEC_INVALID_PARAM);
+        assert_eq!(dec_init(dec.assume_init_mut(), Some(iface), 0), VPX_CODEC_OK);
         assert_eq!(
-            dec_init(Some(dec.assume_init_mut()), Some(iface), 0),
-            VPX_CODEC_OK
-        );
-        assert_eq!(
-            vpx_codec_decode(Some(dec.assume_init_mut()), &buf, core::ptr::null_mut(), 0),
+            vpx_codec_decode(dec.assume_init_mut(), &buf, core::ptr::null_mut(), 0),
             VPX_CODEC_UNSUP_BITSTREAM
         );
         // Empty buffer is the only "no data" shape now (the null+nonzero
         // and nonzero+null combos are unrepresentable through `&[u8]`).
         assert_eq!(
-            vpx_codec_decode(Some(dec.assume_init_mut()), &[], core::ptr::null_mut(), 0),
+            vpx_codec_decode(dec.assume_init_mut(), &[], core::ptr::null_mut(), 0),
             VPX_CODEC_OK
         );
-        assert_eq!(vpx_codec_destroy(Some(dec.assume_init_mut())), VPX_CODEC_OK);
+        assert_eq!(vpx_codec_destroy(dec.assume_init_mut()), VPX_CODEC_OK);
     }
 }
 
@@ -101,7 +93,7 @@ fn optional_params() {
 
         assert_eq!(
             dec_init(
-                Some(dec.assume_init_mut()),
+                dec.assume_init_mut(),
                 Some(iface),
                 VPX_CODEC_USE_ERROR_CONCEALMENT
             ),
@@ -125,7 +117,7 @@ fn vp8_flush_with_no_fragments() {
 
         assert_eq!(
             vpx_codec_dec_init_ver(
-                Some(dec.assume_init_mut()),
+                dec.assume_init_mut(),
                 Some(iface),
                 Some(&cfg),
                 flags,
@@ -134,9 +126,9 @@ fn vp8_flush_with_no_fragments() {
             VPX_CODEC_OK
         );
         assert_eq!(
-            vpx_codec_decode(Some(dec.assume_init_mut()), &[], core::ptr::null_mut(), 0),
+            vpx_codec_decode(dec.assume_init_mut(), &[], core::ptr::null_mut(), 0),
             VPX_CODEC_OK
         );
-        assert_eq!(vpx_codec_destroy(Some(dec.assume_init_mut())), VPX_CODEC_OK);
+        assert_eq!(vpx_codec_destroy(dec.assume_init_mut()), VPX_CODEC_OK);
     }
 }
