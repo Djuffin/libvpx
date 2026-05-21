@@ -14,7 +14,6 @@
 #![allow(clippy::missing_safety_doc)]
 
 use core::ffi::{c_int, c_void};
-use core::ptr;
 
 use crate::codec::ControlCmd;
 use crate::types::{VpxInternalErrorInfo, VpxResult};
@@ -84,7 +83,7 @@ pub fn vpx_codec_error_detail(ctx: Option<&VpxCodecCtx>) -> &'static str {
 /// pool and the inner `Vp8dComp` instances; the `Box` drop reclaims
 /// the `Vp8AlgPriv` shell).
 pub fn vpx_codec_destroy(c: &mut VpxCodecCtx) -> VpxCodecErr {
-    if c.iface.is_none() || c.priv_.is_null() {
+    if c.iface.is_none() || c.trait_obj.is_none() {
         c.err = VPX_CODEC_ERROR;
         return VPX_CODEC_ERROR;
     }
@@ -92,7 +91,6 @@ pub fn vpx_codec_destroy(c: &mut VpxCodecCtx) -> VpxCodecErr {
     let _ = c.trait_obj.take(); // Drops the Box.
     c.iface = None;
     c.name = None;
-    c.priv_ = ptr::null_mut();
     c.err = VPX_CODEC_OK;
     VPX_CODEC_OK
 }

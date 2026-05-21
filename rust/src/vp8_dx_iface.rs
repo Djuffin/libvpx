@@ -597,14 +597,6 @@ impl Vp8Decoder {
         })
     }
 
-    /// Raw pointer into the underlying `Vp8AlgPriv`. Used by
-    /// `vpx_codec_dec_init_ver` to stash a sentinel into
-    /// `VpxCodecCtx.priv_`. The pointer is valid for the lifetime of
-    /// the boxed decoder.
-    pub fn as_ptr(&mut self) -> *mut Vp8AlgPriv<'static> {
-        &raw mut *self.priv_
-    }
-
     /// Store the caller's decoder configuration. Used by
     /// `vpx_codec_dec_init_ver` when a `cfg` is supplied.
     pub fn set_cfg(&mut self, cfg: VpxCodecDecCfg) {

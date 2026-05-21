@@ -9,7 +9,6 @@
 #![allow(non_upper_case_globals)]
 
 use core::ffi::c_void;
-use core::ptr;
 
 use crate::codec::Decoder;
 use crate::vp8_dx_iface::Vp8Decoder;
@@ -71,7 +70,6 @@ pub fn vpx_codec_dec_init_ver(
     // memset it blindly. Assign each field instead.
     ctx.iface = Some(iface);
     ctx.name = Some(iface.name);
-    ctx.priv_ = ptr::null_mut();
     ctx.init_flags = flags;
     ctx.trait_obj = None;
 
@@ -82,10 +80,6 @@ pub fn vpx_codec_dec_init_ver(
             if let Some(c) = cfg {
                 dec.set_cfg(*c);
             }
-            // priv_ is a non-null sentinel for initialized-state
-            // checks elsewhere; it points at the same Vp8AlgPriv the
-            // boxed trait object owns.
-            ctx.priv_ = dec.as_ptr() as *mut VpxCodecPriv;
             ctx.trait_obj = Some(Box::new(dec));
             ctx.err = VPX_CODEC_OK;
             VPX_CODEC_OK

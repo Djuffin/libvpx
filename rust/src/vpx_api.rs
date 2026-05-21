@@ -406,10 +406,12 @@ pub struct VpxCodecCtx {
     // (`vp8/vp8_dx_iface.c:78-81`). This port hands `cfg` to
     // `Vp8Decoder::new` / `set_cfg` directly as a typed parameter, so
     // the channel — and the field — carry nothing anyone reads back.
-    /// Non-null sentinel pointer into the boxed decoder's
-    /// `Vp8AlgPriv`. Used only as an "is initialized?" flag for the
-    /// public-API guards; dispatch goes through `trait_obj`.
-    pub priv_: *mut VpxCodecPriv,
+    //
+    // No `priv_` field either. In libvpx, `vpx_codec_ctx_t::priv` is
+    // both the dispatch handle (every entry recovers the alg-priv from
+    // it) and the "initialized?" sentinel. Dispatch here goes through
+    // `trait_obj`, so the only surviving role — the init check — is
+    // already answered by `trait_obj.is_some()`.
     /// Boxed [`crate::codec::Decoder`] trait object. `None` before
     /// `vpx_codec_dec_init_ver` succeeds.
     pub trait_obj: Option<Box<dyn crate::codec::Decoder + 'static>>,
