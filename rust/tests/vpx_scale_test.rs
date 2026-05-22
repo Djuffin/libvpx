@@ -5,7 +5,7 @@
 //! Two tests, each parameterized over (W, H) ∈ kSizesToTest × itself:
 //!   - `ExtendBorder` — `vp8_yv12_extend_frame_borders_c` replicates the
 //!     32-px guard band; reference impl does the same in pure Rust;
-//!     compare whole `buffer_alloc`.
+//!     compare the whole owned slab.
 //!   - `CopyFrame`    — `vp8_yv12_copy_frame_c` copies + extends borders
 //!     into `dst_img_`; compare against the reference impl.
 //!
@@ -27,11 +27,13 @@ const BUF_MAX: u8 = BUF_FILLER - 1;
 // --- Yv12 helpers (mirror `VpxScaleBase`) ----------------------------
 
 unsafe fn reset_image(img: *mut Yv12BufferConfig, width: i32, height: i32) {
-    // memset(img, 0, sizeof(*img))
-    std::ptr::write_bytes(img as *mut u8, 0, mem::size_of::<Yv12BufferConfig>());
-    let rc = vp8_yv12_alloc_frame_buffer(img, width, height, VP8_BORDER_IN_PIXELS);
+    // C: memset(img, 0, sizeof(*img)). Assigning a fresh zeroed value
+    // drops the previous config first (freeing any owned slab), so a
+    // reused `img` doesn't leak.
+    *img = mem::zeroed();
+    let rc = vp8_yv12_alloc_frame_buffer(&mut *img, width, height, VP8_BORDER_IN_PIXELS);
     assert_eq!(rc, 0, "alloc failed for {width}x{height}");
-    std::ptr::write_bytes((*img).buffer_alloc, BUF_FILLER, (*img).frame_size);
+    (*img).owning_buffer.as_deref_mut().unwrap().fill(BUF_FILLER);
 }
 
 unsafe fn fill_plane(buf: *mut u8, width: i32, height: i32, stride: i32) {
@@ -55,19 +57,19 @@ unsafe fn reset_images(
     reset_image(dst_img, width, height);
 
     fill_plane(
-        (*img).y_buffer,
+        (*img).y_buffer(),
         (*img).y_crop_width,
         (*img).y_crop_height,
         (*img).y_stride,
     );
     fill_plane(
-        (*img).u_buffer,
+        (*img).u_buffer(),
         (*img).uv_crop_width,
         (*img).uv_crop_height,
         (*img).uv_stride,
     );
     fill_plane(
-        (*img).v_buffer,
+        (*img).v_buffer(),
         (*img).uv_crop_width,
         (*img).uv_crop_height,
         (*img).uv_stride,
@@ -79,9 +81,9 @@ unsafe fn dealloc_images(
     ref_img: *mut Yv12BufferConfig,
     dst_img: *mut Yv12BufferConfig,
 ) {
-    vp8_yv12_de_alloc_frame_buffer(img);
-    vp8_yv12_de_alloc_frame_buffer(ref_img);
-    vp8_yv12_de_alloc_frame_buffer(dst_img);
+    vp8_yv12_de_alloc_frame_buffer(&mut *img);
+    vp8_yv12_de_alloc_frame_buffer(&mut *ref_img);
+    vp8_yv12_de_alloc_frame_buffer(&mut *dst_img);
 }
 
 /// Reference border-extend (`ExtendPlane` from vpx_scale_test.h:115).
@@ -130,7 +132,7 @@ unsafe fn extend_plane(
 
 unsafe fn reference_extend_border(ref_img: *mut Yv12BufferConfig) {
     extend_plane(
-        (*ref_img).y_buffer,
+        (*ref_img).y_buffer(),
         (*ref_img).y_crop_width,
         (*ref_img).y_crop_height,
         (*ref_img).y_width,
@@ -139,7 +141,7 @@ unsafe fn reference_extend_border(ref_img: *mut Yv12BufferConfig) {
         (*ref_img).border,
     );
     extend_plane(
-        (*ref_img).u_buffer,
+        (*ref_img).u_buffer(),
         (*ref_img).uv_crop_width,
         (*ref_img).uv_crop_height,
         (*ref_img).uv_width,
@@ -148,7 +150,7 @@ unsafe fn reference_extend_border(ref_img: *mut Yv12BufferConfig) {
         (*ref_img).border / 2,
     );
     extend_plane(
-        (*ref_img).v_buffer,
+        (*ref_img).v_buffer(),
         (*ref_img).uv_crop_width,
         (*ref_img).uv_crop_height,
         (*ref_img).uv_width,
@@ -164,15 +166,15 @@ unsafe fn reference_copy_frame(img: *const Yv12BufferConfig, ref_img: *mut Yv12B
         for x in 0..(*img).y_crop_width {
             let dst_off = (x + y * (*ref_img).y_stride) as isize;
             let src_off = (x + y * (*img).y_stride) as isize;
-            *(*ref_img).y_buffer.offset(dst_off) = *(*img).y_buffer.offset(src_off);
+            *(*ref_img).y_buffer().offset(dst_off) = *(*img).y_buffer().offset(src_off);
         }
     }
     for y in 0..(*img).uv_crop_height {
         for x in 0..(*img).uv_crop_width {
             let dst_off = (x + y * (*ref_img).uv_stride) as isize;
             let src_off = (x + y * (*img).uv_stride) as isize;
-            *(*ref_img).u_buffer.offset(dst_off) = *(*img).u_buffer.offset(src_off);
-            *(*ref_img).v_buffer.offset(dst_off) = *(*img).v_buffer.offset(src_off);
+            *(*ref_img).u_buffer().offset(dst_off) = *(*img).u_buffer().offset(src_off);
+            *(*ref_img).v_buffer().offset(dst_off) = *(*img).v_buffer().offset(src_off);
         }
     }
     reference_extend_border(ref_img);
@@ -180,13 +182,29 @@ unsafe fn reference_copy_frame(img: *const Yv12BufferConfig, ref_img: *mut Yv12B
 
 unsafe fn compare_images(ref_img: *const Yv12BufferConfig, actual: *const Yv12BufferConfig) {
     assert_eq!((*ref_img).frame_size, (*actual).frame_size);
-    let a = std::slice::from_raw_parts((*ref_img).buffer_alloc, (*ref_img).frame_size);
-    let b = std::slice::from_raw_parts((*actual).buffer_alloc, (*actual).frame_size);
-    assert_eq!(a, b, "buffer_alloc mismatch");
+    let a = (*ref_img).owning_buffer.as_deref().unwrap();
+    let b = (*actual).owning_buffer.as_deref().unwrap();
+    assert_eq!(a, b, "slab mismatch");
 }
 
 unsafe fn new_yv12() -> Yv12BufferConfig {
     mem::zeroed()
+}
+
+/// Guards the layout invariant the codebase relies on: `Vp8dComp` (and
+/// the `sd` configs in SET/COPY_REFERENCE) are built via
+/// `core::mem::zeroed()`, so a zeroed `Yv12BufferConfig` must have
+/// `owning_buffer == None`. `Option<Box<[u8]>>` is a null-pointer-
+/// optimized niche type (None == all-zeros, guaranteed by std), but
+/// assert it so a future change to the field type can't silently turn
+/// it into `Some(dangling)`.
+#[test]
+fn zeroed_config_has_no_owning_buffer() {
+    let c: Yv12BufferConfig = unsafe { mem::zeroed() };
+    assert!(
+        c.owning_buffer.is_none(),
+        "zeroed Yv12BufferConfig must have owning_buffer == None"
+    );
 }
 
 // --- Tests --------------------------------------------------------

@@ -28,17 +28,17 @@ use crate::types::Yv12BufferConfig;
 /// [`setup_intra_recon_left`].
 pub unsafe fn vp8_setup_intra_recon_top_line(ybf: *mut Yv12BufferConfig) {
     write_bytes(
-        (*ybf).y_buffer.offset(-1 - (*ybf).y_stride as isize),
+        (*ybf).y_buffer().offset(-1 - (*ybf).y_stride as isize),
         INTRA_RECON_ABOVE_SEED,
         ((*ybf).y_width + 5) as usize,
     );
     write_bytes(
-        (*ybf).u_buffer.offset(-1 - (*ybf).uv_stride as isize),
+        (*ybf).u_buffer().offset(-1 - (*ybf).uv_stride as isize),
         INTRA_RECON_ABOVE_SEED,
         ((*ybf).uv_width + 5) as usize,
     );
     write_bytes(
-        (*ybf).v_buffer.offset(-1 - (*ybf).uv_stride as isize),
+        (*ybf).v_buffer().offset(-1 - (*ybf).uv_stride as isize),
         INTRA_RECON_ABOVE_SEED,
         ((*ybf).uv_width + 5) as usize,
     );

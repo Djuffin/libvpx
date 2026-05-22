@@ -22,6 +22,7 @@
 
 #![allow(dead_code)]
 
+use core::ptr::NonNull;
 
 use crate::tables::{
     BLOCK_TYPES, COEF_BANDS, ENTROPY_NODES, MvContext, PREV_COEF_CONTEXTS, Prob, QINDEX_RANGE,
@@ -300,10 +301,11 @@ pub struct ModeInfo {
 // ===========================================================================
 
 /// `YV12_BUFFER_CONFIG` (`yv12config.h`) — one slot in the DPB.
-/// Single contiguous `buffer_alloc`, with `y_buffer/u_buffer/v_buffer`
-/// offset into it by `border * stride + border`. RFC 6386 §16
-/// (decoded picture buffer); libvpx-specific bookkeeping otherwise.
-#[repr(C)]
+/// Single contiguous slab (an owned `Box<[u8]>`) with
+/// `y_buffer/u_buffer/v_buffer` offset into it by `border * stride +
+/// border`. RFC 6386 §16 (decoded picture buffer); libvpx-specific
+/// bookkeeping otherwise.
+#[derive(Default)]
 pub struct Yv12BufferConfig {
     pub y_width: i32,
     pub y_height: i32,
@@ -323,13 +325,23 @@ pub struct Yv12BufferConfig {
     pub alpha_height: i32,
     pub alpha_stride: i32,
 
-    pub y_buffer: *mut u8,
-    pub u_buffer: *mut u8,
-    pub v_buffer: *mut u8,
-    pub alpha_buffer: *mut u8,
+    /// Per-plane memory regions, each spanning the plane **plus its
+    /// surrounding border** (data pointer at the region base, length the
+    /// whole region). The visible top-left pixel is `border` rows/cols
+    /// in; use the [`y_buffer`](Self::y_buffer) / `u_buffer` / `v_buffer`
+    /// accessors to get that origin pointer. `None` when unallocated.
+    /// For caller-supplied (borrowed) configs these point at the
+    /// caller's memory; otherwise they alias into `owning_buffer`.
+    pub y_region: Option<NonNull<[u8]>>,
+    pub u_region: Option<NonNull<[u8]>>,
+    pub v_region: Option<NonNull<[u8]>>,
+    pub alpha_region: Option<NonNull<[u8]>>,
 
-    pub buffer_alloc: *mut u8,
-    pub buffer_alloc_sz: usize,
+    /// Owned backing allocation for an internally-allocated frame: a
+    /// zeroed boxed byte slice that `Box` frees on drop (no manual
+    /// alloc/free). `None` for borrowed/caller-supplied configs, whose
+    /// plane regions point at foreign memory.
+    pub owning_buffer: Option<Box<[u8]>>,
     pub border: i32,
     pub frame_size: usize,
 
@@ -345,6 +357,48 @@ pub struct Yv12BufferConfig {
 
     pub corrupted: i32,
     pub flags: i32,
+}
+
+impl Yv12BufferConfig {
+    /// Visible top-left **luma** pixel: the plane region base advanced by
+    /// the border (`border` rows + `border` cols). This is what most code
+    /// historically read as the `y_buffer` field. Panics if the Y region
+    /// is unallocated.
+    #[inline]
+    pub fn y_buffer(&self) -> *mut u8 {
+        let base = self.y_region.expect("y plane region").as_ptr() as *mut u8;
+        // SAFETY: the region spans plane+border, so this offset is inside it.
+        unsafe { base.add((self.border * self.y_stride + self.border) as usize) }
+    }
+
+    /// Visible top-left **U** (Cb) pixel. Chroma border is `border / 2`.
+    #[inline]
+    pub fn u_buffer(&self) -> *mut u8 {
+        let base = self.u_region.expect("u plane region").as_ptr() as *mut u8;
+        let b = self.border / 2;
+        unsafe { base.add((b * self.uv_stride + b) as usize) }
+    }
+
+    /// Visible top-left **V** (Cr) pixel.
+    #[inline]
+    pub fn v_buffer(&self) -> *mut u8 {
+        let base = self.v_region.expect("v plane region").as_ptr() as *mut u8;
+        let b = self.border / 2;
+        unsafe { base.add((b * self.uv_stride + b) as usize) }
+    }
+
+    /// Build a plane region from a visible-origin pointer by stepping
+    /// `back` bytes back to the region base and spanning `len` bytes.
+    /// `len` must cover from the region base through the plane + border.
+    #[inline]
+    pub unsafe fn plane_region_from_origin(
+        origin: *mut u8,
+        back: usize,
+        len: usize,
+    ) -> Option<NonNull<[u8]>> {
+        let base = unsafe { origin.sub(back) };
+        NonNull::new(base).map(|p| NonNull::slice_from_raw_parts(p, len))
+    }
 }
 
 // ===========================================================================
@@ -440,6 +494,60 @@ pub struct VpxInternalErrorInfo {
     pub error_code: VpxCodecErr,
 }
 
+/// Per-MB plane view into a frame buffer.
+///
+/// `MACROBLOCKD.pre` / `.dst` are a full `YV12_BUFFER_CONFIG` in libvpx,
+/// but the decoder only ever reads the three plane base pointers (which
+/// it advances per-MB to the current macroblock) and the luma/chroma
+/// strides off them. Carrying the whole config forced a bytewise struct
+/// copy at frame setup and left several aliased plane pointers live;
+/// this slim view holds exactly the five fields that are used.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct PlaneRef {
+    pub y_buffer: *mut u8,
+    pub u_buffer: *mut u8,
+    pub v_buffer: *mut u8,
+    pub y_stride: i32,
+    pub uv_stride: i32,
+}
+
+impl PlaneRef {
+    /// View of a frame buffer's plane bases + strides. The bases are the
+    /// frame origins; the per-MB loop advances them to the current MB.
+    #[inline]
+    pub fn of(ybf: &Yv12BufferConfig) -> Self {
+        PlaneRef {
+            y_buffer: ybf.y_buffer(),
+            u_buffer: ybf.u_buffer(),
+            v_buffer: ybf.v_buffer(),
+            y_stride: ybf.y_stride,
+            uv_stride: ybf.uv_stride,
+        }
+    }
+}
+
+/// Non-owning view of a decoded frame for output to the caller.
+///
+/// Carries the plane bases + strides of a DPB slot plus the *display*
+/// (cropped) dimensions. This is what `vp8dx_get_raw_frame` hands back
+/// to build the caller-facing `VpxImage` — replacing a bytewise copy of
+/// the slot's whole `Yv12BufferConfig`. The pointers alias the decoder's
+/// frame buffer and stay valid only until the next decode call.
+#[derive(Clone, Copy)]
+pub struct FrameView {
+    pub y_buffer: *mut u8,
+    pub u_buffer: *mut u8,
+    pub v_buffer: *mut u8,
+    /// Slab base, surfaced as the output image's `img_data`.
+    pub buffer_alloc: *mut u8,
+    pub y_stride: i32,
+    pub uv_stride: i32,
+    /// Cropped (visible) luma dimensions, not the 16-aligned ones.
+    pub display_width: i32,
+    pub display_height: i32,
+}
+
 /// `MACROBLOCKD` (`blockd.h`) — the working state for one macroblock
 /// during decode. Heavy alignment (`align(16)`) because libvpx's
 /// reference SIMD reads `qcoeff` / `dqcoeff` / `eobs` directly as
@@ -461,10 +569,10 @@ pub struct Macroblockd {
     /// Mask used to round MVs to full-pel when `full_pixel` is set.
     pub fullpixel_mask: i32,
 
-    /// Source frame (selected reference) descriptor.
-    pub pre: Yv12BufferConfig,
-    /// Destination (current frame) descriptor.
-    pub dst: Yv12BufferConfig,
+    /// Source frame (selected reference) plane view.
+    pub pre: PlaneRef,
+    /// Destination (current frame) plane view.
+    pub dst: PlaneRef,
 
     pub mode_info_stride: i32,
 

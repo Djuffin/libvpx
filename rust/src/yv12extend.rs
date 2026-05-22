@@ -91,7 +91,7 @@ pub unsafe fn vp8_yv12_extend_frame_borders_c(ybf: *mut Yv12BufferConfig) {
     assert!((*ybf).y_width - (*ybf).y_crop_width >= 0);
 
     extend_plane(
-        (*ybf).y_buffer,
+        (*ybf).y_buffer(),
         (*ybf).y_stride,
         (*ybf).y_crop_width,
         (*ybf).y_crop_height,
@@ -102,7 +102,7 @@ pub unsafe fn vp8_yv12_extend_frame_borders_c(ybf: *mut Yv12BufferConfig) {
     );
 
     extend_plane(
-        (*ybf).u_buffer,
+        (*ybf).u_buffer(),
         (*ybf).uv_stride,
         (*ybf).uv_crop_width,
         (*ybf).uv_crop_height,
@@ -113,7 +113,7 @@ pub unsafe fn vp8_yv12_extend_frame_borders_c(ybf: *mut Yv12BufferConfig) {
     );
 
     extend_plane(
-        (*ybf).v_buffer,
+        (*ybf).v_buffer(),
         (*ybf).uv_stride,
         (*ybf).uv_crop_width,
         (*ybf).uv_crop_height,
@@ -136,8 +136,8 @@ pub unsafe fn vp8_yv12_copy_frame_c(
     src_ybc: *const Yv12BufferConfig,
     dst_ybc: *mut Yv12BufferConfig,
 ) {
-    let mut src: *const u8 = (*src_ybc).y_buffer;
-    let mut dst: *mut u8 = (*dst_ybc).y_buffer;
+    let mut src: *const u8 = (*src_ybc).y_buffer();
+    let mut dst: *mut u8 = (*dst_ybc).y_buffer();
 
     // #if 0 block (disabled assertions) elided.
 
@@ -147,8 +147,8 @@ pub unsafe fn vp8_yv12_copy_frame_c(
         dst = dst.offset((*dst_ybc).y_stride as isize);
     }
 
-    src = (*src_ybc).u_buffer;
-    dst = (*dst_ybc).u_buffer;
+    src = (*src_ybc).u_buffer();
+    dst = (*dst_ybc).u_buffer();
 
     for _ in 0..(*src_ybc).uv_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).uv_width as usize);
@@ -156,8 +156,8 @@ pub unsafe fn vp8_yv12_copy_frame_c(
         dst = dst.offset((*dst_ybc).uv_stride as isize);
     }
 
-    src = (*src_ybc).v_buffer;
-    dst = (*dst_ybc).v_buffer;
+    src = (*src_ybc).v_buffer();
+    dst = (*dst_ybc).v_buffer();
 
     for _ in 0..(*src_ybc).uv_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).uv_width as usize);
@@ -175,8 +175,8 @@ pub unsafe fn vp8_yv12_copy_frame_c(
 /// Both pointers must reference valid `Yv12BufferConfig`s with
 /// matching luma dimensions.
 pub unsafe fn vpx_yv12_copy_y_c(src_ybc: *const Yv12BufferConfig, dst_ybc: *mut Yv12BufferConfig) {
-    let mut src: *const u8 = (*src_ybc).y_buffer;
-    let mut dst: *mut u8 = (*dst_ybc).y_buffer;
+    let mut src: *const u8 = (*src_ybc).y_buffer();
+    let mut dst: *mut u8 = (*dst_ybc).y_buffer();
 
     for _ in 0..(*src_ybc).y_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).y_width as usize);

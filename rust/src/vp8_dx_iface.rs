@@ -16,8 +16,8 @@ use crate::onyxd_if::{
     vp8dx_get_reference, vp8dx_set_reference,
 };
 use crate::types::{
-    FragmentData, FrameBuffers, VP8_BORDER_IN_PIXELS, MAX_PARTITIONS,
-    Vp8PpFlags, Vp8dComp, Vp8dConfig, VpxInternalErrorInfo, Yv12BufferConfig,
+    FragmentData, FrameBuffers, FrameView, VP8_BORDER_IN_PIXELS, MAX_PARTITIONS,
+    PlaneRef, Vp8PpFlags, Vp8dComp, Vp8dConfig, VpxInternalErrorInfo, Yv12BufferConfig,
 };
 use crate::vpx_api::*;
 use crate::vpx_codec::vpx_internal_error;
@@ -216,32 +216,34 @@ fn update_error_state(error: &VpxInternalErrorInfo) -> VpxCodecErr {
 }
 
 /// `yuvconfig2image` — `vp8/vp8_dx_iface.c:210`.
-fn yuvconfig2image(img: &mut VpxImage, yv12: &Yv12BufferConfig, user_priv: *mut c_void) {
+fn yuvconfig2image(img: &mut VpxImage, view: &FrameView, user_priv: *mut c_void) {
     // vpx_img_wrap() doesn't allow specifying independent strides for
     // the Y, U, and V planes, nor other alignment adjustments that
     // might be representable by a YV12_BUFFER_CONFIG, so we just
-    // initialize all the fields.
+    // initialize all the fields. The dimensions here are the cropped
+    // (display) ones — the C source overwrites the descriptor's
+    // y_width/y_height with pc->Width/Height before this conversion.
     img.fmt = VPX_IMG_FMT_I420;
-    img.w = yv12.y_stride as u32;
-    img.h = ((yv12.y_height + 2 * VP8_BORDER_IN_PIXELS + 15) & !15) as u32;
-    img.d_w = yv12.y_width as u32;
-    img.r_w = yv12.y_width as u32;
-    img.d_h = yv12.y_height as u32;
-    img.r_h = yv12.y_height as u32;
+    img.w = view.y_stride as u32;
+    img.h = ((view.display_height + 2 * VP8_BORDER_IN_PIXELS + 15) & !15) as u32;
+    img.d_w = view.display_width as u32;
+    img.r_w = view.display_width as u32;
+    img.d_h = view.display_height as u32;
+    img.r_h = view.display_height as u32;
     img.x_chroma_shift = 1;
     img.y_chroma_shift = 1;
-    img.planes[VPX_PLANE_Y] = yv12.y_buffer;
-    img.planes[VPX_PLANE_U] = yv12.u_buffer;
-    img.planes[VPX_PLANE_V] = yv12.v_buffer;
+    img.planes[VPX_PLANE_Y] = view.y_buffer;
+    img.planes[VPX_PLANE_U] = view.u_buffer;
+    img.planes[VPX_PLANE_V] = view.v_buffer;
     img.planes[VPX_PLANE_ALPHA] = ptr::null_mut();
-    img.stride[VPX_PLANE_Y] = yv12.y_stride;
-    img.stride[VPX_PLANE_U] = yv12.uv_stride;
-    img.stride[VPX_PLANE_V] = yv12.uv_stride;
-    img.stride[VPX_PLANE_ALPHA] = yv12.y_stride;
+    img.stride[VPX_PLANE_Y] = view.y_stride;
+    img.stride[VPX_PLANE_U] = view.uv_stride;
+    img.stride[VPX_PLANE_V] = view.uv_stride;
+    img.stride[VPX_PLANE_ALPHA] = view.y_stride;
     img.bit_depth = 8;
     img.bps = 12;
     img.user_priv = user_priv;
-    img.img_data = yv12.buffer_alloc;
+    img.img_data = view.buffer_alloc;
     img.img_data_owner = 0;
     img.self_allocd = 0;
 }
@@ -455,19 +457,12 @@ unsafe fn vp8_decode_resolution_change(
     }
 
     // xd->pre = pc->yv12_fb[pc->lst_fb_idx];
-    let lst = pbi.common.lst_fb_idx as usize;
-    ptr::copy_nonoverlapping(
-        &pbi.common.yv12_fb[lst] as *const Yv12BufferConfig,
-        &mut pbi.mb.pre as *mut Yv12BufferConfig,
-        1,
-    );
     // xd->dst = pc->yv12_fb[pc->new_fb_idx];
+    // pre/dst are slim plane views: copy plane bases + strides only.
+    let lst = pbi.common.lst_fb_idx as usize;
     let new = pbi.common.new_fb_idx as usize;
-    ptr::copy_nonoverlapping(
-        &pbi.common.yv12_fb[new] as *const Yv12BufferConfig,
-        &mut pbi.mb.dst as *mut Yv12BufferConfig,
-        1,
-    );
+    pbi.mb.pre = PlaneRef::of(&pbi.common.yv12_fb[lst]);
+    pbi.mb.dst = PlaneRef::of(&pbi.common.yv12_fb[new]);
 
     vp8_build_block_doffsets(&mut pbi.mb);
 
@@ -486,7 +481,6 @@ pub unsafe fn vp8_get_frame(
     // iter acts as a flip flop, so an image is only returned on the first
     // call to get_frame.
     if (*iter).is_null() && (*ctx).yv12_frame_buffers.pbi.is_some() {
-        let mut sd: Yv12BufferConfig = core::mem::zeroed();
         let mut flags: Vp8PpFlags = Vp8PpFlags::default();
 
         if ((*ctx).base.init_flags & VPX_CODEC_USE_POSTPROC) != 0 {
@@ -500,8 +494,8 @@ pub unsafe fn vp8_get_frame(
             .pbi
             .as_deref_mut()
             .expect("pbi present (guarded by pbi.is_some() above)");
-        if vp8dx_get_raw_frame(pbi, &mut sd, &mut flags) == 0 {
-            yuvconfig2image(&mut (*ctx).img, &sd, (*ctx).user_priv);
+        if let Some(view) = vp8dx_get_raw_frame(pbi, &mut flags) {
+            yuvconfig2image(&mut (*ctx).img, &view, (*ctx).user_priv);
 
             img = &mut (*ctx).img;
             *iter = img as *mut c_void;
@@ -518,9 +512,6 @@ fn image2yuvconfig(img: &VpxImage, yv12: &mut Yv12BufferConfig) -> VpxCodecErr {
     let uv_w = (img.d_w as i32 + 1) / 2;
     let uv_h = (img.d_h as i32 + 1) / 2;
     let res: VpxCodecErr = VPX_CODEC_OK;
-    yv12.y_buffer = img.planes[VPX_PLANE_Y];
-    yv12.u_buffer = img.planes[VPX_PLANE_U];
-    yv12.v_buffer = img.planes[VPX_PLANE_V];
 
     yv12.y_crop_width = y_w;
     yv12.y_crop_height = y_h;
@@ -531,10 +522,38 @@ fn image2yuvconfig(img: &VpxImage, yv12: &mut Yv12BufferConfig) -> VpxCodecErr {
     yv12.uv_width = uv_w;
     yv12.uv_height = uv_h;
 
-    yv12.y_stride = img.stride[VPX_PLANE_Y];
-    yv12.uv_stride = img.stride[VPX_PLANE_U];
+    let y_stride = img.stride[VPX_PLANE_Y];
+    let uv_stride = img.stride[VPX_PLANE_U];
+    yv12.y_stride = y_stride;
+    yv12.uv_stride = uv_stride;
 
-    yv12.border = (img.stride[VPX_PLANE_Y] - img.d_w as i32) / 2;
+    let border = (y_stride - img.d_w as i32) / 2;
+    yv12.border = border;
+    let b = border / 2;
+
+    // Plane regions span plane+border, with the data pointer stepped back
+    // from the caller's visible origin to the region base. This mirrors
+    // the C contract that a bordered caller buffer has the surrounding
+    // slack (for border == 0 the region simply starts at the origin).
+    // SAFETY: the caller guarantees a buffer with the implied border.
+    unsafe {
+        yv12.y_region = Yv12BufferConfig::plane_region_from_origin(
+            img.planes[VPX_PLANE_Y],
+            (border * y_stride + border) as usize,
+            ((y_h + 2 * border) * y_stride) as usize,
+        );
+        yv12.u_region = Yv12BufferConfig::plane_region_from_origin(
+            img.planes[VPX_PLANE_U],
+            (b * uv_stride + b) as usize,
+            ((uv_h + 2 * b) * uv_stride) as usize,
+        );
+        yv12.v_region = Yv12BufferConfig::plane_region_from_origin(
+            img.planes[VPX_PLANE_V],
+            (b * uv_stride + b) as usize,
+            ((uv_h + 2 * b) * uv_stride) as usize,
+        );
+    }
+    yv12.alpha_region = None;
     res
 }
 

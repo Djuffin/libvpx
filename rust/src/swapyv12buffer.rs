@@ -19,8 +19,10 @@ use crate::types::Yv12BufferConfig;
 /// expected to have allocated both buffers with identical dimensions.
 /// The `&mut` signature statically prevents aliasing the two frames.
 pub fn vp8_swap_yv12_buffer(new_frame: &mut Yv12BufferConfig, last_frame: &mut Yv12BufferConfig) {
-    core::mem::swap(&mut last_frame.buffer_alloc, &mut new_frame.buffer_alloc);
-    core::mem::swap(&mut last_frame.y_buffer, &mut new_frame.y_buffer);
-    core::mem::swap(&mut last_frame.u_buffer, &mut new_frame.u_buffer);
-    core::mem::swap(&mut last_frame.v_buffer, &mut new_frame.v_buffer);
+    // The owned slab moves with the plane regions that point into it.
+    // mem::swap transfers ownership / the region pointers without freeing.
+    core::mem::swap(&mut last_frame.owning_buffer, &mut new_frame.owning_buffer);
+    core::mem::swap(&mut last_frame.y_region, &mut new_frame.y_region);
+    core::mem::swap(&mut last_frame.u_region, &mut new_frame.u_region);
+    core::mem::swap(&mut last_frame.v_region, &mut new_frame.v_region);
 }

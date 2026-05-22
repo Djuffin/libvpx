@@ -32,20 +32,14 @@ use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buf
 ///
 /// Source: `vp8/common/alloccommon.c:22`.
 pub fn vp8_de_alloc_frame_buffers(oci: &mut Vp8Common) {
-    // SAFETY: `vp8_yv12_de_alloc_frame_buffer` accepts a null buffer
-    // descriptor; the embedded YV12 slots are either populated by
-    // `vp8_alloc_frame_buffers` or already nulled by a previous
-    // teardown.
-    unsafe {
-        for i in 0..NUM_YV12_BUFFERS {
-            vp8_yv12_de_alloc_frame_buffer(&mut oci.yv12_fb[i]);
-            oci.fb_idx_ref_cnt[i] = 0;
-        }
-
-        vp8_yv12_de_alloc_frame_buffer(&mut oci.temp_scale_frame);
-
-        // CONFIG_POSTPROC block omitted (minimal build).
+    for i in 0..NUM_YV12_BUFFERS {
+        vp8_yv12_de_alloc_frame_buffer(&mut oci.yv12_fb[i]);
+        oci.fb_idx_ref_cnt[i] = 0;
     }
+
+    vp8_yv12_de_alloc_frame_buffer(&mut oci.temp_scale_frame);
+
+    // CONFIG_POSTPROC block omitted (minimal build).
 
     oci.above_context = None;
     oci.mip = None;
@@ -73,12 +67,8 @@ pub fn vp8_alloc_frame_buffers(oci: &mut Vp8Common, mut width: i32, mut height: 
     }
 
     for i in 0..NUM_YV12_BUFFERS {
-        // SAFETY: `oci.yv12_fb[i]` is a valid `Yv12BufferConfig` slot;
-        // the YV12 allocator initialises plane pointers from a single
-        // memalign'd allocation.
-        let rc = unsafe {
-            vp8_yv12_alloc_frame_buffer(&mut oci.yv12_fb[i], width, height, VP8_BORDER_IN_PIXELS)
-        };
+        let rc =
+            vp8_yv12_alloc_frame_buffer(&mut oci.yv12_fb[i], width, height, VP8_BORDER_IN_PIXELS);
         if rc < 0 {
             // goto allocation_fail
             vp8_de_alloc_frame_buffers(oci);
@@ -96,10 +86,7 @@ pub fn vp8_alloc_frame_buffers(oci: &mut Vp8Common, mut width: i32, mut height: 
     oci.fb_idx_ref_cnt[2] = 1;
     oci.fb_idx_ref_cnt[3] = 1;
 
-    // SAFETY: same as above — valid YV12 slot.
-    let rc = unsafe {
-        vp8_yv12_alloc_frame_buffer(&mut oci.temp_scale_frame, width, 16, VP8_BORDER_IN_PIXELS)
-    };
+    let rc = vp8_yv12_alloc_frame_buffer(&mut oci.temp_scale_frame, width, 16, VP8_BORDER_IN_PIXELS);
     if rc < 0 {
         vp8_de_alloc_frame_buffers(oci);
         return 1;

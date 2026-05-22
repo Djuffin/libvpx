@@ -22,8 +22,8 @@ use crate::tables::{
 use crate::types::{
     ClampType, EntropyContextPlanes, FrameContext, FrameType, LoopFilterType, MAX_MB_SEGMENTS,
     MAX_MODE_LF_DELTAS, MAX_REF_FRAMES, MAX_REF_LF_DELTAS, MB_FEATURE_TREE_PROBS, MB_LVL_MAX,
-    Macroblockd, MbLevelFeature, MbPredictionMode, ModeInfo, MvReferenceFrame, TokenPartition,
-    Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig,
+    Macroblockd, MbLevelFeature, MbPredictionMode, ModeInfo, MvReferenceFrame, PlaneRef,
+    TokenPartition, Vp8Common, Vp8Reader, Vp8dComp, VpxResult, Yv12BufferConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -376,7 +376,7 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     /* Y Plane */
     Border = (*ybf).border as u32;
     plane_stride = (*ybf).y_stride;
-    src_ptr1 = (*ybf).y_buffer.offset(-(Border as isize));
+    src_ptr1 = (*ybf).y_buffer().offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
     for _ in 0..Border as i32 {
@@ -387,7 +387,7 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     /* U Plane */
     plane_stride = (*ybf).uv_stride;
     Border /= 2;
-    src_ptr1 = (*ybf).u_buffer.offset(-(Border as isize));
+    src_ptr1 = (*ybf).u_buffer().offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
     for _ in 0..Border as i32 {
@@ -396,7 +396,7 @@ unsafe fn yv12_extend_frame_top_c(ybf: *mut Yv12BufferConfig) {
     }
 
     /* V Plane */
-    src_ptr1 = (*ybf).v_buffer.offset(-(Border as isize));
+    src_ptr1 = (*ybf).v_buffer().offset(-(Border as isize));
     dest_ptr1 = src_ptr1.offset(-((Border as isize) * (plane_stride as isize)));
 
     for _ in 0..Border as i32 {
@@ -424,7 +424,7 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
     plane_stride = (*ybf).y_stride;
     plane_height = (*ybf).y_height;
 
-    src_ptr1 = (*ybf).y_buffer.offset(-(Border as isize));
+    src_ptr1 = (*ybf).y_buffer().offset(-(Border as isize));
     src_ptr2 = src_ptr1
         .offset((plane_height as isize) * (plane_stride as isize))
         .offset(-(plane_stride as isize));
@@ -440,7 +440,7 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
     plane_height = (*ybf).uv_height;
     Border /= 2;
 
-    src_ptr1 = (*ybf).u_buffer.offset(-(Border as isize));
+    src_ptr1 = (*ybf).u_buffer().offset(-(Border as isize));
     src_ptr2 = src_ptr1
         .offset((plane_height as isize) * (plane_stride as isize))
         .offset(-(plane_stride as isize));
@@ -452,7 +452,7 @@ unsafe fn yv12_extend_frame_bottom_c(ybf: *mut Yv12BufferConfig) {
     }
 
     /* V Plane */
-    src_ptr1 = (*ybf).v_buffer.offset(-(Border as isize));
+    src_ptr1 = (*ybf).v_buffer().offset(-(Border as isize));
     src_ptr2 = src_ptr1
         .offset((plane_height as isize) * (plane_stride as isize))
         .offset(-(plane_stride as isize));
@@ -559,9 +559,9 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
     let mut ref_fb_corrupted: [i32; MAX_REF_FRAMES] = [0; MAX_REF_FRAMES];
     for i in 1..MAX_REF_FRAMES {
         let this_fb = &pbi.common.yv12_fb[pbi.dec_fb_ref_idx[i] as usize];
-        ref_buffer[i][0] = this_fb.y_buffer;
-        ref_buffer[i][1] = this_fb.u_buffer;
-        ref_buffer[i][2] = this_fb.v_buffer;
+        ref_buffer[i][0] = this_fb.y_buffer();
+        ref_buffer[i][1] = this_fb.u_buffer();
+        ref_buffer[i][2] = this_fb.v_buffer();
         ref_fb_corrupted[i] = this_fb.corrupted;
     }
 
@@ -571,7 +571,7 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
     let yv12_fb_new: *mut Yv12BufferConfig = &mut pbi.common.yv12_fb[new_idx];
     let (recon_y_stride, recon_uv_stride, dst_y, dst_u, dst_v) = {
         let yv12 = &pbi.common.yv12_fb[new_idx];
-        (yv12.y_stride, yv12.uv_stride, yv12.y_buffer, yv12.u_buffer, yv12.v_buffer)
+        (yv12.y_stride, yv12.uv_stride, yv12.y_buffer(), yv12.u_buffer(), yv12.v_buffer())
     };
     let dst_buffer: [*mut u8; 3] = [dst_y, dst_u, dst_v];
     let mut lf_dst: [*mut u8; 3] = [dst_y, dst_u, dst_v];
@@ -1140,15 +1140,12 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
                 data = data_end;
             }
         } else {
-            // C does `xd->pre = *yv12_fb_new; xd->dst = *yv12_fb_new;` —
-            // a full struct copy. Yv12BufferConfig is not Copy (it owns
-            // raw plane pointers), so mirror with ptr::copy.
-            // SAFETY: yv12_fb[new_idx] is live and distinct from xd.pre/xd.dst.
-            unsafe {
-                let src: *const Yv12BufferConfig = &pbi.common.yv12_fb[new_idx];
-                ptr::copy_nonoverlapping(src, &mut pbi.mb.pre, 1);
-                ptr::copy_nonoverlapping(src, &mut pbi.mb.dst, 1);
-            }
+            // C does `xd->pre = *yv12_fb_new; xd->dst = *yv12_fb_new;`.
+            // pre/dst are slim plane views now: copy the plane bases +
+            // strides; the per-MB loop re-points y/u/v_buffer.
+            let view = PlaneRef::of(&pbi.common.yv12_fb[new_idx]);
+            pbi.mb.pre = view;
+            pbi.mb.dst = view;
         }
     }
     if pbi.decoded_key_frame == 0 && pbi.common.frame_type != KEY_FRAME {

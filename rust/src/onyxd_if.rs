@@ -20,10 +20,9 @@
 #![allow(non_camel_case_types)]
 #![allow(clippy::missing_safety_doc)]
 
-use core::ptr;
 
 use crate::types::{
-    FrameBuffers, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
+    FrameBuffers, FrameView, NUM_YV12_BUFFERS, Vp8Common, Vp8PpFlags,
     Vp8dComp, Vp8dConfig, VpxResult, Yv12BufferConfig,
 };
 
@@ -404,18 +403,17 @@ pub fn vp8dx_receive_compressed_data(pbi: &mut Vp8dComp<'static>) -> VpxResult<(
 
 /// `vp8dx_get_raw_frame` — `vp8/decoder/onyxd_if.c:376`.
 
-pub unsafe fn vp8dx_get_raw_frame(
+pub fn vp8dx_get_raw_frame(
     pbi: &mut Vp8dComp<'static>,
-    sd: *mut Yv12BufferConfig,
     flags: *mut Vp8PpFlags,
-) -> i32 {
+) -> Option<FrameView> {
     if pbi.ready_for_new_data == 1 {
-        return -1;
+        return None;
     }
 
     // ie no raw frame to show!!!
     if pbi.common.show_frame == 0 {
-        return -1;
+        return None;
     }
 
     pbi.ready_for_new_data = 1;
@@ -423,22 +421,32 @@ pub unsafe fn vp8dx_get_raw_frame(
     // CONFIG_POSTPROC is disabled — cast flags to void as the C source does.
     let _ = flags;
 
-    let ret = if pbi.common.frame_to_show_idx >= 0 {
-        // Shallow descriptor copy — *sd shares plane buffers with the
-        // decoder's frame_to_show until the next call to
-        // vp8dx_receive_compressed_data.
-        let idx = pbi.common.frame_to_show_idx as usize;
-        ptr::copy_nonoverlapping(&pbi.common.yv12_fb[idx], sd, 1);
-        (*sd).y_width = pbi.common.width;
-        (*sd).y_height = pbi.common.height;
-        (*sd).uv_height = pbi.common.height / 2;
-        0
+    // A non-owning view that shares plane buffers with the decoder's
+    // frame_to_show until the next call to vp8dx_receive_compressed_data.
+    // The visible dimensions are the cropped ones, not the slot's
+    // 16-aligned width/height.
+    let view = if pbi.common.frame_to_show_idx >= 0 {
+        let slot = &pbi.common.yv12_fb[pbi.common.frame_to_show_idx as usize];
+        Some(FrameView {
+            y_buffer: slot.y_buffer(),
+            u_buffer: slot.u_buffer(),
+            v_buffer: slot.v_buffer(),
+            // Slab base, surfaced as the output image's `img_data`.
+            buffer_alloc: slot
+                .owning_buffer
+                .as_ref()
+                .map_or(core::ptr::null_mut(), |s| s.as_ptr() as *mut u8),
+            y_stride: slot.y_stride,
+            uv_stride: slot.uv_stride,
+            display_width: pbi.common.width,
+            display_height: pbi.common.height,
+        })
     } else {
-        -1
+        None
     };
 
     vpx_clear_system_state();
-    ret
+    view
 }
 
 /// `vp8dx_references_buffer` — `vp8/decoder/onyxd_if.c:411`.
