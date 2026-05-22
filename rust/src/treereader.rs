@@ -1,15 +1,10 @@
-//! Header-only inline wrappers from `vp8/decoder/treereader.h`.
-//!
-//! Every entity in the C header is either a typedef, a `#define` macro,
-//! or a `static INLINE` function — so nothing here corresponds to an
-//! `.o` in the C build, but every name is referenced from
-//! `decodemv.c` / `decodeframe.c` and must exist as a Rust symbol.
+//! Tree-coder helpers from `vp8/decoder/treereader.h`.
 
 use crate::dboolhuff::{vp8_decode_value, vp8dx_decode_bool};
 use crate::tables::{PROB_HALF, Prob, TreeIndex};
 use crate::types::BoolDecoder;
 
-/// `typedef BOOL_DECODER vp8_reader;` — the bitstream-side bool decoder.
+/// `typedef BOOL_DECODER vp8_reader;`
 pub type vp8_reader<'a> = BoolDecoder<'a>;
 
 /// `#define vp8_read vp8dx_decode_bool` — read one binary symbol against

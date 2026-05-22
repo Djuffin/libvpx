@@ -5,11 +5,8 @@
 //! passes (intra/inter prediction, reconstruction) can address each
 //! 4x4 sub-block uniformly via the `BLOCKD` array.
 //!
-//! The C source also has `vp8_setup_block_dptrs` which wires
-//! `qcoeff`/`dqcoeff`/`predictor`/`eob` pointer aliases per block.
-//! All five fields are encoder-only convenience caches into
-//! `Macroblockd`'s flat arrays; the decoder-only Rust port omits both
-//! the fields and the setup function.
+//! The C source's `vp8_setup_block_dptrs` wires encoder-only pointer
+//! aliases (`qcoeff`/`dqcoeff`/`predictor`/`eob`) and is not ported.
 
 use crate::types::Macroblockd;
 

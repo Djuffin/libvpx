@@ -1,10 +1,8 @@
 //! `vp8/common/reconinter.c` — inter-prediction reconstruction.
 //!
-//! Literal Rust translation of `vp8/common/reconinter.c`. Materialises
-//! the per-macroblock inter predictor samples — either via a plain
-//! rectangular copy (integer-MV fast path) or by dispatching one of the
-//! installed sub-pel kernels — into the destination YV12 plane. See
-//! `documentation/vp8_files/reconinter.md` for the narrative walk-through.
+//! Materialises the per-macroblock inter predictor samples — either via
+//! a plain rectangular copy (integer-MV fast path) or by dispatching one
+//! of the installed sub-pel kernels — into the destination YV12 plane.
 
 #![allow(dead_code)]
 #![allow(non_snake_case)]
@@ -13,23 +11,12 @@
 use crate::types::{BModeInfo, Blockd, Macroblockd, MbPredictionMode, ModeInfo, Mv, SubpixFn};
 
 // ===========================================================================
-// External dependencies (sub-pel filter kernels — defined in `filter.c`
-// and dispatched here through `MACROBLOCKD::subpixel_predict*`).
-// The function pointers themselves live in [`Macroblockd`], so there is
-// nothing extra to import for them. The plain-copy kernels are static
-// helpers in this same file (the `_c` variants); when the libvpx RTCD
-// dispatcher would select a SIMD specialisation, we always pick the
-// portable `_c` body in the Rust port.
-// ===========================================================================
-
-// ===========================================================================
 // `int_mv` helpers
 // ===========================================================================
 
-/// Mirror the C `int_mv` union's `as_int` field for the equality /
+/// Pack an MV into the C `int_mv` union's `as_int` form for the equality /
 /// "any fractional bit set" tests below. The exact bit layout does not
-/// matter — only that it is a bijection on `(row, col)` pairs — so use
-/// the same packing as `entropymode::mv_as_int`.
+/// matter — only that it is a bijection on `(row, col)` pairs.
 #[inline]
 fn bmi_as_int(b: &BModeInfo) -> u32 {
     match *b {
@@ -38,16 +25,12 @@ fn bmi_as_int(b: &BModeInfo) -> u32 {
     }
 }
 
-/// Borrow the [`Mv`] payload of a `BModeInfo::Mv` variant. In the C
-/// source this is the trivial `bmi.mv.as_mv` projection; we assume the
-/// caller only touches `bmi.mv` when the parent MB is in SPLITMV (i.e.
-/// the variant is `Mv`), which mirrors the C invariant.
+/// Mutably borrow the [`Mv`] payload of a `BModeInfo`. The C union has no
+/// variant tag; an `Intra` value here means an uninitialised MV, so coerce
+/// it to a zero MV before borrowing.
 #[inline]
 fn bmi_mv_mut(b: &mut BModeInfo) -> &mut Mv {
     if let BModeInfo::Intra(_) = b {
-        // The C union doesn't distinguish; in practice the SPLITMV
-        // path always installs an `Mv` variant before reading. Coerce
-        // by overwriting with a zero MV and re-borrowing.
         *b = BModeInfo::Mv(Mv { row: 0, col: 0 });
     }
     match b {
@@ -57,7 +40,7 @@ fn bmi_mv_mut(b: &mut BModeInfo) -> &mut Mv {
 }
 
 /// Read the `Mv` payload (zero if the variant is `Intra`, matching the
-/// implicit zero-init the C union has on a fresh `BLOCKD`).
+/// implicit zero-init of a fresh `BLOCKD`).
 #[inline]
 fn bmi_mv(b: &BModeInfo) -> Mv {
     match *b {
@@ -123,8 +106,7 @@ pub unsafe fn vp8_copy_mem8x4_c(
     }
 }
 
-// Internal wrappers that mirror the RTCD-dispatched symbols without the
-// `_c` suffix. The Rust port always uses the portable body.
+// Wrappers for the RTCD-dispatched symbols; always use the portable body.
 #[inline]
 unsafe fn vp8_copy_mem16x16(src: *mut u8, src_stride: i32, dst: *mut u8, dst_stride: i32) {
     vp8_copy_mem16x16_c(src, src_stride, dst, dst_stride);
@@ -336,8 +318,6 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
     let uptr: *mut u8;
     let vptr: *mut u8;
 
-    // `int_mv` modelled as a plain `Mv` plus a packed-int snapshot for
-    // the `as_int & 0x00070007` test.
     let mut _16x16mv: Mv;
 
     let ptr_base: *mut u8 = x.pre.y_buffer;
@@ -359,8 +339,7 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
         .offset(((_16x16mv.row as i32 >> 3) * pre_stride) as isize)
         .offset((_16x16mv.col as i32 >> 3) as isize);
 
-    // C tests `_16x16mv.as_int & 0x00070007`; mirror by packing into the
-    // same layout `entropymode::mv_as_int` uses (col<<16 | row).
+    // C tests `_16x16mv.as_int & 0x00070007` (any fractional bit set).
     let mut as_int: u32 = ((_16x16mv.col as u16 as u32) << 16) | (_16x16mv.row as u16 as u32);
 
     if (as_int & 0x0007_0007) != 0 {
@@ -434,9 +413,9 @@ pub unsafe fn vp8_build_inter16x16_predictors_mb(
 ///
 /// Source: `vp8/common/reconinter.c:359`.
 unsafe fn build_inter4x4_predictors_mb(x: &mut Macroblockd, mi: &ModeInfo) {
-    // Snapshot fn pointers + plane bases up front. After this, x is held
-    // for `block[]` access only, avoiding borrow conflicts with the
-    // raw pixel pointers we pass to sub-calls.
+    // Snapshot fn pointers + plane bases up front so x is only borrowed
+    // for `block[]` access, avoiding conflicts with the raw pixel
+    // pointers passed to sub-calls.
     let sp8x8 = x.subpixel_predict8x8;
     let sp8x4 = x.subpixel_predict8x4;
     let sp4x4 = x.subpixel_predict;
@@ -607,7 +586,6 @@ fn build_4x4uvmvs(x: &mut Macroblockd, mi: &ModeInfo) {
 
             let mut temp: i32;
 
-            // `mode_info_context->bmi[k].mv.as_mv.row` -> via bmi_mv helper.
             temp = bmi_mv(&mi.bmi[(yoffset + 0) as usize]).row as i32
                 + bmi_mv(&mi.bmi[(yoffset + 1) as usize]).row as i32
                 + bmi_mv(&mi.bmi[(yoffset + 4) as usize]).row as i32

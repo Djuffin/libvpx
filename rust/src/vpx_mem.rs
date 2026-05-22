@@ -1,23 +1,13 @@
-//! `vpx_mem/vpx_mem.c` — the codec's memory front door.
-//!
-//! Literal transliteration of the four public entry points
-//! (`vpx_memalign`, `vpx_malloc`, `vpx_calloc`, `vpx_free`) plus the
-//! five `static` helpers (`check_size_argument_overflow`,
-//! `get_malloc_address_location`, `get_aligned_malloc_size`,
-//! `set_actual_malloc_address`, `get_actual_malloc_address`).
+//! `vpx_mem/vpx_mem.c` — the codec's memory allocation front end.
 //!
 //! The C code over-allocates and stashes the original `malloc` pointer
-//! in the `sizeof(size_t)` slot immediately preceding the returned
-//! address, so `free` can recover it. Rust's `std::alloc::dealloc`
-//! additionally requires the original [`Layout`] (size + align), so the
-//! header here holds **two** `usize` words: the original allocation
-//! pointer and the original allocation size. The header slot grows from
-//! `sizeof(size_t)` to `2 * sizeof(size_t)`, which is wider than the C
-//! original but invisible to callers.
+//! in the slot immediately preceding the returned address, so `free` can
+//! recover it. Rust's `std::alloc::dealloc` additionally requires the
+//! original [`Layout`] (size + align), so the header here holds **two**
+//! `usize` words: the original allocation pointer and the original
+//! allocation size.
 //!
-//! There is no `vpx_realloc` in the C source — the codec uses the
-//! explicit `vpx_free` + `vpx_calloc` pattern instead — so none is
-//! provided here either.
+//! There is no `vpx_realloc` in the C source, so none is provided here.
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
@@ -41,9 +31,9 @@ pub type size_t = usize;
 // ===========================================================================
 
 /// `ADDRESS_STORAGE_SIZE` from `include/vpx_mem_intrnl.h`. In C this is
-/// `sizeof(size_t)`; here we widen it to two `usize` words so the
-/// stash can hold the original pointer **and** the original
-/// allocation size (Rust's `dealloc` needs the `Layout` back).
+/// `sizeof(size_t)`; here it is two `usize` words so the stash can hold
+/// the original pointer **and** the original allocation size (Rust's
+/// `dealloc` needs the `Layout` back).
 pub const ADDRESS_STORAGE_SIZE: size_t = 2 * core::mem::size_of::<size_t>();
 
 /// `DEFAULT_ALIGNMENT` from `include/vpx_mem_intrnl.h`:
@@ -101,10 +91,9 @@ fn check_size_argument_overflow(nmemb: u64, size: u64) -> bool {
 /// (one `ADDRESS_STORAGE_SIZE`-sized step before `mem`).
 ///
 /// Pure address arithmetic — no memory is read or written here, so this
-/// is a safe `fn`. `wrapping_offset` sidesteps the provenance/overflow
-/// preconditions of `offset`; the resulting pointer is only ever
-/// dereferenced by the (unsafe) callers, who hold the real invariant
-/// that `mem` came from `vpx_memalign`.
+/// is a safe `fn`. The resulting pointer is only dereferenced by the
+/// unsafe callers, who hold the invariant that `mem` came from
+/// `vpx_memalign`.
 #[inline]
 fn get_malloc_address_location(mem: *mut c_void) -> *mut size_t {
     // Two-word header: `[orig_ptr, orig_size]`. Step back two `usize`s.
@@ -161,10 +150,8 @@ pub unsafe fn vpx_memalign(align: size_t, size: size_t) -> *mut c_void {
     }
 
     let total = aligned_size as size_t;
-    // Rust's allocator demands a non-zero size and a valid Layout. The
-    // C runtime is more forgiving (`malloc(0)` may return NULL or a
-    // freeable pointer); on this path `total >= ADDRESS_STORAGE_SIZE`,
-    // so it is always > 0.
+    // Rust's allocator requires a non-zero size; here
+    // `total >= ADDRESS_STORAGE_SIZE`, so it is always > 0.
     let layout = match Layout::from_size_align(total, core::mem::size_of::<size_t>()) {
         Ok(l) => l,
         Err(_) => return ptr::null_mut(),

@@ -9,8 +9,7 @@
 //!
 //! Each block is dispatched per its `eob` index to either the full
 //! dequant+IDCT+add kernel ([`vp8_dequant_idct_add_c`]) or the
-//! DC-only shortcut ([`vp8_dc_only_idct_add_c`]). See
-//! `documentation/vp8_files/idct_blk.md` for the exact contract.
+//! DC-only shortcut ([`vp8_dc_only_idct_add_c`]).
 
 #![allow(non_snake_case)]
 

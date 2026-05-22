@@ -1,22 +1,17 @@
 //! Whole-macroblock intra prediction (`vp8/common/reconintra.c`).
 //!
-//! Literal Rust transliteration of libvpx's `reconintra.c`. Three public
-//! entry points:
+//! Three public entry points:
 //!   * [`vp8_build_intra_predictors_mby_s`] — 16x16 luma predictor.
 //!   * [`vp8_build_intra_predictors_mbuv_s`] — 8x8 chroma (U and V).
 //!   * [`vp8_init_intra_predictors`] — once-per-process dispatch-table
 //!     populator.
 //!
-//! The actual pixel kernels live in `vpx_dsp/intrapred.c` and are
-//! reached by raw function pointer through the `pred` / `dc_pred` tables.
+//! The pixel kernels live in `vpx_dsp/intrapred.c` and are reached by raw
+//! function pointer through the `pred` / `dc_pred` tables.
 
 #![allow(non_upper_case_globals)]
 
 use crate::types::{Macroblockd, MbPredictionMode, ModeInfo};
-
-// ---------------------------------------------------------------------------
-// extern dependencies (translated in other modules)
-// ---------------------------------------------------------------------------
 
 use crate::reconintra4x4::vp8_init_intra4x4_predictors_internal;
 use crate::vpx_dsp_rtcd::{
@@ -27,10 +22,6 @@ use crate::vpx_dsp_rtcd::{
     vpx_v_predictor_16x16,
 };
 use crate::vpx_ports::once;
-
-// ---------------------------------------------------------------------------
-// File-local enums and dispatch tables
-// ---------------------------------------------------------------------------
 
 /// Size token used to index the `pred` / `dc_pred` tables.
 /// Mirrors the anonymous `enum { SIZE_16, SIZE_8, NUM_SIZES }` in
@@ -53,16 +44,10 @@ static mut pred: [[Option<IntraPredFn>; NUM_SIZES]; 4] = [[None; NUM_SIZES]; 4];
 /// Indexed `[left_available][up_available][size]`.
 static mut dc_pred: [[[Option<IntraPredFn>; NUM_SIZES]; 2]; 2] = [[[None; NUM_SIZES]; 2]; 2];
 
-// ---------------------------------------------------------------------------
-// Initialisation
-// ---------------------------------------------------------------------------
-
-/// `static void vp8_init_intra_predictors_internal(void)`
-/// (vp8/common/reconintra.c:32).
+/// `vp8_init_intra_predictors_internal` (vp8/common/reconintra.c:32).
 ///
-/// Populates both file-local dispatch tables for the two whole-MB sizes
-/// (16 and 8) and chains into the per-4x4 initializer so a single
-/// `once()` call covers both layers of VP8 intra prediction.
+/// Populates both dispatch tables for the two whole-MB sizes (16 and 8)
+/// and chains into the per-4x4 initializer.
 unsafe fn vp8_init_intra_predictors_internal() {
     // INIT_SIZE(16);
     pred[MbPredictionMode::VPred as usize][SIZE_16] = Some(vpx_v_predictor_16x16);
@@ -86,10 +71,6 @@ unsafe fn vp8_init_intra_predictors_internal() {
 
     vp8_init_intra4x4_predictors_internal();
 }
-
-// ---------------------------------------------------------------------------
-// Public entry points
-// ---------------------------------------------------------------------------
 
 /// `vp8_build_intra_predictors_mby_s` (vp8/common/reconintra.c:48).
 ///
@@ -148,9 +129,8 @@ pub fn vp8_build_intra_predictors_mbuv_s(
     pred_stride: i32,
 ) {
     let uvmode: MbPredictionMode = mi.mbmi.uv_mode;
-    // The C source uses `#if HAVE_VSX` to reserve 16 bytes on PowerPC
-    // VSX builds (which load full 128-bit vectors). We unconditionally
-    // reserve 16 bytes — minor stack overhead, no UB on any backend.
+    // 16 bytes (not 8): the C source reserves 16 under `#if HAVE_VSX` so
+    // VSX kernels can load full 128-bit vectors.
     let mut uleft_col: [u8; 16] = [0; 16];
     let mut vleft_col: [u8; 16] = [0; 16];
 
@@ -186,9 +166,7 @@ pub fn vp8_build_intra_predictors_mbuv_s(
 
 /// `vp8_init_intra_predictors` (vp8/common/reconintra.c:102).
 ///
-/// Process-wide one-shot dispatch-table populator. Wraps the internal
-/// initializer in `once()` so multiple decoder instances and threads
-/// share the same populated tables safely.
+/// Process-wide one-shot dispatch-table populator.
 pub unsafe fn vp8_init_intra_predictors() {
     once(vp8_init_intra_predictors_internal);
 }

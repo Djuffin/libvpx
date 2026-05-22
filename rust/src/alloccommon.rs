@@ -5,9 +5,9 @@
 //! the C control flow verbatim — each public entry point corresponds 1:1 to
 //! the C prototype in `vp8/common/alloccommon.h`.
 //!
-//! The minimal build targeted by `rust_types.md` does not compile
-//! `CONFIG_POSTPROC` or `CONFIG_ERROR_CONCEALMENT`, so the gated blocks
-//! from the C source are intentionally omitted here.
+//! This build does not compile `CONFIG_POSTPROC` or
+//! `CONFIG_ERROR_CONCEALMENT`, so the gated blocks from the C source are
+//! omitted here.
 
 #![allow(dead_code)]
 
@@ -28,7 +28,7 @@ use crate::yv12config::{vp8_yv12_alloc_frame_buffer, vp8_yv12_de_alloc_frame_buf
 // ---------------------------------------------------------------------------
 
 /// `vp8_de_alloc_frame_buffers` — free all heap-resident regions reachable
-/// from `oci`. NULL-safe and idempotent.
+/// from `oci`. Idempotent.
 ///
 /// Source: `vp8/common/alloccommon.c:22`.
 pub fn vp8_de_alloc_frame_buffers(oci: &mut Vp8Common) {
@@ -99,8 +99,7 @@ pub fn vp8_alloc_frame_buffers(oci: &mut Vp8Common, mut width: i32, mut height: 
     // SAFETY: every field of `ModeInfo` has a valid zero bit pattern
     // — the tagged enums (`MbPredictionMode`, `MvReferenceFrame`,
     // `BModeInfo`) all have discriminant 0 corresponding to a real
-    // variant. Byte-identical to the previous `vpx_calloc(count,
-    // sizeof(ModeInfo))`.
+    // variant.
     let count = ((oci.mb_cols + 1) * (oci.mb_rows + 1)) as usize;
     oci.mip = Some(unsafe { Box::<[ModeInfo]>::new_zeroed_slice(count).assume_init() });
 

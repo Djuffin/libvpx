@@ -16,7 +16,7 @@ use core::ptr;
 use crate::vpx_api::*;
 
 // ===========================================================================
-// External allocator hooks (provided by `vpx_mem/vpx_mem.c`).
+// External allocator hooks.
 // ===========================================================================
 
 use crate::vpx_mem::{vpx_free, vpx_memalign};

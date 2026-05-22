@@ -1,17 +1,12 @@
-//! Loop-filter driver — literal translation of `vp8/common/vp8_loopfilter.c`.
+//! Loop-filter driver — translation of `vp8/common/vp8_loopfilter.c`.
 //!
 //! This file does no pixel work itself. It:
 //!   1. Builds and refreshes the `loop_filter_info_n` LUT
 //!      (`vp8_loop_filter_init`, `vp8_loop_filter_update_sharpness`,
 //!      `vp8_loop_filter_frame_init`).
-//!   2. Walks the frame in raster order and dispatches per-edge
-//!      kernels declared in `loopfilter_filters.c`
-//!      (`vp8_loop_filter_frame`, `vp8_loop_filter_row_normal`,
-//!      `vp8_loop_filter_row_simple`, `vp8_loop_filter_frame_yonly`,
-//!      `vp8_loop_filter_partial_frame`).
-//!
-//! See `documentation/vp8_files/vp8_loopfilter.md` for the full prose
-//! walkthrough and `documentation/vp8_technical_overview.md` §11.
+//!   2. Walks an MB row and dispatches per-edge kernels declared in
+//!      `loopfilter_filters.c` (`vp8_loop_filter_row_normal`,
+//!      `vp8_loop_filter_row_simple`).
 
 #![allow(non_snake_case)]
 #![allow(clippy::too_many_arguments)]
@@ -35,12 +30,10 @@ const SEGMENT_ABSDATA: u8 = 1;
 const MB_LVL_ALT_LF: usize = 1;
 
 // ---------------------------------------------------------------------------
-// extern dependencies (translated in other modules).
+// Edge kernels from `loopfilter_filters.c`.
 //
-// The RTCD layer would normally route `vp8_loop_filter_mbv` etc. to the
-// best SIMD variant; on `--target=generic-gnu` it resolves to the `_c`
-// reference implementation in `loopfilter_filters.c`. We call the `_c`
-// symbols directly.
+// RTCD would route `vp8_loop_filter_mbv` etc. to the best SIMD variant; on
+// `--target=generic-gnu` these resolve to the `_c` reference, called directly.
 // ---------------------------------------------------------------------------
 
 use crate::loopfilter_filters::{
@@ -50,7 +43,7 @@ use crate::loopfilter_filters::{
 };
 
 // ---------------------------------------------------------------------------
-// RTCD alias shims — let the body code read like the C source.
+// RTCD alias shims — map the `_c` kernels to their RTCD names.
 // ---------------------------------------------------------------------------
 
 #[inline(always)]
@@ -263,14 +256,13 @@ pub fn vp8_loop_filter_frame_init(
         lvl_ref = lvl_seg + mbd.ref_lf_deltas[intra_ref] as i32;
 
         /* Apply delta for Intra modes */
-        /* mode = 0: B_PRED — only the split mode BPRED has a further special case */
+        /* mode = 0: B_PRED */
         lvl_mode = lvl_ref + mbd.mode_lf_deltas[0] as i32;
-        /* clamp */
         lvl_mode = lvl_mode.clamp(0, 63);
 
         lfi.lvl[seg][intra_ref][0] = lvl_mode as u8;
 
-        /* mode = 1: all the rest of Intra modes — clamp */
+        /* mode = 1: all the rest of Intra modes */
         lvl_mode = lvl_ref.clamp(0, 63);
         lfi.lvl[seg][intra_ref][1] = lvl_mode as u8;
 
@@ -282,7 +274,6 @@ pub fn vp8_loop_filter_frame_init(
             /* Apply delta for Inter modes */
             for mode in 1..4usize {
                 lvl_mode = lvl_ref + mbd.mode_lf_deltas[mode] as i32;
-                /* clamp */
                 lvl_mode = lvl_mode.clamp(0, 63);
 
                 lfi.lvl[seg][r#ref][mode] = lvl_mode as u8;

@@ -1,8 +1,7 @@
 //! YV12-aware border-extension and whole-frame-copy.
 //!
-//! Literal Rust port of `vpx_scale/generic/yv12extend.c`. Mirrors C
-//! control flow exactly. The VP9/HBD (`CONFIG_VP9`,
-//! `CONFIG_VP9_HIGHBITDEPTH`) blocks are omitted — VP8-only build.
+//! Port of `vpx_scale/generic/yv12extend.c` (VP8-only; the VP9/HBD
+//! `CONFIG_VP9`/`CONFIG_VP9_HIGHBITDEPTH` blocks are omitted).
 //!
 //! See `documentation/vp8_files/yv12extend.md` and
 //! `documentation/vp8_technical_overview.md` §10.3.
@@ -138,8 +137,6 @@ pub unsafe fn vp8_yv12_copy_frame_c(
 ) {
     let mut src: *const u8 = (*src_ybc).y_buffer();
     let mut dst: *mut u8 = (*dst_ybc).y_buffer();
-
-    // #if 0 block (disabled assertions) elided.
 
     for _ in 0..(*src_ybc).y_height {
         ptr::copy_nonoverlapping(src, dst, (*src_ybc).y_width as usize);

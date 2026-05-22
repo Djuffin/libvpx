@@ -70,25 +70,21 @@ pub fn vpx_codec_error(ctx: Option<&VpxCodecCtx>) -> &'static str {
 }
 
 /// Returns a description of the most recent error on `ctx`. The
-/// variadic detail-formatter from libvpx was dropped during the Rust
-/// port (see `translation_summary.md` §4.1) so the "detail" is just
-/// the error-code description — identical to [`vpx_codec_error`].
-/// Kept as a separate entry point for API symmetry.
+/// variadic detail-formatter from libvpx is not implemented, so the
+/// "detail" is just the error-code description — identical to
+/// [`vpx_codec_error`].
 pub fn vpx_codec_error_detail(ctx: Option<&VpxCodecCtx>) -> &'static str {
     vpx_codec_error(ctx)
 }
 
-/// `vpx_codec_destroy`. Drops the boxed [`Decoder`] trait object,
-/// which in turn runs `Vp8Decoder::Drop` (frees the YV12 frame buffer
-/// pool and the inner `Vp8dComp` instances; the `Box` drop reclaims
-/// the `Vp8AlgPriv` shell).
+/// `vpx_codec_destroy`. Drops the boxed [`Decoder`] trait object.
 pub fn vpx_codec_destroy(c: &mut VpxCodecCtx) -> VpxCodecErr {
     if c.iface.is_none() || c.trait_obj.is_none() {
         c.err = VPX_CODEC_ERROR;
         return VPX_CODEC_ERROR;
     }
 
-    let _ = c.trait_obj.take(); // Drops the Box.
+    let _ = c.trait_obj.take();
     c.iface = None;
     c.name = None;
     c.err = VPX_CODEC_OK;
@@ -112,9 +108,8 @@ pub unsafe fn vpx_codec_control_(
     } else if c.iface.is_none() || c.trait_obj.is_none() {
         VPX_CODEC_ERROR
     } else {
-        // Build the typed ControlCmd from the legacy (ctrl_id, ap) pair.
-        // Ap is null-checked per-arm; the SET_DECRYPTOR arm accepts null
-        // (means "clear").
+        // `ap` is null-checked per-arm; the SET_DECRYPTOR arm accepts
+        // null (means "clear").
         let cmd: Result<ControlCmd<'_>, VpxCodecErr> = match ctrl_id {
             VP8_SET_REFERENCE if !ap.is_null() => {
                 Ok(ControlCmd::SetReference(&*(ap as *const VpxRefFrame)))

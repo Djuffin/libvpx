@@ -21,28 +21,24 @@ unsafe fn dec_init(
     vpx_codec_dec_init_ver(ctx, iface, None, flags, VPX_DECODER_ABI_VERSION)
 }
 
-/// C: `TEST(DecodeAPI, InvalidParams)` — null-pointer arm only. The
+/// C: `TEST(DecodeAPI, InvalidParams)` — null-`iface` arm. The
 /// iface-loop arm is in `invalid_params_via_iface` below.
 ///
-/// The C test also passes `NULL` for `ctx` to `dec_init` / `decode` /
-/// `destroy`. Those arms are gone here: the Rust entry points take
-/// `&mut VpxCodecCtx`, which can't be null, so a null-`ctx` call is
-/// unrepresentable (same reason the null+nonzero `&[u8]` combos
-/// dropped out). Only the null-`iface` arm and the `Option<&ctx>`
-/// error queries remain exercisable.
+/// The C null-`ctx` arms are unrepresentable: the Rust entry points
+/// take `&mut VpxCodecCtx`, which can't be null. Only the null-`iface`
+/// arm and the `Option<&ctx>` error queries remain exercisable.
 #[test]
 fn invalid_params_null_ptrs() {
     let mut dec_storage = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
 
     unsafe {
-        // Valid ctx, null iface → INVALID_PARAM.
+        // Null iface → INVALID_PARAM.
         assert_eq!(
             dec_init(dec_storage.assume_init_mut(), None, 0),
             VPX_CODEC_INVALID_PARAM
         );
 
-        // Error queries still accept `None` and return a fallback
-        // description.
+        // Error queries accept `None` and return a fallback description.
         assert!(!vpx_codec_error(None).is_empty());
         assert!(!vpx_codec_error_detail(None).is_empty());
     }
@@ -73,8 +69,8 @@ fn invalid_params_via_iface() {
             vpx_codec_decode(dec.assume_init_mut(), &buf, core::ptr::null_mut(), 0),
             VPX_CODEC_UNSUP_BITSTREAM
         );
-        // Empty buffer is the only "no data" shape now (the null+nonzero
-        // and nonzero+null combos are unrepresentable through `&[u8]`).
+        // Empty buffer is the only "no data" shape: the C null+nonzero
+        // and nonzero+null combos are unrepresentable through `&[u8]`.
         assert_eq!(
             vpx_codec_decode(dec.assume_init_mut(), &[], core::ptr::null_mut(), 0),
             VPX_CODEC_OK

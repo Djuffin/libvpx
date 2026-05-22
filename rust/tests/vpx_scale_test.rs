@@ -4,8 +4,8 @@
 //!
 //! Two tests, each parameterized over (W, H) ∈ kSizesToTest × itself:
 //!   - `ExtendBorder` — `vp8_yv12_extend_frame_borders_c` replicates the
-//!     32-px guard band; reference impl does the same in pure Rust;
-//!     compare the whole owned slab.
+//!     32-px guard band; a pure-Rust reference impl computes the expected
+//!     result; compare the whole `owning_buffer`.
 //!   - `CopyFrame`    — `vp8_yv12_copy_frame_c` copies + extends borders
 //!     into `dst_img_`; compare against the reference impl.
 //!
@@ -28,8 +28,7 @@ const BUF_MAX: u8 = BUF_FILLER - 1;
 
 unsafe fn reset_image(img: *mut Yv12BufferConfig, width: i32, height: i32) {
     // C: memset(img, 0, sizeof(*img)). Assigning a fresh zeroed value
-    // drops the previous config first (freeing any owned slab), so a
-    // reused `img` doesn't leak.
+    // drops the previous config first, freeing any owned buffer.
     *img = mem::zeroed();
     let rc = vp8_yv12_alloc_frame_buffer(&mut *img, width, height, VP8_BORDER_IN_PIXELS);
     assert_eq!(rc, 0, "alloc failed for {width}x{height}");

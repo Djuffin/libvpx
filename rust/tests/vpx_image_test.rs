@@ -20,9 +20,7 @@ fn vpx_img_wrap_invalid_align() {
     let mut buf = vec![0u8; W * H * 3];
 
     let mut img: MaybeUninit<vpx_image_t> = MaybeUninit::uninit();
-    // Stamp junk into the two fields the implementation must not read on
-    // failure. The C test writes through the union; in Rust we reach for
-    // the struct directly via `as_mut_ptr`.
+    // Stamp junk into the two fields the implementation must not read on failure.
     let img_ptr = img.as_mut_ptr();
     unsafe {
         (*img_ptr).img_data = b"\0" as *const u8 as *mut u8;
@@ -121,8 +119,7 @@ fn vpx_img_alloc_huge_width() {
         let img = vpx_img_alloc(ptr::null_mut(), VPX_IMG_FMT_I420, u32::MAX, 1, 1);
         assert!(img.is_null());
 
-        // The remaining cases either succeed or fail; the C test just checks
-        // that we don't crash. Free if non-null.
+        // Remaining cases may succeed or fail; just check we don't crash.
         let img = vpx_img_alloc(ptr::null_mut(), VPX_IMG_FMT_I420, 0x7fff_fffe, 1, 1);
         if !img.is_null() {
             vpx_img_free(img);

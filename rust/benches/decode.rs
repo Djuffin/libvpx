@@ -99,9 +99,7 @@ fn slurp_ivf(path: &Path) -> Vec<Vec<u8>> {
 }
 
 /// init → decode every packet (draining every emitted image) → destroy.
-/// Decoder is constructed fresh each iteration; for the dozens-to-hundreds
-/// of frames per vector here, init overhead is well below 1% of the
-/// measurement.
+/// The decoder is constructed fresh each iteration.
 unsafe fn decode_all(packets: &[Vec<u8>]) {
     let iface = vpx_codec_vp8_dx();
     let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
@@ -137,9 +135,7 @@ fn bench_decoder(b: &mut criterion::Bencher, packets: &[Vec<u8>]) {
 // ---------------------------------------------------------------------
 
 fn target_dir() -> PathBuf {
-    // Cargo invokes the bench binary from the crate root; benches/decode.rs
-    // sits at CARGO_MANIFEST_DIR. Cache generated streams in target/ so
-    // they survive `cargo clean -p` of the bench artifact alone.
+    // Cache generated streams under the crate's target/ directory.
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target")
 }
 

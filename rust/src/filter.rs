@@ -5,11 +5,10 @@
 //!   * 6-tap luma sub-pel filter (`vp8_sixtap_predict*_c`).
 //!   * 2-tap bilinear filter (`vp8_bilinear_predict*_c`).
 //!
-//! Both are dispatched in the C build through `vp8_rtcd.h`; the SIMD
-//! variants must remain bit-exact with these references. The two
+//! SIMD variants must remain bit-exact with these references. The two
 //! coefficient tables (`vp8_bilinear_filters`, `vp8_sub_pel_filters`)
 //! live in [`crate::tables`] and are re-exported below under their
-//! original C names so call sites can use them unchanged.
+//! original C names.
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]

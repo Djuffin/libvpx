@@ -221,7 +221,7 @@ fn decode_macroblock(
                 xd.eobs.fill(0);
             }
 
-            // SAFETY: above_right_src reaches the above row of the dst plane.
+            // SAFETY: above_right reaches the above row of the dst plane.
             let above_right = unsafe { xd.dst.y_buffer.offset(-y_stride).add(16) };
             intra_prediction_down_copy(xd, above_right);
 
@@ -565,8 +565,8 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
         ref_fb_corrupted[i] = this_fb.corrupted;
     }
 
-    // Snapshot the new frame's plane state. We keep a raw pointer to the
-    // Yv12BufferConfig for sub-calls that take *mut, and capture plane
+    // Snapshot the new frame's plane state: a raw pointer to the
+    // Yv12BufferConfig for sub-calls that take *mut, plus plane
     // pointers/strides as locals.
     let yv12_fb_new: *mut Yv12BufferConfig = &mut pbi.common.yv12_fb[new_idx];
     let (recon_y_stride, recon_uv_stride, dst_y, dst_u, dst_v) = {
@@ -646,12 +646,9 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
                 pbi.mb.dst.v_buffer = dst_buffer[2].offset(recon_uvoffset as isize);
             }
 
-            // Current MB's MI cell, borrowed once as a direct field path
-            // (`common.mip`, not the `mi_mut` method) and held across the
-            // rest of the loop body. The intervening code touches only
-            // `pbi.mb` and disjoint `pbi.common` sub-fields, so this `&mut`
-            // coexists with all of them — and reusing it for the ref_frame
-            // read avoids a second bounds-checked grid index per MB.
+            // Current MB's MI cell, borrowed via the `common.mip` field
+            // path so the `&mut` coexists with the disjoint `pbi.mb` /
+            // `pbi.common` borrows taken below in this loop body.
             let mi: &mut ModeInfo = {
                 let stride = pbi.common.mode_info_stride as usize;
                 let idx = ((mb_row + 1) as usize) * stride + ((mb_col + 1) as usize);
@@ -676,11 +673,8 @@ fn decode_mb_rows(pbi: &mut Vp8dComp<'static>) {
             /* propagate errors from reference frames */
             pbi.mb.corrupted |= ref_fb_corrupted[ref_frame as usize];
 
-            // Field-disjoint borrows for decode_macroblock: every source
-            // is a distinct field path off `pbi`, so the `&mut` into the
-            // current MI cell (`common.mip`, taken above) coexists with the
-            // `common.above_context` / `left_context` / `fc` / dequant
-            // borrows and with `pbi.mb` / `pbi.mbc[bc_idx]`.
+            // Field-disjoint borrows for decode_macroblock; all coexist
+            // with the `mi` borrow taken above.
             let above_slot = &mut pbi
                 .common
                 .above_context
@@ -941,9 +935,8 @@ unsafe fn setup_token_decoder(
         }
         /* Split the chunk into partitions read from the bitstream */
         while fragment_size > 0 {
-            // `fragment_start` is a bytestream pointer (Copy); hoist it out
-            // so the `&mut pbi` reborrow for the call doesn't alias the
-            // `pbi.fragments` read.
+            // Copy out the bytestream pointer so the `&mut pbi` reborrow
+            // for the call below does not alias the `pbi.fragments` read.
             let fragment_start = pbi.fragments.ptrs[fragment_idx as usize];
             let partition_size: u32 = read_available_partition_size(
                 pbi,
@@ -972,10 +965,8 @@ unsafe fn setup_token_decoder(
 
     pbi.fragments.count = num_token_partitions + 1;
 
-    // Seed one bool reader per token partition. The C source walks a
-    // `mbc` cursor with `++bool_decoder`; here it is a bounds-checked
-    // index — `mbc[partition_idx - 1]` (cursor started at `mbc[0]` for
-    // `partition_idx == 1`).
+    // Seed one bool reader per token partition. C walks a `mbc` cursor
+    // with `++bool_decoder`; here it is the index `mbc[partition_idx - 1]`.
     for partition_idx in 1..pbi.fragments.count {
         let src = pbi.fragments.ptrs[partition_idx as usize];
         let sz = pbi.fragments.sizes[partition_idx as usize];
@@ -1111,12 +1102,10 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
 
         if pbi.common.frame_type == KEY_FRAME {
             if (data_end as isize) - (data as isize) >= 7 {
-                // Sync code + width/height live at clear[3..9] (the
-                // top-of-function `clear` was *not* advanced when we
-                // advanced `data`).
-                // SAFETY: at least 10 bytes were copied into clear_buffer
-                // (or `data_sz` >= 10); the if-condition above ensures
-                // bytes 3..9 are valid past `data`.
+                // Sync code + width/height live at clear[3..9] (`clear`
+                // was not advanced when `data` was advanced past the tag).
+                // SAFETY: the if-condition above ensures bytes 3..9 are
+                // valid past `data`.
                 let (s0, s1, s2, w0, w1, h0, h1) = unsafe {
                     (
                         *clear.add(3), *clear.add(4), *clear.add(5),
@@ -1166,9 +1155,8 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
     }
 
-    // Bool-reader-driven header parsing. `bc` borrows pbi.mbc[8]; the
-    // writes target disjoint fields (pbi.mb / pbi.common), so they
-    // coexist under field-disjoint borrows.
+    // Bool-reader-driven header parsing; `bc` borrows pbi.mbc[8] while
+    // the writes target the disjoint pbi.mb / pbi.common fields.
     {
         let bc = &mut pbi.mbc[8];
         if pbi.common.frame_type == KEY_FRAME {
@@ -1264,8 +1252,6 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
 
     /* Read the default quantizers. */
     {
-        // bool-reader literal reads + delta-Q deltas; `bc` borrows
-        // pbi.mbc[8], updates target disjoint pbi.common fields.
         let q_update = {
             let bc = &mut pbi.mbc[8];
             pbi.common.base_qindex = vp8_read_literal(bc, 7);
@@ -1295,7 +1281,7 @@ pub fn vp8_decode_frame(pbi: &mut Vp8dComp<'static>) -> VpxResult<()> {
         );
     }
 
-    // More bool-reader-driven header parsing; `bc` borrows pbi.mbc[8].
+    // More bool-reader-driven header parsing.
     {
         let bc = &mut pbi.mbc[8];
         /* Determine if GF/ARF buffers should be updated and how. */

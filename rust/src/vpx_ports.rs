@@ -5,7 +5,7 @@
 //!
 //! - `vpx_clear_system_state()` — `vpx_ports/system_state.h`. Empties
 //!   the x87 FPU state after MMX use. On non-x86/MMX builds the C
-//!   header `#define`s it to nothing. We always compile that variant.
+//!   header `#define`s it to nothing, so this is a no-op.
 //!
 //! - `once(func)` — `vpx_ports/vpx_once.h`. Runs `func` exactly once
 //!   across the program's lifetime, thread-safely. Rust's
@@ -23,15 +23,8 @@ pub fn vpx_clear_system_state() {}
 /// `vpx_ports/vpx_once.h`.
 ///
 /// In C the `once` macro stamps out a per-translation-unit lock and
-/// calls `func` under it. Rust's `Once` does the same thing more
-/// directly, but we need a *separate* `Once` per call site (the C
-/// version's lock is per-translation-unit, but each `.c` file calls
-/// `once(somefunc)` for at most one `somefunc`). Modelling that by
-/// having the caller own their own `Once` would require touching every
-/// call site, so instead we use a thread-safe map keyed by the function
-/// pointer address. For the decoder this map only ever has 2-3 entries
-/// (`initialize_dec`, `vp8_init_intra_predictors_internal`,
-/// `vp8_init_intra4x4_predictors_internal`), so the cost is trivial.
+/// calls `func` under it. Here a thread-safe map keyed by the function
+/// pointer address holds a separate `Once` per distinct `func`.
 ///
 /// Safety: `func` must be safe to call from any thread.
 pub unsafe fn once(func: unsafe fn()) {

@@ -30,8 +30,6 @@ impl<T: Copy + PartialEq + std::fmt::Debug> Buf<T> {
     }
 
     fn top_left(&mut self) -> *mut T {
-        // Safe: bounds-checked indexing followed by `slice::as_mut_ptr`.
-        // The raw pointer is only needed to feed the C-ABI kernel below.
         let off = self.pad * self.stride + self.pad;
         self.data[off..].as_mut_ptr()
     }

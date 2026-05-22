@@ -1,7 +1,6 @@
-//! Literal Rust transliteration of `vp8/common/loopfilter_filters.c`.
+//! Rust port of `vp8/common/loopfilter_filters.c`.
 //!
-//! The inner-loop pixel kernels for the VP8 deblocking filter. See
-//! `documentation/vp8_files/loopfilter_filters.md` for design notes.
+//! The inner-loop pixel kernels for the VP8 deblocking filter.
 //!
 //! These are the `_c` reference implementations dispatched via
 //! `vp8_rtcd.h` when SIMD is unavailable. All per-pixel arithmetic is

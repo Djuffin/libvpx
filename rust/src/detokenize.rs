@@ -1,13 +1,7 @@
 //! `vp8/decoder/detokenize.c` — residual coefficient parsing.
 //!
-//! Literal C-to-Rust transliteration of the per-MB token decoder. The
-//! two public entry points (`vp8_reset_mb_tokens_context`,
-//! `vp8_decode_mb_tokens`) mirror their C counterparts byte-for-byte;
-//! `GetCoeffs` and `GetSigned` remain private file-static helpers.
-//!
-//! Control flow, indexing arithmetic, and the asymmetric Y2 context
-//! handling are preserved exactly as in the C source. See
-//! `documentation/vp8_files/detokenize.md` for the line-by-line rationale.
+//! Port of the per-MB token decoder. Public entry points:
+//! `vp8_reset_mb_tokens_context` and `vp8_decode_mb_tokens`.
 
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -18,14 +12,10 @@ use crate::types::{
     FrameContext, Macroblockd, ModeInfo,
 };
 
-// ===========================================================================
-// Extern declarations for symbols defined in other translation units.
-// ===========================================================================
-
 use crate::dboolhuff::{vp8dx_bool_decoder_fill, vp8dx_decode_bool};
 
 // ===========================================================================
-// File-scope tables — direct ports of `detokenize.c:35-47`.
+// File-scope tables — `detokenize.c:35-47`.
 // ===========================================================================
 
 /// `kBands[16 + 1]` (`detokenize.c:35-38`) — RFC 6386 §13.3 band-remap
@@ -58,20 +48,11 @@ const NUM_CTX: usize = 3;
 /// `FRAME_CONTEXT.coef_probs[block_type]` (a `[[[Prob; 11]; 3]; 8]`).
 type ProbaArray<'a> = &'a [[[Prob; NUM_PROBAS]; NUM_CTX]; COEF_BANDS];
 
-// ===========================================================================
-// `VP8GetBit` — thin macro rename (`detokenize.c:49`).
-// ===========================================================================
-
-/// `VP8GetBit` (`detokenize.c:49`) — alias macro for `vp8dx_decode_bool`.
+/// `VP8GetBit` (`detokenize.c:49`) — alias for `vp8dx_decode_bool`.
 #[inline(always)]
 fn VP8GetBit(br: &mut BoolDecoder<'static>, probability: i32) -> i32 {
     vp8dx_decode_bool(br, probability)
 }
-
-// ===========================================================================
-// `GetSigned` — sign-bit folded into a streamlined bool decoder
-// (`detokenize.c:58-79`).
-// ===========================================================================
 
 /// `GetSigned` (`detokenize.c:58-79`) — decode one equiprobable sign bit
 /// and return `+/- value_to_sign`. Renormalization is open-coded
@@ -103,10 +84,6 @@ fn GetSigned(br: &mut BoolDecoder<'static>, value_to_sign: i32) -> i32 {
 
     v
 }
-
-// ===========================================================================
-// `GetCoeffs` — one-block coefficient decoder (`detokenize.c:84-140`).
-// ===========================================================================
 
 /// `GetCoeffs` (`detokenize.c:84-140`) — decode all coefficients of one
 /// 4x4 block. Scatters magnitudes through `kZigzag` into `out[0..16]`
@@ -199,23 +176,17 @@ pub fn vp8_reset_mb_tokens_context(
     left_context: &mut EntropyContextPlanes,
     mi: &ModeInfo,
 ) {
-    // Always clear Y/U/V (bytes 0..ECTX_Y2); also clear Y2 (byte ECTX_Y2)
-    // unless this is a B_PRED MB, which preserves the previous Y2 context.
     let n = if mi.mbmi.is_4x4 { ECTX_Y2 } else { ECTX_Y2 + 1 };
     above_slot.ctx[..n].fill(0);
     left_context.ctx[..n].fill(0);
 }
 
-// ===========================================================================
-// `vp8_decode_mb_tokens` — the per-MB driver (`detokenize.c:142-210`).
-// ===========================================================================
-
 /// `vp8_decode_mb_tokens` (`detokenize.c:142-210`).
 ///
-/// Orchestrates exactly 24 or 25 calls to `GetCoeffs` (Y2 if present,
-/// then 16 Y, then 8 UV), threading entropy contexts and the
-/// per-block `eobs` array. Returns `eobtotal` — the sum of every
-/// block's eob, with the Y2 adjustment described in the doc.
+/// Issues 24 or 25 `GetCoeffs` calls (Y2 if present, then 16 Y, then 8 UV),
+/// threading entropy contexts and the per-block `eobs` array. Returns
+/// `eobtotal`, the sum of every block's eob. When a Y2 block is present its
+/// eob is added as `nonzeros - 16` (`detokenize.c:171`).
 pub fn vp8_decode_mb_tokens(
     above_slot: &mut EntropyContextPlanes,
     left_context: &mut EntropyContextPlanes,
@@ -228,16 +199,13 @@ pub fn vp8_decode_mb_tokens(
     let mut eobtotal: i32 = 0;
 
     let mut coef_probs: ProbaArray;
-    // Entropy-context cursors are bounds-checked indices into the flat
-    // `[i8; 9]` planes (Y at ECTX_Y1, U/V at ECTX_UV, Y2 at ECTX_Y2). The
-    // C code walked these as raw `ENTROPY_CONTEXT *` with `.offset()`; the
-    // index arithmetic below is the exact equivalent.
+    // Index into the flat `[i8; 9]` planes: Y at ECTX_Y1, U/V at ECTX_UV,
+    // Y2 at ECTX_Y2.
     let a = &mut above_slot.ctx;
     let l = &mut left_context.ctx;
     let skip_dc: i32;
 
-    // `qcoeff`/`eobs` are disjoint fields of `mb`; the per-block coefficient
-    // slice is `qcoeff[block * 16 .. block * 16 + 16]`.
+    // Per-block coefficients are `qcoeff[block * 16 .. block * 16 + 16]`.
     let qcoeff = &mut mb.qcoeff;
     let eobs = &mut mb.eobs;
 

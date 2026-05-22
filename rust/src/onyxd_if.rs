@@ -1,19 +1,11 @@
 //! `vp8/decoder/onyxd_if.c` — VP8 decoder instance lifecycle and frame driver.
 //!
-//! Literal Rust translation of `vp8/decoder/onyxd_if.c`. Function names,
-//! control flow, and pointer arithmetic mirror the C source verbatim.
-//! All bodies are `unsafe` because the work is built on raw pointers
-//! and FFI-shaped state owned by [`Vp8dComp`].
-//!
-//! Build assumptions (the minimal `vp8_only` configuration documented
-//! in `documentation/vp8_files.md`):
+//! Build assumptions (the minimal `vp8_only` configuration):
 //!   - `CONFIG_POSTPROC = 0`
 //!   - `CONFIG_ERROR_CONCEALMENT = 0`
 //!   - `CONFIG_MULTITHREAD = 0`
 //!
-//! Anything gated by one of those switches in the C source is omitted,
-//! mirroring the pruning already applied to [`Vp8dComp`] / [`Vp8Common`]
-//! in `rust/src/types.rs`.
+//! Anything gated by one of those switches in the C source is omitted.
 
 #![allow(dead_code)]
 #![allow(non_snake_case)]
@@ -27,7 +19,7 @@ use crate::types::{
 };
 
 // ===========================================================================
-// Inline types and constants (kept here to avoid editing `types.rs`).
+// Inline types and constants.
 // ===========================================================================
 
 /// `vpx_codec_err_t` — public libvpx error code (`vpx/vpx_codec.h`). Only
@@ -64,36 +56,25 @@ use crate::vpx_scale_rtcd::vp8_yv12_copy_frame;
 
 /// `static void initialize_dec(void)` — `vp8/decoder/onyxd_if.c:48`.
 ///
-/// Process-wide one-shot init. Invoked through `once()` from
-/// [`create_decompressor`]. The C source has a `volatile int init_done`
-/// guard that is defensive — the real serialization happens in
-/// `once()`, so we drop the dead inner check. Remains `unsafe fn` to
-/// satisfy `once()`'s `unsafe fn` signature and because
-/// `vp8_init_intra_predictors` is itself `unsafe`.
+/// Process-wide one-shot init, invoked through `once()`. The C source's
+/// `volatile int init_done` guard is dropped: serialization is handled by
+/// `once()`.
 unsafe fn initialize_dec() {
     vpx_dsp_rtcd();
     vp8_init_intra_predictors();
 }
 
-/// `static void remove_decompressor(VP8D_COMP *)` — `vp8/decoder/onyxd_if.c:58`.
 /// `static struct VP8D_COMP *create_decompressor(VP8D_CONFIG *)` —
 /// `vp8/decoder/onyxd_if.c:66`. Returns `None` if initialization fails;
 /// the half-initialized instance is torn down before return.
 fn create_decompressor(oxcf: &Vp8dConfig) -> Option<Box<Vp8dComp<'static>>> {
-    // Allocate the outer shell zero-initialised on the heap. The C
-    // source uses `vpx_memalign(32, sizeof(VP8D_COMP)) + memset(0, ...)`;
-    // `Box::new_zeroed` is the same byte pattern. The function-pointer
-    // fields on `Macroblockd` (subpixel_predict*) are non-nullable and
-    // thus zero-init is technically UB until they are written in
-    // `init_frame`; this matches the literal-transliteration policy
-    // the rest of the port follows.
-    //
-    // SAFETY of `assume_init`: every field of `Vp8dComp` is either
-    // `Copy`/POD or `Option<…>` whose all-zero bit pattern is the
-    // `None` discriminant — except for the non-nullable subpixel-
-    // predict function pointers on `Macroblockd`, which are written
-    // before first use by `init_frame`. We mirror the C source's
-    // policy here.
+    // Allocate the outer shell zero-initialised on the heap (the C source
+    // memalign+memsets it). SAFETY of `assume_init`: every field of
+    // `Vp8dComp` is either `Copy`/POD or `Option<…>` whose all-zero bit
+    // pattern is the `None` discriminant — except the non-nullable
+    // subpixel-predict function pointers on `Macroblockd`, whose zero
+    // pattern is technically UB until they are written before first use by
+    // `init_frame`.
     let mut pbi: Box<Vp8dComp<'static>> =
         unsafe { Box::<Vp8dComp<'static>>::new_zeroed().assume_init() };
 
@@ -465,11 +446,6 @@ pub fn vp8dx_references_buffer(oci: &Vp8Common, ref_frame: i32) -> i32 {
 }
 
 /// `vp8_create_decoder_instances` — `vp8/decoder/onyxd_if.c:424`.
-///
-/// `create_decompressor` is a safe wrapper that encapsulates the
-/// `assume_init` / raw-pointer dance internally; the boundary here is
-/// safe because the only caller side-effect on success is
-/// `fb.pbi = Some(box)`, which is a plain field write.
 pub fn vp8_create_decoder_instances(
     fb: &mut FrameBuffers<'static>,
     oxcf: &Vp8dConfig,

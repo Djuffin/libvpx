@@ -103,13 +103,6 @@ pub struct Vp8AlgPriv<'a> {
     pub fragments: FragmentData,
 }
 
-// ===========================================================================
-// External Rust dependencies (functions defined in sibling source files,
-// translated separately).
-// ===========================================================================
-
-// From `vp8/decoder/onyxd_if.rs`. The `*_inner` adapter calls below
-// import the new-style `VpxResult`-returning helpers directly.
 use crate::onyxd_if::{
     vp8dx_get_quantizer, vp8dx_receive_compressed_data, vp8dx_references_buffer,
 };
@@ -123,10 +116,6 @@ use crate::vpx_scale_rtcd::vpx_scale_rtcd;
 use crate::types::{
     ALTREF_FRAME, GOLDEN_FRAME, LAST_FRAME, VP8_ALTR_FRAME, VP8_GOLD_FRAME, VP8_LAST_FRAME,
 };
-
-// ===========================================================================
-// Helpers
-// ===========================================================================
 
 // ===========================================================================
 // `vp8_dx_iface.c` static helpers
@@ -181,7 +170,7 @@ unsafe fn vp8_peek_si_internal(
     res
 }
 
-/// `vp8_peek_si` — `vp8/vp8_dx_iface.c:178`. Vtable `dec.peek_si` slot.
+/// `vp8_peek_si` — `vp8/vp8_dx_iface.c:178`.
 pub unsafe fn vp8_peek_si(
     data: *const u8,
     data_sz: u32,
@@ -190,7 +179,7 @@ pub unsafe fn vp8_peek_si(
     vp8_peek_si_internal(data, data_sz, si)
 }
 
-/// `vp8_get_si` — `vp8/vp8_dx_iface.c:183`. Vtable `dec.get_si` slot.
+/// `vp8_get_si` — `vp8/vp8_dx_iface.c:183`.
 pub unsafe fn vp8_get_si(ctx: &Vp8AlgPriv<'static>, si: *mut VpxCodecStreamInfo) -> VpxCodecErr {
     let sz: u32 = if (*si).sz as usize >= core::mem::size_of::<Vp8StreamInfo>() {
         core::mem::size_of::<Vp8StreamInfo>() as u32
@@ -208,9 +197,8 @@ pub unsafe fn vp8_get_si(ctx: &Vp8AlgPriv<'static>, si: *mut VpxCodecStreamInfo)
     VPX_CODEC_OK
 }
 
-/// `update_error_state` — `vp8/vp8_dx_iface.c:199`. The variadic
-/// detail-message channel was dropped during the port, so this just
-/// returns the error code.
+/// `update_error_state` — `vp8/vp8_dx_iface.c:199`. Returns the error
+/// code; the variadic detail-message channel is not carried.
 fn update_error_state(error: &VpxInternalErrorInfo) -> VpxCodecErr {
     error.error_code
 }
@@ -300,7 +288,7 @@ fn update_fragments(
     1
 }
 
-/// `vp8_decode` — `vp8/vp8_dx_iface.c:285`. Vtable `dec.decode` slot.
+/// `vp8_decode` — `vp8/vp8_dx_iface.c:285`.
 pub unsafe fn vp8_decode(
     ctx: *mut Vp8AlgPriv<'static>,
     data: *const u8,
@@ -471,7 +459,7 @@ unsafe fn vp8_decode_resolution_change(
     Ok(())
 }
 
-/// `vp8_get_frame` — `vp8/vp8_dx_iface.c:531`. Vtable `dec.get_frame` slot.
+/// `vp8_get_frame` — `vp8/vp8_dx_iface.c:531`.
 pub unsafe fn vp8_get_frame(
     ctx: *mut Vp8AlgPriv<'static>,
     iter: *mut VpxCodecIter,

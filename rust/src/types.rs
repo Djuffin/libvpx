@@ -1,19 +1,14 @@
 //! VP8 decoder backbone types.
 //!
-//! Literal Rust translations of the structs/enums/aliases that hold the
-//! decoder's state. This module declares the *shape* of those types only
-//! — there is intentionally no behavior here. Method bodies, allocation
-//! helpers, FFI shims and the bool-decoder hot path land in later phases.
+//! Rust translations of the structs/enums/aliases that hold the decoder's
+//! state.
 //!
-//! Layout decisions follow `documentation/translation_summary.md` §3:
-//!   - direct C transliteration with raw `*mut u8` plane pointers,
+//! Layout decisions:
 //!   - `#[repr(C)]` (and `align(16)` for the working MB) wherever bit
-//!     layout matters for compatibility with SIMD/assembly later,
-//!   - the `int_mv` union collapses to a single `Mv` (both halves of
-//!     the C union are addressed via helper methods to be added later),
-//!   - `union b_mode_info` becomes a tagged enum `BModeInfo`. This is
-//!     larger than the C union (8 vs 4 bytes) — accepted, see the design
-//!     doc.
+//!     layout matters for compatibility with SIMD/assembly,
+//!   - the C `int_mv` union collapses to a single `Mv`,
+//!   - `union b_mode_info` becomes a tagged enum `BModeInfo`, which is
+//!     larger than the C union (8 vs 4 bytes).
 //!
 //! Build targets the minimal libvpx configuration (`--disable-postproc
 //! --disable-error-concealment --disable-multithread`), so per-frame
@@ -134,10 +129,8 @@ pub const MB_MODE_COUNT: usize = 10;
 
 /// `B_PREDICTION_MODE` (`blockd.h`). The first 10 variants are the
 /// intra-4x4 modes; the last 4 are the SPLITMV sub-block reference
-/// modes (`LEFT4X4` … `NEW4X4`). Note: the `Mv` variant of
-/// [`BModeInfo`] carries the sub-block MV for SPLITMV — these enum
-/// tags are only used by `VP8_SUB_MV_REF_TREE` parsing, not stored in
-/// `bmi[i].as_mode`.
+/// modes (`LEFT4X4` … `NEW4X4`), used only by `VP8_SUB_MV_REF_TREE`
+/// parsing. RFC 6386 §11.5 / §17.4.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum BPredictionMode {
@@ -250,10 +243,8 @@ pub struct EntropyContextPlanes {
     pub ctx: [EntropyContext; 9],
 }
 
-/// Region offsets into [`EntropyContextPlanes::ctx`] (RFC 6386 §13.3).
-/// These name the byte ranges the old C struct exposed as fields:
-/// `y1[4]` at 0, `u[2]`+`v[2]` at 4 (addressed together as one 4-byte
-/// chroma region), `y2` at 8.
+/// Region offsets into [`EntropyContextPlanes::ctx`] (RFC 6386 §13.3):
+/// `y1[4]` at 0, `u[2]`+`v[2]` at 4 (one 4-byte chroma region), `y2` at 8.
 pub const ECTX_Y1: usize = 0;
 pub const ECTX_UV: usize = 4;
 pub const ECTX_Y2: usize = 8;
@@ -361,8 +352,7 @@ pub struct Yv12BufferConfig {
 
 impl Yv12BufferConfig {
     /// Visible top-left **luma** pixel: the plane region base advanced by
-    /// the border (`border` rows + `border` cols). This is what most code
-    /// historically read as the `y_buffer` field. Panics if the Y region
+    /// the border (`border` rows + `border` cols). Panics if the Y region
     /// is unallocated.
     #[inline]
     pub fn y_buffer(&self) -> *mut u8 {
@@ -437,15 +427,10 @@ pub type Vp8Reader<'a> = BoolDecoder<'a>;
 
 /// `BLOCKD` (`blockd.h`) — per-4x4-block working context.
 ///
-/// The C struct also carries `qcoeff`/`dqcoeff`/`predictor`/`dequant`/`eob`
-/// pointer fields. All five are encoder-only convenience aliases (see
-/// `vp8/encoder/{loongarch/vp8_quantize_lsx, rdopt}.c` and
-/// `vp8/encoder/encodeframe.c` for the consumers) into either
-/// `Macroblockd`'s flat coefficient arrays (`qcoeff`/`dqcoeff`/`eob`
-/// → `Macroblockd.{qcoeff,dqcoeff,eobs}` at fixed offset
-/// `block_idx * 16`) or its encoder-only `predictor[384]` scratch.
-/// The decoder-only Rust port omits all of them; consumers compute
-/// the offset directly from the block index when they need it.
+/// The C struct's `qcoeff`/`dqcoeff`/`predictor`/`dequant`/`eob` pointer
+/// fields are encoder-only aliases into `Macroblockd`'s flat coefficient
+/// arrays and are omitted here; consumers compute the offset
+/// (`block_idx * 16`) from the block index directly.
 #[repr(C)]
 pub struct Blockd {
     /// Pixel offset from the MB's top-left into the destination plane.
@@ -497,11 +482,9 @@ pub struct VpxInternalErrorInfo {
 /// Per-MB plane view into a frame buffer.
 ///
 /// `MACROBLOCKD.pre` / `.dst` are a full `YV12_BUFFER_CONFIG` in libvpx,
-/// but the decoder only ever reads the three plane base pointers (which
-/// it advances per-MB to the current macroblock) and the luma/chroma
-/// strides off them. Carrying the whole config forced a bytewise struct
-/// copy at frame setup and left several aliased plane pointers live;
-/// this slim view holds exactly the five fields that are used.
+/// but the decoder only reads the three plane base pointers (advanced
+/// per-MB to the current macroblock) and the luma/chroma strides. This
+/// view holds exactly those five fields.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct PlaneRef {
@@ -531,9 +514,8 @@ impl PlaneRef {
 ///
 /// Carries the plane bases + strides of a DPB slot plus the *display*
 /// (cropped) dimensions. This is what `vp8dx_get_raw_frame` hands back
-/// to build the caller-facing `VpxImage` — replacing a bytewise copy of
-/// the slot's whole `Yv12BufferConfig`. The pointers alias the decoder's
-/// frame buffer and stay valid only until the next decode call.
+/// to build the caller-facing `VpxImage`. The pointers alias the
+/// decoder's frame buffer and stay valid only until the next decode call.
 #[derive(Clone, Copy)]
 pub struct FrameView {
     pub y_buffer: *mut u8,
@@ -563,8 +545,7 @@ pub struct Macroblockd {
     pub dequant_y2: [i16; 16],
     pub dequant_uv: [i16; 16],
 
-    /// 16 Y + 4 U + 4 V + 1 Y2 = 25 blocks. The pointer fields inside
-    /// each `Blockd` alias the arrays above.
+    /// 16 Y + 4 U + 4 V + 1 Y2 = 25 blocks.
     pub block: [Blockd; 25],
     /// Mask used to round MVs to full-pel when `full_pixel` is set.
     pub fullpixel_mask: i32,
@@ -888,8 +869,8 @@ impl Vp8Common {
 // ===========================================================================
 
 /// `VP8D_CONFIG` (`onyxd.h`) — decoder configuration passed at create
-/// time. The minimal build still carries the field (`max_threads`,
-/// `postprocess`, `error_concealment`); they are read but ignored.
+/// time. `max_threads`, `postprocess` and `error_concealment` are read
+/// but ignored in the minimal build.
 #[derive(Copy, Clone, Default)]
 #[repr(C)]
 pub struct Vp8dConfig {
@@ -928,8 +909,8 @@ pub struct Vp8dComp<'a> {
 
     /// Indices into `common.yv12_fb` for the four DPB slots, keyed by
     /// `MvReferenceFrame` (INTRA=current/new, LAST, GOLDEN, ALTREF).
-    /// `-1` means "no slot bound" (not currently emitted, but allowed by
-    /// the type). Set per frame at `onyxd_if.rs:vp8dx_receive_compressed_data`.
+    /// `-1` means "no slot bound". Set per frame at
+    /// `onyxd_if.rs:vp8dx_receive_compressed_data`.
     pub dec_fb_ref_idx: [i32; NUM_YV12_BUFFERS],
 
     pub common: Vp8Common,

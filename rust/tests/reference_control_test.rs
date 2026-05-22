@@ -7,10 +7,10 @@
 //! (SET), copy it into a decoder-owned DPB slot, and later copy it back
 //! out into another caller-owned buffer (COPY). Both directions go
 //! through `image2yuvconfig`, which *aliases* the caller's planes into a
-//! transient `Yv12BufferConfig` with no `buffer_alloc` — exactly the
-//! "borrowed, never-freed" config kind that the YV12 ownership rework
-//! must preserve. If a future change makes `Yv12BufferConfig` own its
-//! slab unconditionally, this test fails (double-free / wrong copy).
+//! transient `Yv12BufferConfig` whose `owning_buffer` is `None` — the
+//! borrowed, never-freed config kind. If `Yv12BufferConfig` were made to
+//! own its slab unconditionally, this test would fail (double-free /
+//! wrong copy).
 
 use core::ffi::c_void;
 use core::mem::MaybeUninit;

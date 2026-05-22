@@ -2,13 +2,8 @@
 //! Port of `test/invalid_file_test.cc` to Rust integration tests.
 //!
 //! For each corrupt VP8 IVF, decode every frame and verify the returned
-//! `vpx_codec_err_t` matches the canonical `.res` companion file
+//! `vpx_codec_err_t` matches the `.res` companion file
 //! (one integer per frame, `0` = OK, `7` = `VPX_CODEC_CORRUPT_FRAME`).
-//!
-//! Both `InvalidFileTest` and `InvalidFileInvalidPeekTest` collapse to
-//! the same body — the only difference in the C suite is that the
-//! peek-test class overrides `HandlePeekResult` to no-op, which is
-//! implicit here (we never call peek).
 //!
 //! Test data is discovered at build time by `build.rs`. If discovery
 //! fails the tests skip themselves rather than failing.
@@ -38,7 +33,7 @@ fn test_data_dir(test_name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(TEST_DATA_DIR))
 }
 
-// --- IVF reader (same shape as test_vector_test) -------------------------
+// --- IVF reader ----------------------------------------------------------
 
 struct IvfReader {
     inner: BufReader<File>,
@@ -149,9 +144,7 @@ fn invalid_comprehensive_s17661() {
     unsafe { run_invalid_file("invalid-vp80-00-comprehensive-s17661_r01-05_b6-.ivf") }
 }
 
-// `InvalidFileInvalidPeekTest` — C: `kVP8InvalidPeekTests`. Same body;
-// distinction in the C suite is that peek-result handling is overridden
-// to no-op. Implicit in this port (no separate peek call).
+// `InvalidFileInvalidPeekTest` — C: `kVP8InvalidPeekTests`.
 #[test]
 fn invalid_peek_2kf_0x6() {
     unsafe { run_invalid_file("invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf") }

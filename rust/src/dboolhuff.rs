@@ -1,13 +1,11 @@
 //! VP8 boolean arithmetic decoder.
 //!
-//! Literal translation of `vp8/decoder/dboolhuff.c` and the inline
-//! helpers from `vp8/decoder/dboolhuff.h`. See `documentation/vp8_files/
-//! dboolhuff.md` for the design / invariants.
+//! Translation of `vp8/decoder/dboolhuff.c` and the inline helpers from
+//! `vp8/decoder/dboolhuff.h`.
 //!
-//! The Rust [`BoolDecoder`] in `types.rs` replaces the C pair
+//! [`BoolDecoder`] in `types.rs` replaces the C pair
 //! `(user_buffer, user_buffer_end)` with a borrowed slice plus a `pos`
-//! cursor. The translation below mirrors the C control flow exactly,
-//! addressing the slice as if it were a `(buf, buf + sz)` pair: the
+//! cursor. The slice is addressed as a `(buf, buf + sz)` pair: the
 //! "current pointer" is `buffer.as_ptr().add(pos)` and the "end" is
 //! `buffer.as_ptr().add(buffer.len())`.
 
@@ -25,8 +23,8 @@ use crate::types::{BD_VALUE_BITS, BdValue, BoolDecoder, VP8_LOTS_OF_BITS};
 /// targets libvpx supports.
 const CHAR_BIT: i32 = 8;
 
-/// `VP8_BD_VALUE_SIZE` — bit width of [`BdValue`]. The C macro derives
-/// this from `sizeof(VP8_BD_VALUE) * CHAR_BIT`.
+/// `VP8_BD_VALUE_SIZE` — bit width of [`BdValue`]. In C, `sizeof(VP8_BD_VALUE)
+/// * CHAR_BIT`.
 const VP8_BD_VALUE_SIZE: i32 = BD_VALUE_BITS as i32;
 
 // ---------------------------------------------------------------------------
@@ -80,12 +78,8 @@ pub fn vp8dx_start_decode<'a>(
 ///
 /// Source: `vp8/decoder/dboolhuff.c:38`.
 ///
-/// Called from [`vp8dx_decode_bool`] when `count` drops below zero. See
-/// the file-level doc and `documentation/vp8_files/dboolhuff.md` for the
-/// invariants.
+/// Called from [`vp8dx_decode_bool`] when `count` drops below zero.
 pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
-    // Stand-in for `const unsigned char *bufptr = br->user_buffer;`. We
-    // keep a usize cursor into `buffer` rather than a raw pointer.
     let buffer_ptr = br.buffer.as_ptr();
     let buffer_len = br.buffer.len();
 
@@ -127,8 +121,7 @@ pub fn vp8dx_bool_decoder_fill(br: &mut BoolDecoder<'_>) {
 
 // ---------------------------------------------------------------------------
 // vp8dx_decode_bool (dboolhuff.h:54) — `static inline` in C, the per-bit
-// hot path. Translated as a safe `pub fn`; later phases may mark it
-// `#[inline]` once the call-site shape is settled.
+// hot path.
 // ---------------------------------------------------------------------------
 
 /// `vp8dx_decode_bool` — decode one binary symbol at the given probability.

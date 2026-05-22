@@ -1,8 +1,6 @@
 //! Frame-border extension (`vp8/common/extend.c`).
 //!
-//! Literal Rust transliteration of libvpx's `extend.c`. The decoder
-//! only ever calls [`vp8_extend_mb_row`]; encoder-side helpers were
-//! pruned in the dead-code cleanup.
+//! The decoder only uses [`vp8_extend_mb_row`].
 
 #![allow(clippy::too_many_arguments)]
 
@@ -13,10 +11,7 @@ use crate::types::Yv12BufferConfig;
 /// Replicates one column of edge samples into the right side of the
 /// most-recently-decoded macroblock row so that the next MB row's
 /// intra-prediction can read 4 pixels to the right of the current
-/// column. Called from `decode_mb_rows` at the end of every MB row.
-///
-/// Note the extension is only for the last row, for intra prediction
-/// purpose.
+/// column.
 pub unsafe fn vp8_extend_mb_row(
     ybf: *mut Yv12BufferConfig,
     mut y_ptr: *mut u8,

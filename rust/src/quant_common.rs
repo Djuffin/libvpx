@@ -5,10 +5,7 @@
 //! the integer dequant step used by the IDCT path. The backing tables
 //! `DC_QLOOKUP` / `AC_QLOOKUP` live in [`crate::tables`]; this module
 //! only carries the clamp + per-channel correction logic specified by
-//! RFC 6386 §9.6.
-//!
-//! See `documentation/vp8_files/quant_common.md` for the per-function
-//! rationale (Y2 DC × 2, Y2 AC × 155 % via a 16-bit fixed-point
+//! RFC 6386 §9.6 (Y2 DC × 2, Y2 AC × 155 % via a 16-bit fixed-point
 //! multiply with a floor of 8, chroma DC ceiling of 132, etc.).
 
 #![allow(non_snake_case)]

@@ -2,7 +2,7 @@
 //!
 //! Literal Rust transliteration of libvpx's `reconintra4x4.c` plus the
 //! `intra_prediction_down_copy` helper that lives in `reconintra4x4.h`.
-//! See `documentation/vp8_files/reconintra4x4.md` and RFC 6386 §12.2.
+//! See RFC 6386 §12.2.
 //!
 //! The per-mode 4x4 intra-prediction kernels themselves live in
 //! `vpx_dsp/intrapred.c` and are reached via the existing C symbols

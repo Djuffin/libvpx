@@ -1,20 +1,12 @@
 //! Generic C intra-prediction kernels (`vpx_dsp/intrapred.c`).
 //!
-//! Literal Rust transliteration of libvpx's reference C intra-prediction
-//! kernels. Every function is a `_c` reference entry point that on a
-//! SIMD-capable target would be replaced at startup by a NEON/SSE2/MSA
-//! variant via the RTCD dispatch table; on the `generic-gnu`
-//! configuration these functions are what actually runs.
-//!
-//! The C file uses two layers of preprocessor macros
+//! The C file uses preprocessor macros
 //! (`intra_pred_sized` / `intra_pred_allsizes` / `intra_pred_no_4x4`) to
-//! materialize each `(mode, size)` pair as a separately-linked symbol.
-//! Rust has no equivalent; each variant is written out as its own
-//! function below.
+//! materialize each `(mode, size)` pair as a separate symbol; here each
+//! variant is written out as its own function.
 //!
-//! `CONFIG_VP9_HIGHBITDEPTH` is off in the minimal VP8 build, so the
-//! `highbd_*` ladder from the C file is omitted (it is `#if`'d out
-//! upstream too).
+//! `CONFIG_VP9_HIGHBITDEPTH` is off in this build, so the `highbd_*`
+//! variants from the C file are omitted.
 
 #![allow(non_snake_case)]
 #![allow(dead_code)]
@@ -683,13 +675,10 @@ pub unsafe extern "C" fn vpx_d153_predictor_4x4_c(
 }
 
 // ===========================================================================
-// Macro-generated per-size wrappers.
-//
-// In C these are emitted by `intra_pred_no_4x4(d207)` / `intra_pred_no_4x4(d63)`
-// / `intra_pred_no_4x4(d45)` / `intra_pred_no_4x4(d117)` /
-// `intra_pred_no_4x4(d135)` / `intra_pred_no_4x4(d153)` (sizes 8/16/32) and
-// `intra_pred_allsizes(...)` for v/h/tm/dc_128/dc_left/dc_top/dc (sizes
-// 4/8/16/32). Each one pins `bs` to a compile-time constant and forwards.
+// Per-size wrappers. In C these are emitted by `intra_pred_no_4x4(...)` and
+// `intra_pred_allsizes(...)`. Each pins `bs` to a compile-time constant and
+// forwards to a kernel. Only the sizes actually used in this build are
+// instantiated below.
 // ===========================================================================
 
 macro_rules! intra_pred_sized_rs {

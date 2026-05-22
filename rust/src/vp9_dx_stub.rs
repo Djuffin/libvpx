@@ -1,16 +1,12 @@
-//! VP9 decoder placeholder.
-//!
-//! Validates that the `Decoder` trait shape can express VP9 without
-//! changes. Every method returns `Err(Error::Incapable)` — a real
-//! port would replace these bodies with calls into the VP9 stack.
+//! VP9 decoder placeholder. Stub validating the `Decoder` trait shape;
+//! no real VP9 decoding.
 
 use core::time::Duration;
 
 use crate::codec::{ControlCmd, Decoder, Error, Image, StreamInfo};
 use crate::vpx_api::{VPX_CODEC_INCAPABLE, VpxCodecStreamInfo};
 
-/// Phantom VP9 decoder. No state; constructible to confirm the trait
-/// signature accepts it.
+/// Stateless placeholder VP9 decoder.
 pub struct Vp9Decoder;
 
 impl Vp9Decoder {
@@ -43,7 +39,6 @@ impl Decoder for Vp9Decoder {
     }
 
     fn stream_info(&self) -> Result<StreamInfo, Error> {
-        // Return a zero StreamInfo just to exercise the path.
         Ok(VpxCodecStreamInfo {
             sz: 0,
             w: 0,

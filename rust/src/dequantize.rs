@@ -25,11 +25,10 @@ use crate::idctllm::vp8_short_idct4x4llm_c;
 /// `dqcoeff`. Used only for the Y2 second-order block (the rest of
 /// the MB uses the fused [`vp8_dequant_idct_add_c`] form).
 ///
-/// C signature is `vp8_dequantize_b_c(BLOCKD *d, short *DQC)`; the
-/// `BLOCKD` argument's only purpose was to carry `d->qcoeff` and
-/// `d->dqcoeff` — which in this port are just `xd.{qcoeff,dqcoeff} +
-/// 24 * 16` (the Y2 block's slot). We take them directly to avoid the
-/// `Blockd` indirection.
+/// The C signature is `vp8_dequantize_b_c(BLOCKD *d, short *DQC)`,
+/// where `d` carries `d->qcoeff` and `d->dqcoeff` (the Y2 block's slot,
+/// `xd.{qcoeff,dqcoeff} + 24 * 16`); here those pointers are passed
+/// directly.
 pub fn vp8_dequantize_b_c(qcoeff: *mut i16, dqcoeff: *mut i16, DQC: *mut i16) {
     // SAFETY: caller passes pointers to 16-element i16 blocks: the
     // qcoeff/dqcoeff slots inside `xd` and a 16-entry dequant table.

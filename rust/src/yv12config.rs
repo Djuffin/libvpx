@@ -1,16 +1,13 @@
-//! Literal Rust translation of `vpx_scale/generic/yv12config.c`.
+//! Translation of `vpx_scale/generic/yv12config.c`.
 //!
 //! Allocator, deallocator, and (re)allocator for [`Yv12BufferConfig`] — the
 //! single contiguous YV12 frame-buffer slab used everywhere in the VP8
 //! decoder for reference pictures and reconstruction targets. The three
 //! VP8 entry points (`vp8_yv12_alloc_frame_buffer`,
-//! `vp8_yv12_realloc_frame_buffer`, `vp8_yv12_de_alloc_frame_buffer`)
-//! mirror the C control flow: a single 32-byte-aligned `std::alloc`
-//! allocation produces the slab, and `y_buffer` / `u_buffer` /
-//! `v_buffer` are computed as offsets into it so that index `[0]` is
-//! the top-left displayable pixel and the border lives at negative
-//! offsets. The slab is owned: `Yv12BufferConfig`'s `Drop` frees it,
-//! so there is no manual free (the C `vpx_free` + scrub is gone).
+//! `vp8_yv12_realloc_frame_buffer`, `vp8_yv12_de_alloc_frame_buffer`) take
+//! `&mut Yv12BufferConfig`. The slab is an owned `Box<[u8]>`; the Y/U/V
+//! plane regions are subslices of it, each spanning its plane plus border,
+//! so the visible origin sits `border` rows/cols in from the region start.
 //!
 //! Geometry invariants preserved from the C source:
 //!   - `aligned_width  = (width  + 15) & !15`
@@ -29,21 +26,12 @@ use core::ptr::NonNull;
 
 use crate::types::Yv12BufferConfig;
 
-// The slab is owned by `Yv12BufferConfig::owning_buffer` (a zeroed
-// `Box<[u8]>`), which frees itself on drop. No manual allocator call here.
-// These take `&mut Yv12BufferConfig` (not a raw pointer): a reference
-// can't be null, so the C null checks / null return codes are gone, and
-// the bodies are plain safe Rust.
-
 // ---------------------------------------------------------------------------
 // `vp8_yv12_de_alloc_frame_buffer` — release a YV12 buffer and reset the
 // `YV12_BUFFER_CONFIG` to an empty config.
 // ---------------------------------------------------------------------------
 
 pub fn vp8_yv12_de_alloc_frame_buffer(ybf: &mut Yv12BufferConfig) {
-    // Overwriting the slot drops the old config first — its `Box<[u8]>`
-    // frees the slab — and installs a fresh all-`None`/zero one so it can
-    // be reallocated.
     *ybf = Yv12BufferConfig::default();
 }
 
@@ -74,9 +62,6 @@ pub fn vp8_yv12_realloc_frame_buffer(
     let frame_size: usize = (yplane_size + 2 * uvplane_size) as usize;
 
     if ybf.owning_buffer.is_none() {
-        // Zeroed owned slab; freed when the slot drops. (C left it
-        // uninitialized and only zeroed under MSAN; we always zero,
-        // which is safe and cheap since allocation is per-resolution.)
         ybf.owning_buffer = Some(vec![0u8; frame_size].into_boxed_slice());
     }
 
@@ -112,9 +97,8 @@ pub fn vp8_yv12_realloc_frame_buffer(
     ybf.border = border;
     ybf.frame_size = frame_size;
 
-    // Each plane region is a contiguous span of the slab; the visible
-    // origin sits `border` rows/cols in (see the y_buffer/u_buffer/
-    // v_buffer accessors). Built by safe slicing — no pointer arithmetic.
+    // Each plane region is a contiguous subslice of the slab; the visible
+    // origin sits `border` rows/cols in from its start.
     let (yp, uvp) = (yplane_size as usize, uvplane_size as usize);
     let (y, u, v) = {
         let buf = ybf.owning_buffer.as_mut().unwrap();
@@ -150,7 +134,5 @@ pub fn vp8_yv12_alloc_frame_buffer(
 // ---------------------------------------------------------------------------
 // VP9 entry points (`vpx_alloc_frame_buffer`, `vpx_realloc_frame_buffer`,
 // `vpx_free_frame_buffer`) are guarded by `#if CONFIG_VP9` in the C
-// source and are not part of the VP8 decoder build. They are
-// intentionally not translated; per-translation-task instructions
-// retain their C names if/when they are later added.
+// source and are intentionally omitted from this VP8-only translation.
 // ---------------------------------------------------------------------------

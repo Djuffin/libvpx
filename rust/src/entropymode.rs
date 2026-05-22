@@ -1,22 +1,18 @@
 //! `vp8/common/entropymode.c` — mode-probability defaults, tree shapes,
-//! and the tiny `vp8_mv_cont` neighbour-MV classifier.
+//! and the `vp8_mv_cont` neighbour-MV classifier.
 //!
-//! The trees, probability tables, MB-split layouts, and encoder
-//! codeword arrays referenced by this translation unit are all defined
-//! in [`crate::tables`]. This module re-exports them under the original
-//! C identifiers and translates the three functions that the original
-//! `.c` file actually contains:
+//! The trees, probability tables, and MB-split layouts referenced here
+//! are defined in [`crate::tables`]. This module re-exports them under
+//! the original C identifiers and provides the three functions from the
+//! original `.c` file:
 //!
 //! - [`vp8_mv_cont`] — five-way classification of `(left_mv, above_mv)`
 //!   used to pick a row of `vp8_sub_mv_ref_prob2` when decoding a
 //!   SPLITMV sub-block;
 //! - [`vp8_init_mbmode_probs`] — reset the three mutable per-frame
 //!   mode-probability tables on `VP8_COMMON::fc` to their defaults;
-//! - [`vp8_default_bmode_probs`] — copy the 9 default 4x4-intra-mode
+//! - [`vp8_default_bmode_probs`] — copy the default 4x4-intra-mode
 //!   probabilities into a caller-supplied buffer.
-//!
-//! See `documentation/vp8_files/entropymode.md` for the line-by-line
-//! commentary that drives this translation.
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
@@ -126,12 +122,9 @@ const sub_mv_ref_prob: [Prob; VP8_SUBMVREFS - 1] = SUB_MV_REF_PROB;
 // Functions
 // ===========================================================================
 
-/// Pack an [`Mv`] the same way the C `int_mv` union exposes its `as_int`
-/// field: low 16 bits = `row`, high 16 bits = `col`. The libvpx C code
-/// uses `as_int` only for equality / zero comparisons, so the exact
-/// row/col placement is irrelevant — what matters is that the packing
-/// is a bijection on `(row, col)` pairs, which `((col as u16) << 16) |
-/// (row as u16)` is.
+/// Pack an [`Mv`] like the C `int_mv` union's `as_int` field: low 16
+/// bits = `row`, high 16 bits = `col`. Used only for equality / zero
+/// comparisons.
 #[inline]
 fn mv_as_int(m: &Mv) -> u32 {
     ((m.col as u16 as u32) << 16) | (m.row as u16 as u32)

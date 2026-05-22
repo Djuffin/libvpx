@@ -2,12 +2,10 @@
 //!
 //! `CONFIG_MULTITHREAD = 0` for the supported build, so this is a
 //! single-thread shim: `reset()` flips a flag, `launch()` calls
-//! `execute()` inline, `end()` is essentially a no-op. The pthread
-//! paths from the original `vpx_util/vpx_thread.c` are kept as
-//! commented scaffolding for a future multi-thread port.
+//! `execute()` inline, `end()` is a no-op beyond resetting `status_`.
 //!
-//! Original C source (per libvpx's `vpx_thread.h`):
-//!   <https://chromium.googlesource.com/webm/libwebp>
+//! Ported from `vpx_util/vpx_thread.{c,h}`, which libvpx in turn derived
+//! from libwebp's `src/utils/thread.c`.
 
 #![allow(dead_code)]
 #![allow(non_snake_case)]
@@ -31,10 +29,8 @@ pub const VPX_WORKER_STATUS_NOT_OK: VPxWorkerStatus = 0;
 pub const VPX_WORKER_STATUS_OK: VPxWorkerStatus = 1;
 pub const VPX_WORKER_STATUS_WORKING: VPxWorkerStatus = 2;
 
-/// `VPxWorkerHook` — user-supplied function the worker thread calls.
-/// Two opaque pointers, returns nonzero on success and zero on error.
-/// Stays raw: this is the FFI boundary where caller-owned closure data
-/// is passed in.
+/// `VPxWorkerHook` — user-supplied function the worker calls. Two opaque
+/// pointers, returns nonzero on success and zero on error.
 pub type VPxWorkerHook = Option<unsafe fn(*mut c_void, *mut c_void) -> c_int>;
 
 /// `VPxWorkerImpl` — opaque platform-state placeholder (would hold
@@ -45,8 +41,7 @@ pub struct VPxWorkerImpl {
 }
 
 /// `VPxWorker` — public synchronisation object. Field names match the
-/// C struct verbatim. The four raw-pointer fields (`impl_`, `hook`,
-/// `data1`, `data2`) are caller-owned FFI slots and stay raw.
+/// C struct verbatim.
 #[repr(C)]
 pub struct VPxWorker {
     /// Owned by the worker; NULL until `reset` succeeds, NULL again
@@ -81,32 +76,25 @@ pub struct VPxWorkerInterface {
 }
 
 // ===========================================================================
-// `#if CONFIG_MULTITHREAD` block — placeholders for the pthread-backed
-// implementation. Never reached in the single-thread build.
+// `#if CONFIG_MULTITHREAD` block — never compiled in the single-thread build.
 // ===========================================================================
 
-#[cfg(any())] // never compiled — placeholder for the threaded build
+#[cfg(any())]
 unsafe fn thread_loop(_ptr: *mut c_void) -> *mut c_void {
-    // pthread_mutex_lock / pthread_cond_wait / execute() loop —
-    // omitted; see the C source.
     ptr::null_mut()
 }
 
 #[cfg(any())]
-unsafe fn change_state(_worker: &mut VPxWorker, _new_status: VPxWorkerStatus) {
-    // pthread_mutex_lock / pthread_cond_wait / signal — omitted.
-}
+unsafe fn change_state(_worker: &mut VPxWorker, _new_status: VPxWorkerStatus) {}
 
 // ===========================================================================
-// The vtable methods. `CONFIG_MULTITHREAD == 0` branches are taken in
-// this build; the others are commented out.
+// The vtable methods (`CONFIG_MULTITHREAD == 0` build).
 // ===========================================================================
 
 /// Zero the struct and set `status_` to `NOT_OK`. After this call the
 /// worker is safe to pass to `end()` even if `reset()` is never called.
 unsafe fn init(worker: &mut VPxWorker) {
-    // C: memset(worker, 0, sizeof(*worker)). Field-wise zeroing is
-    // equivalent for this `#[repr(C)]` struct and avoids `write_bytes`.
+    // C: memset(worker, 0, sizeof(*worker)).
     worker.impl_ = ptr::null_mut();
     worker.status_ = VPX_WORKER_STATUS_NOT_OK;
     worker.thread_name = ptr::null();
@@ -123,14 +111,11 @@ unsafe fn sync(worker: &mut VPxWorker) -> c_int {
     (worker.had_error == 0) as c_int
 }
 
-/// Allocate the impl + spawn the OS thread (threaded build), or flip
-/// `status_` to `OK` (single-thread build). `had_error` is cleared
-/// either way.
+/// Flip `status_` to `OK` and clear `had_error`.
 unsafe fn reset(worker: &mut VPxWorker) -> c_int {
     let mut ok: c_int = 1;
     worker.had_error = 0;
     if worker.status_ < VPX_WORKER_STATUS_OK {
-        // Threaded path omitted; see C source.
         worker.status_ = VPX_WORKER_STATUS_OK;
     } else if worker.status_ > VPX_WORKER_STATUS_OK {
         ok = sync(worker);
@@ -148,17 +133,13 @@ unsafe fn execute(worker: &mut VPxWorker) {
     }
 }
 
-/// Kick the worker. Threaded build signals the condvar; single-thread
-/// build calls `execute()` inline.
+/// Kick the worker: call `execute()` inline.
 unsafe fn launch(worker: &mut VPxWorker) {
-    // Threaded build would: change_state(worker, VPX_WORKER_STATUS_WORKING).
     execute(worker);
 }
 
-/// Terminate the worker. Threaded build joins the thread + frees impl;
-/// single-thread build only resets `status_`.
+/// Terminate the worker; only resets `status_`.
 unsafe fn end(worker: &mut VPxWorker) {
-    // Threaded build would: join + free impl_ — see C source.
     worker.status_ = VPX_WORKER_STATUS_NOT_OK;
     debug_assert!(worker.impl_.is_null());
     debug_assert!(worker.status_ == VPX_WORKER_STATUS_NOT_OK);

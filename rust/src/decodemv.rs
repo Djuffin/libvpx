@@ -81,8 +81,7 @@ fn int_as_mv(v: u32) -> Mv {
 
 // ===========================================================================
 // findnearmv.h inline helpers reproduced here. They are static inline in C
-// and used only by this translation unit; keeping them local avoids a
-// premature dependency on a translation of findnearmv.h.
+// and used only by this translation unit.
 // ===========================================================================
 
 /// `mv_bias` (`findnearmv.h:24`).
@@ -134,8 +133,7 @@ fn vp8_check_mv_bounds(
 }
 
 /// `vp8_mbsplit_offset` (findnearmv.c:13) — first 4x4 block index of
-/// each subset, per split shape. Local copy because `findnearmv.c` is
-/// not yet translated.
+/// each subset, per split shape.
 const VP8_MBSPLIT_OFFSET: [[u8; 16]; 4] = [
     [0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -581,7 +579,6 @@ fn read_mb_modes_mv(
     edge_top: i32,
     edge_bottom: i32,
 ) {
-    // ref_frame = (MV_REFERENCE_FRAME)vp8_read(bc, pbi->prob_intra);
     let rf = vp8_read(bc, prob_intra as i32);
     cur.mbmi.ref_frame = match rf {
         0 => MvReferenceFrame::Intra,
@@ -613,7 +610,6 @@ fn read_mb_modes_mv(
         }
 
         /* Zero accumulators */
-        // (already zero from initialisation above; mirror the C zeroing.)
         near_mvs[0] = Mv { row: 0, col: 0 };
         near_mvs[1] = Mv { row: 0, col: 0 };
         near_mvs[2] = Mv { row: 0, col: 0 };
@@ -922,8 +918,7 @@ pub fn vp8_decode_mode_mvs(pbi: &mut Vp8dComp<'_>) {
 
         for mb_col in 0..mb_cols {
             // The slab split + neighbour resolution happens inside
-            // `decode_mb_mode_mvs`; `pbi` is reborrowed fresh each
-            // iteration so the per-MB borrows don't outlive the call.
+            // `decode_mb_mode_mvs`.
             decode_mb_mode_mvs(pbi, mb_row, mb_col);
 
             // (CONFIG_ERROR_CONCEALMENT branch omitted — minimal build.)

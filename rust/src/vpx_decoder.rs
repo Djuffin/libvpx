@@ -65,16 +65,13 @@ pub fn vpx_codec_dec_init_ver(
         return e;
     }
 
-    // Reset the slot to known-initial state. The struct is no longer
-    // `#[repr(C)]` (it holds a `Box<dyn Decoder>` field), so we can't
-    // memset it blindly. Assign each field instead.
+    // Reset the context to its known-initial state.
     ctx.iface = Some(iface);
     ctx.name = Some(iface.name);
     ctx.init_flags = flags;
     ctx.trait_obj = None;
 
-    // VP8 is currently the only algorithm; when VP9 lands a small
-    // per-algo registry will choose between constructors.
+    // VP8 is currently the only supported algorithm.
     match Vp8Decoder::new(flags) {
         Ok(mut dec) => {
             if let Some(c) = cfg {
@@ -92,9 +89,8 @@ pub fn vpx_codec_dec_init_ver(
     }
 }
 
-/// `vpx_codec_peek_stream_info` — parse without committing. The
-/// `iface` parameter is kept only for null-check + param validation;
-/// dispatch uses `Decoder::peek_stream_info`.
+/// `vpx_codec_peek_stream_info` — parse without committing. `iface` is
+/// only validated; dispatch uses `Decoder::peek_stream_info`.
 pub fn vpx_codec_peek_stream_info(
     iface: Option<&VpxCodecIface>,
     data: &[u8],
@@ -109,7 +105,6 @@ pub fn vpx_codec_peek_stream_info(
     if (si.sz as usize) < core::mem::size_of::<VpxCodecStreamInfo>() {
         return VPX_CODEC_INVALID_PARAM;
     }
-    // Set default/unknown values
     si.w = 0;
     si.h = 0;
 
@@ -224,9 +219,8 @@ pub fn vpx_codec_register_put_slice_cb(
 }
 
 /// `vpx_codec_set_frame_buffer_functions`. The VP8 build lacks
-/// `VPX_CODEC_CAP_EXTERNAL_FRAME_BUFFER`; the trait-based
-/// `FrameBufferAllocator` hook in `crate::codec` is the future
-/// replacement.
+/// `VPX_CODEC_CAP_EXTERNAL_FRAME_BUFFER`, so this always returns
+/// `INCAPABLE`.
 pub fn vpx_codec_set_frame_buffer_functions(
     ctx: &mut VpxCodecCtx,
     cb_get: VpxGetFrameBufferCbFnT,

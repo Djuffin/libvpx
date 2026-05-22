@@ -1,10 +1,8 @@
 //! `vp8/common/entropy.c` — coefficient-token entropy data.
 //!
-//! Direct translation of the C source. Every table referenced by this
-//! file lives in [`crate::tables`] and is re-exported here under its
-//! original C name so existing call-sites can keep using the libvpx
-//! identifiers. The only code in `entropy.c` proper is the one-liner
-//! [`vp8_default_coef_probs`], translated below.
+//! Every table referenced here lives in [`crate::tables`] and is
+//! re-exported under its original C name (`pub use crate::tables::X as
+//! vp8_x`) so call-sites keep using the libvpx identifiers.
 
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
@@ -41,10 +39,7 @@ pub const DCT_VAL_CATEGORY6: i32 = 10;
 /// `DCT_EOB_TOKEN` — end-of-block sentinel.
 pub const DCT_EOB_TOKEN: i32 = 11;
 
-// Re-exports of bitstream-fixed constants already declared in
-// `crate::tables`. The aliases preserve the original C identifiers so
-// translated call-sites in other modules don't need to learn the
-// SCREAMING_SNAKE_CASE Rust spelling.
+// Re-exports of bitstream-fixed constants declared in `crate::tables`.
 
 pub use crate::tables::DCT_MAX_VALUE;
 pub use crate::tables::{
@@ -74,33 +69,16 @@ pub use crate::tables::VP8_NORM as vp8_norm;
 /// `vp8_prev_token_class[12]` — token value → previous-coefficient context.
 pub use crate::tables::VP8_PREV_TOKEN_CLASS as vp8_prev_token_class;
 
-/// `default_coef_probs` — the static initial coefficient-probability cube.
-/// File-local in C (`#include "default_coef_probs.h"` defines it as a
-/// `static const`), exposed here so [`vp8_default_coef_probs`] is the
-/// only writer.
+/// `default_coef_probs` — static initial coefficient-probability cube
+/// (`default_coef_probs.h`).
 pub use crate::tables::DEFAULT_COEF_PROBS as default_coef_probs;
 
 // ---------------------------------------------------------------------------
 // Functions.
 // ---------------------------------------------------------------------------
 
-/// `vp8_default_coef_probs` — reset the frame-context coefficient probs to
-/// their RFC-6386 default values. Translated literally from `entropy.c:145`:
-///
-/// ```c
-/// void vp8_default_coef_probs(VP8_COMMON *pc) {
-///   memcpy(pc->fc.coef_probs, default_coef_probs, sizeof(default_coef_probs));
-/// }
-/// ```
-///
-/// # Safety
-///
-/// `pc` must be a valid, properly-aligned pointer to a [`Vp8Common`] for
-/// the duration of the call. Mirrors the C signature
-/// (`void vp8_default_coef_probs(struct VP8Common *)`).
+/// `vp8_default_coef_probs` (`entropy.c:145`) — reset the frame-context
+/// coefficient probs to their RFC 6386 default values.
 pub fn vp8_default_coef_probs(pc: &mut Vp8Common) {
-    // `memcpy(dst, src, sizeof(default_coef_probs))` — the two arrays
-    // are the same shape (`[[[[Prob; 11]; 3]; 8]; 4]`), so a direct
-    // assignment is the literal Rust equivalent.
     pc.fc.coef_probs = default_coef_probs;
 }

@@ -126,8 +126,7 @@ pub const VPX_PLANE_U: usize = 1;
 pub const VPX_PLANE_V: usize = 2;
 pub const VPX_PLANE_ALPHA: usize = 3;
 
-/// `vpx_image_t` (`vpx/vpx_image.h:76`). Full struct body — the
-/// canonical layout shared by every consumer module.
+/// `vpx_image_t` (`vpx/vpx_image.h:76`).
 #[repr(C)]
 pub struct VpxImage {
     pub fmt: vpx_img_fmt_t,
@@ -341,9 +340,9 @@ pub struct VpxCodecPrivEncMrCfg {
 }
 pub type vpx_codec_priv_enc_mr_cfg_t = VpxCodecPrivEncMrCfg;
 
-/// `vpx_codec_iface_t` (`vpx/internal/vpx_codec_internal.h`). The
-/// dispatcher only inspects `name`, `abi_version`, and `caps`; the
-/// full vtable lives behind the `Decoder` trait object now.
+/// `vpx_codec_iface_t` (`vpx/internal/vpx_codec_internal.h`). Only the
+/// descriptor fields are kept; dispatch goes through the `Decoder`
+/// trait object.
 pub struct VpxCodecIface {
     pub name: &'static str,
     pub abi_version: c_int,
@@ -353,9 +352,8 @@ pub type vpx_codec_iface_t = VpxCodecIface;
 
 unsafe impl Sync for VpxCodecIface {}
 
-/// `vpx_codec_priv_cb_pair_t` (`vpx_codec_internal.h:329`). The two
-/// callback pointers share storage via a C union — we use a single
-/// `*mut c_void` slot here because both callbacks are pointer-sized.
+/// `vpx_codec_priv_cb_pair_t` (`vpx_codec_internal.h:329`). `u` holds a
+/// callback pointer (a C union of pointer-sized callbacks).
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct VpxCodecPrivCbPair {
@@ -393,25 +391,15 @@ pub type vpx_codec_priv_t = VpxCodecPriv;
 /// `vpx_codec_ctx_t` (`vpx/vpx_codec.h:200`).
 pub struct VpxCodecCtx {
     pub name: Option<&'static str>,
-    /// Iface descriptor; `None` until `vpx_codec_dec_init_ver` binds
-    /// one. The `static mut VPX_CODEC_VP8_DX_ALGO` outlives any
-    /// `VpxCodecCtx`, so the `'static` lifetime is sound.
+    /// Iface descriptor; `None` until `vpx_codec_dec_init_ver` binds one.
     pub iface: Option<&'static VpxCodecIface>,
     pub err: VpxCodecErr,
     pub init_flags: VpxCodecFlags,
-    // No `config` field. In libvpx, `vpx_codec_ctx_t::config` is a
-    // pointer-aliasing union used only as the generic-dispatcher →
-    // codec-`init(ctx)` hand-off channel for the caller's `cfg`, which
-    // the codec then copies inward and re-points at its internal copy
-    // (`vp8/vp8_dx_iface.c:78-81`). This port hands `cfg` to
-    // `Vp8Decoder::new` / `set_cfg` directly as a typed parameter, so
-    // the channel — and the field — carry nothing anyone reads back.
+    // No `config` field: `cfg` is passed to the decoder directly as a
+    // typed parameter rather than through `vpx_codec_ctx_t::config`.
     //
-    // No `priv_` field either. In libvpx, `vpx_codec_ctx_t::priv` is
-    // both the dispatch handle (every entry recovers the alg-priv from
-    // it) and the "initialized?" sentinel. Dispatch here goes through
-    // `trait_obj`, so the only surviving role — the init check — is
-    // already answered by `trait_obj.is_some()`.
+    // No `priv_` field: dispatch goes through `trait_obj`, and its
+    // init-check role is covered by `trait_obj.is_some()`.
     /// Boxed [`crate::codec::Decoder`] trait object. `None` before
     /// `vpx_codec_dec_init_ver` succeeds.
     pub trait_obj: Option<Box<dyn crate::codec::Decoder + 'static>>,

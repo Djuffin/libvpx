@@ -43,7 +43,8 @@ fn test_data_dir(test_name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(TEST_DATA_DIR))
 }
 
-/// The 62 VP8 conformance test vectors (`test/test_vectors.cc:18-51`).
+/// The 62 VP8 conformance test vectors (`test/test_vectors.cc`,
+/// `kVP8TestVectors`).
 #[rustfmt::skip]
 const VP8_TEST_VECTORS: &[&str] = &[
     "vp80-00-comprehensive-001.ivf", "vp80-00-comprehensive-002.ivf",
@@ -251,13 +252,8 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
 }
 
 /// Generates one `#[test] fn keyframe_NNN()` per VP8 conformance vector.
-/// Each test decodes only frame 0 (the keyframe) and asserts the MD5
-/// matches the canonical libvpx output. Inter-frame decoding is broken
-/// (see `full_vector_001`), so we stop after the keyframe.
-///
-/// Vectors known to fail at the keyframe stage are tagged with
-/// `#[ignore]` plus a one-line bug summary so the rest of the suite
-/// stays green.
+/// Each test decodes only the first IVF packet and verifies the MD5 of
+/// any displayed frame.
 macro_rules! keyframe_tests {
     ($($(#[$attr:meta])* $id:ident => $vector:literal),* $(,)?) => {
         $(

@@ -27,9 +27,8 @@ const SRC_SIZE: usize = SRC_STRIDE * SRC_STRIDE;
 const BORDER: usize = 16;
 const BORDER_FILL: u8 = 128;
 
-/// Deterministic LCG (Numerical Recipes), seeded so two test runs
-/// produce the same byte stream. Mirrors libvpx's `ACMRandom` use of a
-/// fixed `DeterministicSeed`.
+/// Deterministic LCG (Numerical Recipes), fixed seed so the byte stream
+/// is reproducible across runs.
 struct LCG(u32);
 
 impl LCG {
@@ -64,8 +63,6 @@ impl PaddedDst {
     }
 
     fn dst_ptr(&mut self) -> *mut u8 {
-        // Safe: bounds-checked indexing + `slice::as_mut_ptr`. The raw
-        // pointer is only handed to the C-ABI kernel.
         let off = BORDER * self.stride + BORDER;
         self.buf[off..].as_mut_ptr()
     }
@@ -75,7 +72,7 @@ impl PaddedDst {
     }
 
     /// Raw pointer `off` bytes past the active top-left corner, used to
-    /// exercise unaligned destinations. Safe: bounds-checked indexing.
+    /// exercise unaligned destinations.
     fn dst_ptr_offset(&mut self, off: usize) -> *mut u8 {
         let base = BORDER * self.stride + BORDER + off;
         self.buf[base..].as_mut_ptr()
@@ -109,13 +106,13 @@ impl PaddedDst {
     }
 }
 
-/// `TestWithRandomData(reference)` from the C suite. Since our build
-/// only has the C reference variants the "reference" and "UUT" are the
-/// same function — the test still has value as a smoke / border check.
+/// `TestWithRandomData(reference)` from the C suite. With only the C
+/// reference kernels available, "reference" and "UUT" are the same
+/// function, so this acts as a smoke / border check.
 fn test_with_random_data(width: usize, height: usize, predict: PredictFn) {
     let mut rng = LCG::new();
     let mut padded = PaddedDst::new(width, height);
-    // Plain dst_c output (no border padding) for the side-by-side compare.
+    // Plain output (no border padding) for the side-by-side compare.
     let mut dst_c = vec![0u8; 16 * 16];
     let mut src = vec![0u8; SRC_SIZE];
 
@@ -132,7 +129,7 @@ fn test_with_random_data(width: usize, height: usize, predict: PredictFn) {
 
             let src_base = src[SRC_STRIDE * 2 + 2..].as_mut_ptr();
 
-            // Reference (= same function in our build).
+            // Reference output.
             unsafe {
                 predict(
                     src_base,

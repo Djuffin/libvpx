@@ -1,8 +1,8 @@
 //! Idiomatic Rust codec interface.
 //!
 //! Two top-level traits: [`Decoder`] and [`Encoder`]. A codec may
-//! implement either or both. There is intentionally no `Codec`
-//! supertrait — `decode` and `encode` have no common signature.
+//! implement either or both. There is no `Codec` supertrait —
+//! `decode` and `encode` have no common signature.
 
 use core::time::Duration;
 
@@ -30,10 +30,10 @@ pub trait FrameBufferAllocator {
 
 /// Handle to a frame buffer issued by a [`FrameBufferAllocator`].
 ///
-/// Wraps the C `vpx_codec_frame_buffer_t` shape (data pointer + size +
-/// private slot). Fields are `pub` so allocator implementations can
-/// populate them directly; ownership of the underlying allocation
-/// remains with the allocator.
+/// Mirrors `vpx_codec_frame_buffer_t` (data pointer + size + private
+/// slot). Fields are `pub` so allocator implementations can populate
+/// them directly; ownership of the underlying allocation remains with
+/// the allocator.
 #[derive(Copy, Clone)]
 pub struct FrameBufferHandle {
     pub data: *mut u8,
@@ -41,11 +41,11 @@ pub struct FrameBufferHandle {
     pub priv_: *mut core::ffi::c_void,
 }
 
-/// Decoder control commands. Replaces the libvpx `vpx_codec_control_`
-/// + `va_list` dispatch with a typed enum.
+/// Decoder control commands. Typed replacement for the libvpx
+/// `vpx_codec_control_` + `va_list` dispatch.
 ///
-/// `#[non_exhaustive]` so that adding VP9-specific controls in the
-/// future does not break user `match` arms.
+/// `#[non_exhaustive]` so adding controls later does not break user
+/// `match` arms.
 #[non_exhaustive]
 pub enum ControlCmd<'a> {
     /// Replace a reference frame (last / golden / altref) with the
@@ -90,8 +90,8 @@ pub trait Decoder {
     /// [`Image::user_priv`](crate::vpx_api::VpxImage). Default impl is
     /// a no-op for codecs that don't support tagging.
     ///
-    /// Stays `*mut c_void` because the value is caller-typed; the
-    /// decoder treats it as fully opaque.
+    /// `*mut c_void` because the value is caller-typed and opaque to
+    /// the decoder.
     fn set_user_priv(&mut self, _user_priv: *mut core::ffi::c_void) {}
 
     /// Submit a compressed frame to the decoder. May internally
@@ -112,9 +112,7 @@ pub trait Decoder {
     fn control(&mut self, cmd: ControlCmd<'_>) -> Result<(), Error>;
 
     /// Probe a key-frame header for stream parameters without
-    /// committing to decode. Static — does not need a decoder
-    /// instance. `Self: Sized` so it does not interfere with object
-    /// safety.
+    /// decoding. `Self: Sized` keeps it from affecting object safety.
     fn peek_stream_info(data: &[u8]) -> Result<StreamInfo, Error>
     where
         Self: Sized;
@@ -129,10 +127,8 @@ pub trait Decoder {
     }
 }
 
-/// Encoder trait. VP8/VP9 encoder implementations are out-of-scope
-/// for the current build (`--disable-vp8-encoder`, `--disable-vp9`);
-/// the trait exists for shape validation against future `Vp8Encoder` /
-/// `Vp9Encoder` ports.
+/// Encoder trait. No implementations in the current build
+/// (`--disable-vp8-encoder`, `--disable-vp9`).
 pub trait Encoder {
     /// Submit an uncompressed image for encoding.
     fn encode(&mut self, img: &Image, pts: i64, duration: u64, flags: u32) -> Result<(), Error>;

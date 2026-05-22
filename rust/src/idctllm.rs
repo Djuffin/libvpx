@@ -9,9 +9,6 @@
 //!     scattering recovered DCs into `xd->qcoeff`. RFC 6386 §14.3.
 //!   * [`vp8_short_inv_walsh4x4_1_c`] — DC-only WHT fast path.
 //!
-//! All four are dispatched in the C build through `vp8_rtcd.h`; the SIMD
-//! variants must remain bit-exact with these references.
-//!
 //! Notes (from the C source):
 //!
 //! This implementation makes use of 16 bit fixed point verio of two
@@ -56,12 +53,9 @@ pub extern "C" fn vp8_short_idct4x4llm_c(
     // SAFETY: input is a 16-i16 coefficient block; pred_ptr/dst_ptr point
     // to 4x4 pixel regions in (possibly identical) Yv12 planes.
     unsafe {
-    // Build a bounded view of the input coefficients (fixed 16 shorts).
-    // We materialize the predictor into a local 4x4 buffer before
-    // touching `dst` because callers commonly pass the same buffer as
-    // both `pred_ptr` and `dst_ptr` (in-place IDCT-add); constructing
-    // overlapping `&[u8]` and `&mut [u8]` slices over the same memory
-    // would violate Rust's aliasing rules.
+    // Snapshot the predictor into a local 4x4 buffer before writing `dst`:
+    // callers commonly pass the same buffer as both `pred_ptr` and
+    // `dst_ptr` (in-place IDCT-add).
     let input: &[i16; 16] = &*(input as *const [i16; 16]);
 
     let mut pred: [u8; 16] = [0; 16];
@@ -181,8 +175,6 @@ pub extern "C" fn vp8_short_inv_walsh4x4_c(input: *mut i16, mb_dqcoeff: *mut i16
     // SAFETY: input is a 16-i16 block (the Y2 dqcoeff slot); mb_dqcoeff
     // is qcoeff[0..16*16] addressed at stride 16.
     unsafe {
-    // `input` is a fixed 16-short block; snapshot it into a local
-    // [i16; 16] up front and operate purely on safe arrays.
     let input: &[i16; 16] = &*(input as *const [i16; 16]);
     let mut output: [i16; 16] = [0; 16];
 
