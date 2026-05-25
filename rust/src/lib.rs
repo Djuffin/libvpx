@@ -15,6 +15,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 // ---- Foundations (no inter-module deps) ----
+pub mod api;
 pub mod codec;
 pub mod tables;
 pub mod types;
