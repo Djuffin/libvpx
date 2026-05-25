@@ -12,3 +12,5 @@ pub mod format;
 pub mod frame;
 pub mod opaque;
 pub mod queue;
+pub mod control;
+

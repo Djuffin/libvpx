@@ -23,3 +23,34 @@ pub use frame::{
     VideoFrameAllocator,
 };
 pub use packet::{DecodedPicture, EncodedPacket};
+
+// ===========================================================================
+// VP8 Codec-Specific Control Commands
+// ===========================================================================
+
+pub struct Vp8SetReference {
+    pub frame_type: i32,
+    pub img: crate::vpx_api::VpxImage,
+}
+
+pub struct Vp8CopyReference {
+    pub frame_type: i32,
+    pub img: std::cell::Cell<crate::vpx_api::VpxImage>,
+}
+
+pub struct Vp8GetLastRefUpdates {
+    pub out: std::cell::Cell<i32>,
+}
+
+pub struct Vp8GetFrameCorrupted {
+    pub out: std::cell::Cell<i32>,
+}
+
+pub struct Vp8GetLastRefUsed {
+    pub out: std::cell::Cell<i32>,
+}
+
+pub struct Vp8GetLastQuantizer {
+    pub out: std::cell::Cell<i32>,
+}
+

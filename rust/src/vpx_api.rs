@@ -128,6 +128,7 @@ pub const VPX_PLANE_ALPHA: usize = 3;
 
 /// `vpx_image_t` (`vpx/vpx_image.h:76`).
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct VpxImage {
     pub fmt: vpx_img_fmt_t,
     pub cs: vpx_color_space_t,

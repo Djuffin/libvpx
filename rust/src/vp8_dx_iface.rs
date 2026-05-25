@@ -1008,9 +1008,57 @@ impl crate::api::VideoDecoder for Vp8VideoDecoder {
         Ok(())
     }
 
-    fn control(&mut self, _cmd: &mut crate::api::ControlCmd) -> Result<(), crate::api::DecoderError> {
+    fn control(&mut self, cmd: &mut crate::api::ControlCmd) -> Result<(), crate::api::DecoderError> {
+        if let Some(c) = cmd.downcast_ref::<crate::api::Vp8SetReference>() {
+            let ref_frame = VpxRefFrame {
+                frame_type: c.frame_type,
+                img: c.img,
+            };
+            self.decoder.control(crate::codec::ControlCmd::SetReference(&ref_frame))
+                .map_err(|e| crate::api::DecoderError::Fatal(format!("{e:?}")))?;
+            return Ok(());
+        }
+        if let Some(c) = cmd.downcast_ref::<crate::api::Vp8CopyReference>() {
+            let mut ref_frame = VpxRefFrame {
+                frame_type: c.frame_type,
+                img: c.img.get(),
+            };
+            self.decoder.control(crate::codec::ControlCmd::CopyReference(&mut ref_frame))
+                .map_err(|e| crate::api::DecoderError::Fatal(format!("{e:?}")))?;
+            c.img.set(ref_frame.img);
+            return Ok(());
+        }
+        if let Some(c) = cmd.downcast_ref::<crate::api::Vp8GetLastRefUpdates>() {
+            let mut val = 0;
+            self.decoder.control(crate::codec::ControlCmd::GetLastRefUpdates(&mut val))
+                .map_err(|e| crate::api::DecoderError::Fatal(format!("{e:?}")))?;
+            c.out.set(val);
+            return Ok(());
+        }
+        if let Some(c) = cmd.downcast_ref::<crate::api::Vp8GetFrameCorrupted>() {
+            let mut val = 0;
+            self.decoder.control(crate::codec::ControlCmd::GetFrameCorrupted(&mut val))
+                .map_err(|e| crate::api::DecoderError::Fatal(format!("{e:?}")))?;
+            c.out.set(val);
+            return Ok(());
+        }
+        if let Some(c) = cmd.downcast_ref::<crate::api::Vp8GetLastRefUsed>() {
+            let mut val = 0;
+            self.decoder.control(crate::codec::ControlCmd::GetLastRefUsed(&mut val))
+                .map_err(|e| crate::api::DecoderError::Fatal(format!("{e:?}")))?;
+            c.out.set(val);
+            return Ok(());
+        }
+        if let Some(c) = cmd.downcast_ref::<crate::api::Vp8GetLastQuantizer>() {
+            let mut val = 0;
+            self.decoder.control(crate::codec::ControlCmd::GetLastQuantizer(&mut val))
+                .map_err(|e| crate::api::DecoderError::Fatal(format!("{e:?}")))?;
+            c.out.set(val);
+            return Ok(());
+        }
+
         Err(crate::api::DecoderError::FeatureNotSupported(
-            "control commands not implemented under new API wrapper yet".to_string()
+            "unknown control payload for VP8 Decoder".into()
         ))
     }
 }
