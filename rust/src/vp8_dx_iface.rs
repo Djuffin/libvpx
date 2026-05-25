@@ -888,3 +888,117 @@ impl crate::api::VideoFrame for PublishedFrame {
     }
 }
 
+// ===========================================================================
+// Unified API VideoDecoder wrapper.
+// ===========================================================================
+
+pub struct Vp8VideoDecoder {
+    decoder: Vp8Decoder,
+    allocator: std::sync::Arc<dyn crate::api::VideoFrameAllocator>,
+    callbacks: std::sync::Arc<dyn crate::api::VideoDecoderCallbacks>,
+    out_queue: std::collections::VecDeque<crate::api::DecodedPicture>,
+    pending_opaque: Option<Box<dyn std::any::Any + Send>>,
+    last_format: Option<crate::api::StreamFormat>,
+}
+
+impl Vp8VideoDecoder {
+    pub fn new(
+        _config: crate::api::DecoderConfig,
+        allocator: std::sync::Arc<dyn crate::api::VideoFrameAllocator>,
+        callbacks: std::sync::Arc<dyn crate::api::VideoDecoderCallbacks>,
+    ) -> Result<Self, crate::api::DecoderError> {
+        let mut decoder = Vp8Decoder::new(0).map_err(|e| crate::api::DecoderError::InitializationFailed(format!("{e:?}")))?;
+        decoder.priv_.allocator = Some(allocator.clone());
+
+        Ok(Self {
+            decoder,
+            allocator,
+            callbacks,
+            out_queue: std::collections::VecDeque::new(),
+            pending_opaque: None,
+            last_format: None,
+        })
+    }
+}
+impl crate::api::VideoDecoder for Vp8VideoDecoder {
+    fn decode(&mut self, packet: crate::api::EncodedPacket) -> Result<(), crate::api::DecoderError> {
+        let crate::api::EncodedPacket { data, opaque } = packet;
+        let bytes = (*data).as_ref();
+        self.pending_opaque = opaque;
+
+        self.decoder.decode(bytes, core::time::Duration::ZERO)
+            .map_err(|e| crate::api::DecoderError::MisformedData(format!("{e:?}")))?;
+
+        let priv_ref = &mut *self.decoder.priv_;
+        let mut iter = core::ptr::null();
+        unsafe {
+            let img_ptr = vp8_get_frame(priv_ref, &mut iter);
+            if !img_ptr.is_null() {
+                let pbi = priv_ref.yv12_frame_buffers.pbi_ptr();
+                assert!(!pbi.is_null());
+                let ybf = &(*pbi).common.yv12_fb[(*pbi).common.new_fb_idx as usize];
+
+                let format = crate::api::StreamFormat {
+                    codec: crate::api::Codec::VP8,
+                    coded_width: ybf.y_width as usize,
+                    coded_height: ybf.y_height as usize,
+                    crop_left: 0,
+                    crop_top: 0,
+                    display_width: ybf.y_crop_width as usize,
+                    display_height: ybf.y_crop_height as usize,
+                    color_space: Some(crate::api::ColorSpace {
+                        primaries: crate::api::ColorPrimaries::Unspecified,
+                        transfer: crate::api::TransferCharacteristics::Unspecified,
+                        matrix: crate::api::MatrixCoefficients::Unspecified,
+                        range: crate::api::ColorRange::Limited,
+                    }),
+                    pixel_format: crate::api::PixelFormat::I420,
+                    bit_depth: 8,
+                };
+
+                if self.last_format.as_ref() != Some(&format) {
+                    self.last_format = Some(format.clone());
+                    self.callbacks.on_format_changed(format.clone());
+                }
+
+                let frame: std::sync::Arc<dyn crate::api::VideoFrame> = std::sync::Arc::new(PublishedFrame::new(ybf));
+                self.out_queue.push_back(crate::api::DecodedPicture {
+                    frame,
+                    format,
+                    opaque: self.pending_opaque.take(),
+                });
+
+                self.callbacks.on_picture_available();
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_picture(&mut self) -> Result<Option<crate::api::DecodedPicture>, crate::api::DecoderError> {
+        Ok(self.out_queue.pop_front())
+    }
+
+    fn flush(&mut self, mode: crate::api::FlushMode) -> Result<(), crate::api::DecoderError> {
+        match mode {
+            crate::api::FlushMode::Discard => {
+                self.out_queue.clear();
+                self.pending_opaque = None;
+            }
+            crate::api::FlushMode::Drain => {}
+        }
+        Ok(())
+    }
+
+    fn control(&mut self, _cmd: &mut crate::api::ControlCmd) -> Result<(), crate::api::DecoderError> {
+        Err(crate::api::DecoderError::FeatureNotSupported(
+            "control commands not implemented under new API wrapper yet".to_string()
+        ))
+    }
+}
+
+unsafe impl Send for Vp8VideoDecoder {}
+unsafe impl Sync for Vp8VideoDecoder {}
+
+
+

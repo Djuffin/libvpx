@@ -47,9 +47,11 @@ pub fn create_decoder(
     callback: Arc<dyn VideoDecoderCallbacks>,
 ) -> Result<Box<dyn VideoDecoder>, DecoderError> {
     match config.codec {
-        Codec::VP8 => Err(DecoderError::FeatureNotSupported(
-            "VP8 is not fully implemented under the new API yet".to_string()
-        )),
+        Codec::VP8 => {
+            Ok(Box::new(crate::vp8_dx_iface::Vp8VideoDecoder::new(
+                config, allocator, callback,
+            )?))
+        }
         other => Err(DecoderError::FeatureNotSupported(format!(
             "codec {other:?} is not supported by this decoder library"
         ))),
