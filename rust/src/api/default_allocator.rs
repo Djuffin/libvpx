@@ -38,8 +38,13 @@ struct DefaultFrameBuffer {
 }
 
 impl FrameBuffer for DefaultFrameBuffer {
-    fn plane_ptr(&self, plane: VideoPlane) -> Option<NonNull<u8>> {
-        self.buffers.iter().flatten().find(|b| b.plane == plane).map(|b| b.ptr)
+    fn plane_ptr(&self, plane: VideoPlane) -> Option<NonNull<[u8]>> {
+        self.buffers.iter().flatten()
+            .find(|b| b.plane == plane)
+            .map(|b| {
+                let slice_ptr = std::ptr::slice_from_raw_parts_mut(b.ptr.as_ptr(), b.layout.size());
+                NonNull::new(slice_ptr).unwrap()
+            })
     }
 }
 

@@ -203,16 +203,17 @@ pub fn vp8_yv12_alloc_external_frame_buffer(
     ybf.border = border;
     ybf.frame_size = frame_size;
 
-    let y_ptr = ext_buffer.plane_ptr(crate::api::VideoPlane::Y).ok_or(crate::api::AllocError::OutOfMemory)?;
-    let u_ptr = ext_buffer.plane_ptr(crate::api::VideoPlane::U).ok_or(crate::api::AllocError::OutOfMemory)?;
-    let v_ptr = ext_buffer.plane_ptr(crate::api::VideoPlane::V).ok_or(crate::api::AllocError::OutOfMemory)?;
+    let y_slice = ext_buffer.plane_ptr(crate::api::VideoPlane::Y).ok_or(crate::api::AllocError::OutOfMemory)?;
+    let u_slice = ext_buffer.plane_ptr(crate::api::VideoPlane::U).ok_or(crate::api::AllocError::OutOfMemory)?;
+    let v_slice = ext_buffer.plane_ptr(crate::api::VideoPlane::V).ok_or(crate::api::AllocError::OutOfMemory)?;
 
-    // SAFETY: the allocator guarantees that the returned pointers are valid and aligned.
-    unsafe {
-        ybf.y_region = Some(NonNull::new(std::slice::from_raw_parts_mut(y_ptr.as_ptr(), yplane_size as usize)).unwrap());
-        ybf.u_region = Some(NonNull::new(std::slice::from_raw_parts_mut(u_ptr.as_ptr(), uvplane_size as usize)).unwrap());
-        ybf.v_region = Some(NonNull::new(std::slice::from_raw_parts_mut(v_ptr.as_ptr(), uvplane_size as usize)).unwrap());
-    }
+    assert!(y_slice.len() >= yplane_size as usize, "Allocator returned undersized Y plane");
+    assert!(u_slice.len() >= uvplane_size as usize, "Allocator returned undersized U plane");
+    assert!(v_slice.len() >= uvplane_size as usize, "Allocator returned undersized V plane");
+
+    ybf.y_region = Some(y_slice);
+    ybf.u_region = Some(u_slice);
+    ybf.v_region = Some(v_slice);
     ybf.alpha_region = None;
     ybf.ext_buffer = Some(ext_buffer);
 

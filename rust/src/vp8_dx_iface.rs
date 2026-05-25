@@ -873,9 +873,9 @@ impl crate::api::VideoFrame for PublishedFrame {
         let origin = b * stride + b;
         let visible_bytes = (h.saturating_sub(1)) * stride + w;
 
-        let data = unsafe {
-            std::slice::from_raw_parts(ptr.as_ptr().add(origin as usize), visible_bytes as usize)
-        };
+        let slice_ref = unsafe { ptr.as_ref() };
+        assert!(slice_ref.len() >= (origin + visible_bytes) as usize, "Backing FrameBuffer plane is undersized");
+        let data = &slice_ref[(origin as usize)..(origin as usize + visible_bytes as usize)];
 
         Some(crate::api::PlaneView {
             plane,
