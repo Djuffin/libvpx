@@ -819,3 +819,72 @@ impl Decoder for Vp8Decoder {
         }
     }
 }
+
+// ===========================================================================
+// Unified API VideoFrame implementation.
+// ===========================================================================
+
+pub struct PublishedFrame {
+    buffer: std::sync::Arc<dyn crate::api::FrameBuffer>,
+    y_crop_width: i32,
+    y_crop_height: i32,
+    y_stride: i32,
+    uv_crop_width: i32,
+    uv_crop_height: i32,
+    uv_stride: i32,
+    border: i32,
+}
+
+impl PublishedFrame {
+    pub fn new(ybf: &crate::types::Yv12BufferConfig) -> Self {
+        Self {
+            buffer: ybf.ext_buffer.clone().expect("external frame buffer must be present"),
+            y_crop_width: ybf.y_crop_width,
+            y_crop_height: ybf.y_crop_height,
+            y_stride: ybf.y_stride,
+            uv_crop_width: ybf.uv_crop_width,
+            uv_crop_height: ybf.uv_crop_height,
+            uv_stride: ybf.uv_stride,
+            border: ybf.border,
+        }
+    }
+}
+
+impl crate::api::VideoFrame for PublishedFrame {
+    fn plane(&self, plane: crate::api::VideoPlane) -> Option<crate::api::PlaneView<'_>> {
+        let (w, h, stride) = match plane {
+            crate::api::VideoPlane::Y => (self.y_crop_width, self.y_crop_height, self.y_stride),
+            crate::api::VideoPlane::U => (self.uv_crop_width, self.uv_crop_height, self.uv_stride),
+            crate::api::VideoPlane::V => (self.uv_crop_width, self.uv_crop_height, self.uv_stride),
+            _ => return None,
+        };
+
+        let ptr = self.buffer.plane_ptr(plane)?;
+        let border = self.border;
+        let b = if plane == crate::api::VideoPlane::Y { border } else { border / 2 };
+        let origin = b * stride + b;
+        let visible_bytes = (h.saturating_sub(1)) * stride + w;
+
+        let data = unsafe {
+            std::slice::from_raw_parts(ptr.as_ptr().add(origin as usize), visible_bytes as usize)
+        };
+
+        Some(crate::api::PlaneView {
+            plane,
+            data,
+            stride: stride as usize,
+            width: w as usize,
+            height: h as usize,
+        })
+    }
+
+    fn planes(&self) -> [Option<crate::api::PlaneView<'_>>; 4] {
+        [
+            self.plane(crate::api::VideoPlane::Y),
+            self.plane(crate::api::VideoPlane::U),
+            self.plane(crate::api::VideoPlane::V),
+            None,
+        ]
+    }
+}
+
