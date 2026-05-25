@@ -836,14 +836,14 @@ pub struct PublishedFrame {
 }
 
 impl PublishedFrame {
-    pub fn new(ybf: &crate::types::Yv12BufferConfig) -> Self {
+    pub fn new(ybf: &crate::types::Yv12BufferConfig, display_width: i32, display_height: i32) -> Self {
         Self {
             buffer: ybf.ext_buffer.clone().expect("external frame buffer must be present"),
-            y_crop_width: ybf.y_crop_width,
-            y_crop_height: ybf.y_crop_height,
+            y_crop_width: display_width,
+            y_crop_height: display_height,
             y_stride: ybf.y_stride,
-            uv_crop_width: ybf.uv_crop_width,
-            uv_crop_height: ybf.uv_crop_height,
+            uv_crop_width: (display_width + 1) / 2,
+            uv_crop_height: (display_height + 1) / 2,
             uv_stride: ybf.uv_stride,
             border: ybf.border,
         }
@@ -944,8 +944,8 @@ impl crate::api::VideoDecoder for Vp8VideoDecoder {
                     coded_height: ybf.y_height as usize,
                     crop_left: 0,
                     crop_top: 0,
-                    display_width: ybf.y_crop_width as usize,
-                    display_height: ybf.y_crop_height as usize,
+                    display_width: (*pbi).common.width as usize,
+                    display_height: (*pbi).common.height as usize,
                     color_space: Some(crate::api::ColorSpace {
                         primaries: crate::api::ColorPrimaries::Unspecified,
                         transfer: crate::api::TransferCharacteristics::Unspecified,
@@ -961,7 +961,7 @@ impl crate::api::VideoDecoder for Vp8VideoDecoder {
                     self.callbacks.on_format_changed(format.clone());
                 }
 
-                let frame: std::sync::Arc<dyn crate::api::VideoFrame> = std::sync::Arc::new(PublishedFrame::new(ybf));
+                let frame: std::sync::Arc<dyn crate::api::VideoFrame> = std::sync::Arc::new(PublishedFrame::new(ybf, (*pbi).common.width, (*pbi).common.height));
                 self.out_queue.push_back(crate::api::DecodedPicture {
                     frame,
                     format,

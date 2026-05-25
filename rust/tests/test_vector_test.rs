@@ -1,37 +1,20 @@
-#![allow(unsafe_op_in_unsafe_fn)]
 //! Port of `test/test_vector_test.cc` to Rust integration tests.
 //!
 //! Iterates the 62 VP8 conformance vectors, decodes every frame through
-//! the public API, and verifies the per-frame MD5 against the canonical
-//! `<filename>.md5` companion file.
-//!
-//! Test data is discovered at build time by `build.rs`: it honours
-//! `$LIBVPX_TEST_DATA_PATH`, probes a few conventional locations, and
-//! falls back to downloading from the WebM project storage bucket. If
-//! none of that works the tests skip themselves at runtime rather than
-//! failing.
+//! the unified safe `VideoDecoder` API, and verifies the per-frame MD5 against
+//! the canonical `<filename>.md5` companion file.
 
-use core::mem::MaybeUninit;
-use core::ptr;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use md5::{Digest, Md5};
 
-use vp8_decoder_rs::vp8_dx_iface::vpx_codec_vp8_dx;
-use vp8_decoder_rs::vpx_api::{
-    VPX_CODEC_OK, VPX_DECODER_ABI_VERSION, VPX_IMG_FMT_HIGHBITDEPTH, vpx_codec_ctx_t,
-    vpx_codec_dec_init_ver, vpx_codec_decode, vpx_codec_destroy, vpx_codec_get_frame, vpx_image_t,
-};
+use vp8_decoder_rs::api::*;
 
-/// Build-time-discovered test data location (see `build.rs`). Empty
-/// string if neither the local probe nor the download fallback
-/// succeeded — tests skip silently in that case.
 const TEST_DATA_DIR: &str = env!("VP8_TEST_DATA_DIR");
 
-/// Returns `Some(dir)` if test data is available, otherwise prints a
-/// skip notice and returns `None`. Callers `return` on `None`.
 fn test_data_dir(test_name: &str) -> Option<PathBuf> {
     if TEST_DATA_DIR.is_empty() {
         eprintln!(
@@ -43,8 +26,6 @@ fn test_data_dir(test_name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(TEST_DATA_DIR))
 }
 
-/// The 62 VP8 conformance test vectors (`test/test_vectors.cc`,
-/// `kVP8TestVectors`).
 #[rustfmt::skip]
 const VP8_TEST_VECTORS: &[&str] = &[
     "vp80-00-comprehensive-001.ivf", "vp80-00-comprehensive-002.ivf",
@@ -85,12 +66,6 @@ fn vector_list_has_62_entries() {
     assert_eq!(VP8_TEST_VECTORS.len(), 62);
 }
 
-// ---------------------------------------------------------------------
-// IVF parser
-// ---------------------------------------------------------------------
-
-/// Minimal IVF reader. `vp80*.ivf` files use 32-byte file headers and
-/// 12-byte per-frame headers (4-byte LE size + 8-byte LE pts).
 struct IvfReader {
     inner: BufReader<File>,
 }
@@ -98,14 +73,12 @@ struct IvfReader {
 impl IvfReader {
     fn open(path: &PathBuf) -> std::io::Result<Self> {
         let mut inner = BufReader::new(File::open(path)?);
-        // Skip the 32-byte file header. We don't need the contents.
         let mut hdr = [0u8; 32];
         inner.read_exact(&mut hdr)?;
         assert_eq!(&hdr[0..4], b"DKIF", "{path:?} missing DKIF magic");
         Ok(Self { inner })
     }
 
-    /// Read the next packet, or `None` at EOF.
     fn next_frame(&mut self) -> Option<Vec<u8>> {
         let mut hdr = [0u8; 12];
         if self.inner.read_exact(&mut hdr).is_err() {
@@ -118,32 +91,21 @@ impl IvfReader {
     }
 }
 
-// ---------------------------------------------------------------------
-// MD5 helper (mirrors `test/md5_helper.h::MD5::Add(vpx_image_t*)`)
-// ---------------------------------------------------------------------
-
-unsafe fn md5_of_image(img: &vpx_image_t) -> String {
+fn md5_of_frame(frame: &dyn VideoFrame) -> String {
     let mut hasher = Md5::new();
-    let highbd = (img.fmt & VPX_IMG_FMT_HIGHBITDEPTH) != 0;
-    let bytes_per_sample = if highbd { 2 } else { 1 };
+    let planes = frame.planes();
 
-    for plane in 0..3 {
-        let h = if plane == 0 {
-            img.d_h as usize
-        } else {
-            ((img.d_h + img.y_chroma_shift) >> img.y_chroma_shift) as usize
-        };
-        let w = if plane == 0 {
-            (img.d_w as usize) * bytes_per_sample
-        } else {
-            (((img.d_w + img.x_chroma_shift) >> img.x_chroma_shift) as usize) * bytes_per_sample
-        };
+    for plane_idx in 0..3 {
+        let plane_view = planes[plane_idx].as_ref().expect("planar plane missing");
+        let stride = plane_view.stride;
+        let w = plane_view.width;
+        let h = plane_view.height;
 
-        let mut buf: *const u8 = img.planes[plane];
+        let mut offset = 0;
         for _ in 0..h {
-            let row = core::slice::from_raw_parts(buf, w);
+            let row = &plane_view.data[offset..offset + w];
             hasher.update(row);
-            buf = buf.add(img.stride[plane] as usize);
+            offset += stride;
         }
     }
 
@@ -154,10 +116,6 @@ unsafe fn md5_of_image(img: &vpx_image_t) -> String {
     }
     s
 }
-
-// ---------------------------------------------------------------------
-// .md5 file reader — each line: `<32 hex chars>  <basename>.i420`
-// ---------------------------------------------------------------------
 
 fn read_md5_lines(path: &PathBuf) -> Vec<String> {
     let f = File::open(path).expect("open .md5 file");
@@ -170,32 +128,13 @@ fn read_md5_lines(path: &PathBuf) -> Vec<String> {
         .collect()
 }
 
-// ---------------------------------------------------------------------
-// Decode-and-compare driver
-// ---------------------------------------------------------------------
-
-unsafe fn init_dec() -> vpx_codec_ctx_t {
-    let iface = vpx_codec_vp8_dx();
-    let mut dec = MaybeUninit::<vpx_codec_ctx_t>::zeroed();
-    let init_res = vpx_codec_dec_init_ver(
-        dec.assume_init_mut(),
-        Some(iface),
-        None,
-        0,
-        VPX_DECODER_ABI_VERSION,
-    );
-    assert_eq!(init_res, VPX_CODEC_OK, "dec_init failed");
-    dec.assume_init()
+struct NoopCallbacks;
+impl VideoDecoderCallbacks for NoopCallbacks {
+    fn on_picture_available(&self) {}
+    fn on_format_changed(&self, _format: StreamFormat) {}
 }
 
-/// Decode at most `max_packets` IVF packets from `name`, asserting
-/// per-frame MD5 matches for every *displayed* frame that surfaces.
-///
-/// `max_packets = Some(1)` decodes the first IVF packet — that packet
-/// might be a normal keyframe (1 image out, MD5 verified) or an
-/// invisible keyframe (0 images out, only "didn't crash" verified).
-/// `max_packets = None` decodes the whole file.
-unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
+fn run_one_vector(name: &str, max_packets: Option<usize>) {
     let Some(dir) = test_data_dir(name) else {
         return;
     };
@@ -204,38 +143,37 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
     let expected = read_md5_lines(&md5_path);
 
     let mut reader = IvfReader::open(&ivf_path).expect("open ivf");
-    let mut dec = init_dec();
+    
+    let config = DecoderConfig::new(Codec::VP8);
+    let mut decoder = create_decoder(config, Arc::new(DefaultAllocator), Arc::new(NoopCallbacks))
+        .expect("create_decoder failed");
 
     let mut frame_no = 0usize;
     let mut packets_decoded = 0usize;
-    while let Some(packet) = reader.next_frame() {
+    while let Some(packet_data) = reader.next_frame() {
         if matches!(max_packets, Some(limit) if packets_decoded >= limit) {
             break;
         }
-        let res = vpx_codec_decode(&mut dec, &packet, ptr::null_mut(), 0);
-        assert_eq!(
-            res, VPX_CODEC_OK,
-            "vpx_codec_decode failed on {name} packet {packets_decoded}"
-        );
+        
+        let packet = EncodedPacket {
+            data: Arc::new(packet_data),
+            opaque: None,
+        };
+        
+        decoder.decode(packet).expect("decoder.decode failed");
         packets_decoded += 1;
 
-        let mut iter: *const core::ffi::c_void = ptr::null();
-        loop {
-            match vpx_codec_get_frame(&mut dec, &mut iter) {
-                Some(img) => {
-                    assert!(
-                        frame_no < expected.len(),
-                        "{name}: more decoded frames than md5 lines"
-                    );
-                    let got = md5_of_image(img);
-                    assert_eq!(
-                        got, expected[frame_no],
-                        "{name}: md5 mismatch at frame {frame_no}"
-                    );
-                    frame_no += 1;
-                }
-                None => break,
-            }
+        while let Some(decoded_pic) = decoder.get_picture().expect("get_picture failed") {
+            assert!(
+                frame_no < expected.len(),
+                "{name}: more decoded frames than md5 lines"
+            );
+            let got = md5_of_frame(decoded_pic.frame.as_ref());
+            assert_eq!(
+                got, expected[frame_no],
+                "{name}: md5 mismatch at frame {frame_no}"
+            );
+            frame_no += 1;
         }
     }
 
@@ -247,20 +185,15 @@ unsafe fn run_one_vector(name: &str, max_packets: Option<usize>) {
             expected.len()
         );
     }
-
-    assert_eq!(vpx_codec_destroy(&mut dec), VPX_CODEC_OK);
 }
 
-/// Generates one `#[test] fn keyframe_NNN()` per VP8 conformance vector.
-/// Each test decodes only the first IVF packet and verifies the MD5 of
-/// any displayed frame.
 macro_rules! keyframe_tests {
     ($($(#[$attr:meta])* $id:ident => $vector:literal),* $(,)?) => {
         $(
             #[test]
             $(#[$attr])*
             fn $id() {
-                unsafe { run_one_vector($vector, Some(1)) }
+                run_one_vector($vector, Some(1))
             }
         )*
     };
@@ -331,15 +264,13 @@ keyframe_tests! {
     keyframe_smallsize => "vp80-06-smallsize.ivf",
 }
 
-/// Generates one full-decode test per vector. Each decodes EVERY frame
-/// (keyframe + all inter frames) and verifies the per-frame MD5.
 macro_rules! full_vector_tests {
     ($($(#[$attr:meta])* $id:ident => $vector:literal),* $(,)?) => {
         $(
             #[test]
             $(#[$attr])*
             fn $id() {
-                unsafe { run_one_vector($vector, None) }
+                run_one_vector($vector, None)
             }
         )*
     };
