@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
 use crate::api::*;
@@ -132,10 +133,30 @@ impl VideoFrameAllocator for TrackingAllocator {
     }
 }
 
+struct PooledFrameBuffer {
+    inner: Option<Box<dyn FrameBuffer>>,
+    pool: Arc<Mutex<VecDeque<Box<dyn FrameBuffer>>>>,
+}
+
+impl FrameBuffer for PooledFrameBuffer {
+    fn plane_ptr(&self, plane: VideoPlane) -> Option<NonNull<[u8]>> {
+        self.inner.as_ref().and_then(|b| b.plane_ptr(plane))
+    }
+}
+
+impl Drop for PooledFrameBuffer {
+    fn drop(&mut self) {
+        if let Some(buf) = self.inner.take() {
+            let mut list = self.pool.lock().unwrap();
+            list.push_back(buf);
+        }
+    }
+}
+
 pub struct PoolAllocator {
     inner: DefaultAllocator,
     pub alloc_count: AtomicUsize,
-    pool: Mutex<VecDeque<Box<dyn FrameBuffer>>>,
+    pool: Arc<Mutex<VecDeque<Box<dyn FrameBuffer>>>>,
 }
 
 impl PoolAllocator {
@@ -143,7 +164,7 @@ impl PoolAllocator {
         Arc::new(Self {
             inner: DefaultAllocator,
             alloc_count: AtomicUsize::new(0),
-            pool: Mutex::new(VecDeque::new()),
+            pool: Arc::new(Mutex::new(VecDeque::new())),
         })
     }
 
@@ -157,7 +178,33 @@ impl VideoFrameAllocator for PoolAllocator {
         &self,
         alloc: &BufferAllocation,
     ) -> Result<Box<dyn FrameBuffer>, AllocError> {
-        self.alloc_count.fetch_add(1, Ordering::Relaxed);
-        self.inner.alloc_frame(alloc)
+        let mut list = self.pool.lock().unwrap();
+
+        // Scan the pool for any recycled buffer that is large enough:
+        let found_idx = list.iter().position(|buf| {
+            for plane_alloc in alloc.planes.iter().flatten() {
+                if let Some(slice) = buf.plane_ptr(plane_alloc.plane) {
+                    if slice.len() < plane_alloc.size_bytes {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            true
+        });
+
+        let inner_buf = if let Some(idx) = found_idx {
+            list.remove(idx).unwrap()
+        } else {
+            // Cache miss: allocate fresh memory
+            self.alloc_count.fetch_add(1, Ordering::Relaxed);
+            self.inner.alloc_frame(alloc)?
+        };
+
+        Ok(Box::new(PooledFrameBuffer {
+            inner: Some(inner_buf),
+            pool: self.pool.clone(),
+        }))
     }
 }
