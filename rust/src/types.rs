@@ -940,6 +940,7 @@ pub struct Vp8dComp<'a> {
     pub decoded_key_frame: i32,
     pub independent_partitions: i32,
     pub frame_corrupt_residual: i32,
+    pub latest_alloc_error: Option<crate::api::AllocError>,
 }
 
 // ===========================================================================

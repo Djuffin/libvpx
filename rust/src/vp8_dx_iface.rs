@@ -451,15 +451,19 @@ unsafe fn vp8_decode_resolution_change(
         if (height & 0xf) != 0 { height += 16 - (height & 0xf); }
 
         for i in 0..crate::types::NUM_YV12_BUFFERS {
-            if crate::yv12config::vp8_yv12_alloc_external_frame_buffer(
+            match crate::yv12config::vp8_yv12_alloc_external_frame_buffer(
                 &mut pbi.common.yv12_fb[i],
                 width,
                 height,
                 VP8_BORDER_IN_PIXELS,
                 allocator
-            ).is_err() {
-                crate::alloccommon::vp8_de_alloc_frame_buffers(&mut pbi.common);
-                return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+            ) {
+                Ok(_) => {}
+                Err(e) => {
+                    pbi.latest_alloc_error = Some(e);
+                    crate::alloccommon::vp8_de_alloc_frame_buffers(&mut pbi.common);
+                    return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+                }
             }
         }
 
@@ -473,15 +477,19 @@ unsafe fn vp8_decode_resolution_change(
         pbi.common.fb_idx_ref_cnt[2] = 1;
         pbi.common.fb_idx_ref_cnt[3] = 1;
 
-        if crate::yv12config::vp8_yv12_alloc_external_frame_buffer(
+        match crate::yv12config::vp8_yv12_alloc_external_frame_buffer(
             &mut pbi.common.temp_scale_frame,
             width,
             16,
             VP8_BORDER_IN_PIXELS,
             allocator
-        ).is_err() {
-            crate::alloccommon::vp8_de_alloc_frame_buffers(&mut pbi.common);
-            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+        ) {
+            Ok(_) => {}
+            Err(e) => {
+                pbi.latest_alloc_error = Some(e);
+                crate::alloccommon::vp8_de_alloc_frame_buffers(&mut pbi.common);
+                return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+            }
         }
 
         pbi.common.mb_rows = height >> 4;
@@ -926,8 +934,18 @@ impl crate::api::VideoDecoder for Vp8VideoDecoder {
         let bytes = (*data).as_ref();
         self.pending_opaque = opaque;
 
-        self.decoder.decode(bytes, core::time::Duration::ZERO)
-            .map_err(|e| crate::api::DecoderError::MisformedData(format!("{e:?}")))?;
+        if let Err(e) = self.decoder.decode(bytes, core::time::Duration::ZERO) {
+            if e == crate::vpx_api::VpxCodecErr::VPX_CODEC_MEM_ERROR {
+                let priv_ref = &mut *self.decoder.priv_;
+                if let Some(pbi) = priv_ref.yv12_frame_buffers.pbi.as_mut() {
+                    if let Some(alloc_err) = pbi.latest_alloc_error.take() {
+                        return Err(crate::api::DecoderError::Alloc(alloc_err));
+                    }
+                }
+                return Err(crate::api::DecoderError::Alloc(crate::api::AllocError::OutOfMemory));
+            }
+            return Err(crate::api::DecoderError::MisformedData(format!("{e:?}")));
+        }
 
         let priv_ref = &mut *self.decoder.priv_;
         let mut iter = core::ptr::null();

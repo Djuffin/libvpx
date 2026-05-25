@@ -21,6 +21,9 @@ pub mod tables;
 pub mod types;
 pub mod vp8_cx_stub;
 pub mod vp9_dx_stub;
+#[cfg(test)]
+pub mod api_tests;
+
 
 // ---- vp8/common/ ----
 pub mod alloccommon;
