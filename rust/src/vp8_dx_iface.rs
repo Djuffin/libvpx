@@ -99,6 +99,7 @@ pub struct Vp8AlgPriv<'a> {
     pub img: VpxImage,
     pub img_setup: i32,
     pub yv12_frame_buffers: FrameBuffers<'a>,
+    pub allocator: Option<std::sync::Arc<dyn crate::api::VideoFrameAllocator>>,
     pub user_priv: *mut c_void,
     pub fragments: FragmentData,
 }
@@ -394,7 +395,7 @@ pub unsafe fn vp8_decode(
         if resolution_change != 0 {
             (*pc).width = (*ctx).si.w as i32;
             (*pc).height = (*ctx).si.h as i32;
-            if vp8_decode_resolution_change(&mut *pbi, w, h).is_err() {
+            if vp8_decode_resolution_change(&mut *pbi, w, h, (*ctx).allocator.as_deref()).is_err() {
                 res = update_error_state(&(*pbi).common.error);
                 (*ctx).fragments.count = 0;
                 return res;
@@ -428,6 +429,7 @@ unsafe fn vp8_decode_resolution_change(
     pbi: &mut Vp8dComp<'static>,
     w: u32,
     h: u32,
+    allocator: Option<&dyn crate::api::VideoFrameAllocator>,
 ) -> VpxResult<()> {
     if pbi.common.width <= 0 {
         pbi.common.width = w as i32;
@@ -440,8 +442,62 @@ unsafe fn vp8_decode_resolution_change(
     }
 
     let (cw, ch) = (pbi.common.width, pbi.common.height);
-    if vp8_alloc_frame_buffers(&mut pbi.common, cw, ch) != 0 {
-        return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+    if let Some(allocator) = allocator {
+        crate::alloccommon::vp8_de_alloc_frame_buffers(&mut pbi.common);
+
+        let mut width = cw;
+        let mut height = ch;
+        if (width & 0xf) != 0 { width += 16 - (width & 0xf); }
+        if (height & 0xf) != 0 { height += 16 - (height & 0xf); }
+
+        for i in 0..crate::types::NUM_YV12_BUFFERS {
+            if crate::yv12config::vp8_yv12_alloc_external_frame_buffer(
+                &mut pbi.common.yv12_fb[i],
+                width,
+                height,
+                VP8_BORDER_IN_PIXELS,
+                allocator
+            ).is_err() {
+                crate::alloccommon::vp8_de_alloc_frame_buffers(&mut pbi.common);
+                return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+            }
+        }
+
+        pbi.common.new_fb_idx = 0;
+        pbi.common.lst_fb_idx = 1;
+        pbi.common.gld_fb_idx = 2;
+        pbi.common.alt_fb_idx = 3;
+
+        pbi.common.fb_idx_ref_cnt[0] = 1;
+        pbi.common.fb_idx_ref_cnt[1] = 1;
+        pbi.common.fb_idx_ref_cnt[2] = 1;
+        pbi.common.fb_idx_ref_cnt[3] = 1;
+
+        if crate::yv12config::vp8_yv12_alloc_external_frame_buffer(
+            &mut pbi.common.temp_scale_frame,
+            width,
+            16,
+            VP8_BORDER_IN_PIXELS,
+            allocator
+        ).is_err() {
+            crate::alloccommon::vp8_de_alloc_frame_buffers(&mut pbi.common);
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+        }
+
+        pbi.common.mb_rows = height >> 4;
+        pbi.common.mb_cols = width >> 4;
+        pbi.common.mbs = pbi.common.mb_rows * pbi.common.mb_cols;
+        pbi.common.mode_info_stride = pbi.common.mb_cols + 1;
+        let count = ((pbi.common.mb_cols + 1) * (pbi.common.mb_rows + 1)) as usize;
+        pbi.common.mip = Some(Box::<[crate::types::ModeInfo]>::new_zeroed_slice(count).assume_init());
+
+        pbi.common.above_context = Some(
+            vec![crate::types::EntropyContextPlanes::default(); pbi.common.mb_cols as usize].into_boxed_slice(),
+        );
+    } else {
+        if vp8_alloc_frame_buffers(&mut pbi.common, cw, ch) != 0 {
+            return vpx_internal_error(&mut pbi.common.error, VPX_CODEC_MEM_ERROR);
+        }
     }
 
     // xd->pre = pc->yv12_fb[pc->lst_fb_idx];
