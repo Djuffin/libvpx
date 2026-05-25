@@ -523,38 +523,36 @@ unsafe fn vp8_decode_resolution_change(
     Ok(())
 }
 
-/// `vp8_get_frame` — `vp8/vp8_dx_iface.c:531`.
-pub unsafe fn vp8_get_frame(
-    ctx: *mut Vp8AlgPriv<'static>,
-    iter: *mut VpxCodecIter,
-) -> *mut VpxImage {
-    let mut img: *mut VpxImage = ptr::null_mut();
-
+pub fn vp8_get_frame<'a>(
+    ctx: &'a mut Vp8AlgPriv<'static>,
+    iter: &mut VpxCodecIter,
+) -> Option<&'a mut VpxImage> {
     // iter acts as a flip flop, so an image is only returned on the first
     // call to get_frame.
-    if (*iter).is_null() && (*ctx).yv12_frame_buffers.pbi.is_some() {
+    if iter.is_null() && ctx.yv12_frame_buffers.pbi.is_some() {
         let mut flags: Vp8PpFlags = Vp8PpFlags::default();
 
-        if ((*ctx).base.init_flags & VPX_CODEC_USE_POSTPROC) != 0 {
-            flags.post_proc_flag = (*ctx).postproc_cfg.post_proc_flag;
-            flags.deblocking_level = (*ctx).postproc_cfg.deblocking_level;
-            flags.noise_level = (*ctx).postproc_cfg.noise_level;
+        if (ctx.base.init_flags & VPX_CODEC_USE_POSTPROC) != 0 {
+            flags.post_proc_flag = ctx.postproc_cfg.post_proc_flag;
+            flags.deblocking_level = ctx.postproc_cfg.deblocking_level;
+            flags.noise_level = ctx.postproc_cfg.noise_level;
         }
 
-        let pbi = (*ctx)
+        let pbi = ctx
             .yv12_frame_buffers
             .pbi
             .as_deref_mut()
             .expect("pbi present (guarded by pbi.is_some() above)");
         if let Some(view) = vp8dx_get_raw_frame(pbi, &mut flags) {
-            yuvconfig2image(&mut (*ctx).img, &view, (*ctx).user_priv);
+            yuvconfig2image(&mut ctx.img, &view, ctx.user_priv);
 
-            img = &mut (*ctx).img;
-            *iter = img as *mut c_void;
+            let img_ref = &mut ctx.img;
+            *iter = img_ref as *mut VpxImage as *const core::ffi::c_void;
+            return Some(img_ref);
         }
     }
 
-    img
+    None
 }
 
 /// `image2yuvconfig` — `vp8/vp8_dx_iface.c:560`.
@@ -709,10 +707,7 @@ impl Decoder for Vp8Decoder {
     }
 
     fn get_frame(&mut self) -> Option<&Image> {
-        unsafe {
-            let img = vp8_get_frame(&raw mut *self.priv_, &mut self.iter);
-            if img.is_null() { None } else { Some(&*img) }
-        }
+        vp8_get_frame(&mut self.priv_, &mut self.iter).map(|img| &*img)
     }
 
     fn control(&mut self, cmd: ControlCmd<'_>) -> Result<(), Error> {
@@ -949,10 +944,7 @@ impl crate::api::VideoDecoder for Vp8VideoDecoder {
         let priv_ref = &mut *self.decoder.priv_;
         let mut iter = core::ptr::null();
         
-        // Call the unsafe kernel function to check if a new frame is ready:
-        let img_ptr = unsafe { vp8_get_frame(priv_ref, &mut iter) };
-        
-        if !img_ptr.is_null() {
+        if let Some(_img) = vp8_get_frame(priv_ref, &mut iter) {
             // Retrieve the pbi safely using Option and Box reference:
             let pbi = priv_ref.yv12_frame_buffers.pbi.as_ref().expect("pbi missing");
             let ybf = &pbi.common.yv12_fb[pbi.common.new_fb_idx as usize];
