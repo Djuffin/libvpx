@@ -948,45 +948,46 @@ impl crate::api::VideoDecoder for Vp8VideoDecoder {
 
         let priv_ref = &mut *self.decoder.priv_;
         let mut iter = core::ptr::null();
-        unsafe {
-            let img_ptr = vp8_get_frame(priv_ref, &mut iter);
-            if !img_ptr.is_null() {
-                let pbi = priv_ref.yv12_frame_buffers.pbi_ptr();
-                assert!(!pbi.is_null());
-                let ybf = &(*pbi).common.yv12_fb[(*pbi).common.new_fb_idx as usize];
+        
+        // Call the unsafe kernel function to check if a new frame is ready:
+        let img_ptr = unsafe { vp8_get_frame(priv_ref, &mut iter) };
+        
+        if !img_ptr.is_null() {
+            // Retrieve the pbi safely using Option and Box reference:
+            let pbi = priv_ref.yv12_frame_buffers.pbi.as_ref().expect("pbi missing");
+            let ybf = &pbi.common.yv12_fb[pbi.common.new_fb_idx as usize];
 
-                let format = crate::api::StreamFormat {
-                    codec: crate::api::Codec::VP8,
-                    coded_width: ybf.y_width as usize,
-                    coded_height: ybf.y_height as usize,
-                    crop_left: 0,
-                    crop_top: 0,
-                    display_width: (*pbi).common.width as usize,
-                    display_height: (*pbi).common.height as usize,
-                    color_space: Some(crate::api::ColorSpace {
-                        primaries: crate::api::ColorPrimaries::Unspecified,
-                        transfer: crate::api::TransferCharacteristics::Unspecified,
-                        matrix: crate::api::MatrixCoefficients::Unspecified,
-                        range: crate::api::ColorRange::Limited,
-                    }),
-                    pixel_format: crate::api::PixelFormat::I420,
-                    bit_depth: 8,
-                };
+            let format = crate::api::StreamFormat {
+                codec: crate::api::Codec::VP8,
+                coded_width: ybf.y_width as usize,
+                coded_height: ybf.y_height as usize,
+                crop_left: 0,
+                crop_top: 0,
+                display_width: pbi.common.width as usize,
+                display_height: pbi.common.height as usize,
+                color_space: Some(crate::api::ColorSpace {
+                    primaries: crate::api::ColorPrimaries::Unspecified,
+                    transfer: crate::api::TransferCharacteristics::Unspecified,
+                    matrix: crate::api::MatrixCoefficients::Unspecified,
+                    range: crate::api::ColorRange::Limited,
+                }),
+                pixel_format: crate::api::PixelFormat::I420,
+                bit_depth: 8,
+            };
 
-                if self.last_format.as_ref() != Some(&format) {
-                    self.last_format = Some(format.clone());
-                    self.callbacks.on_format_changed(format.clone());
-                }
-
-                let frame: std::sync::Arc<dyn crate::api::VideoFrame> = std::sync::Arc::new(PublishedFrame::new(ybf, (*pbi).common.width, (*pbi).common.height));
-                self.out_queue.push_back(crate::api::DecodedPicture {
-                    frame,
-                    format,
-                    opaque: self.pending_opaque.take(),
-                });
-
-                self.callbacks.on_picture_available();
+            if self.last_format.as_ref() != Some(&format) {
+                self.last_format = Some(format.clone());
+                self.callbacks.on_format_changed(format.clone());
             }
+
+            let frame: std::sync::Arc<dyn crate::api::VideoFrame> = std::sync::Arc::new(PublishedFrame::new(ybf, pbi.common.width, pbi.common.height));
+            self.out_queue.push_back(crate::api::DecodedPicture {
+                frame,
+                format,
+                opaque: self.pending_opaque.take(),
+            });
+
+            self.callbacks.on_picture_available();
         }
 
         Ok(())
