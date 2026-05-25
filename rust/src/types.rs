@@ -348,6 +348,7 @@ pub struct Yv12BufferConfig {
 
     pub corrupted: i32,
     pub flags: i32,
+    pub ext_buffer: Option<std::sync::Arc<dyn crate::api::FrameBuffer>>,
 }
 
 impl Yv12BufferConfig {

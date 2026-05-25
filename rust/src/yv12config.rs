@@ -136,3 +136,87 @@ pub fn vp8_yv12_alloc_frame_buffer(
 // `vpx_free_frame_buffer`) are guarded by `#if CONFIG_VP9` in the C
 // source and are intentionally omitted from this VP8-only translation.
 // ---------------------------------------------------------------------------
+
+pub fn vp8_yv12_alloc_external_frame_buffer(
+    ybf: &mut Yv12BufferConfig,
+    width: i32,
+    height: i32,
+    border: i32,
+    allocator: &dyn crate::api::VideoFrameAllocator,
+) -> Result<(), crate::api::AllocError> {
+    vp8_yv12_de_alloc_frame_buffer(ybf);
+
+    let aligned_width: i32 = (width + 15) & !15;
+    let aligned_height: i32 = (height + 15) & !15;
+    let y_stride: i32 = ((aligned_width + 2 * border) + 31) & !31;
+    let yplane_size: i32 = (aligned_height + 2 * border) * y_stride;
+    let uv_width: i32 = aligned_width >> 1;
+    let uv_height: i32 = aligned_height >> 1;
+    let uv_stride: i32 = y_stride >> 1;
+    let uvplane_size: i32 = (uv_height + border) * uv_stride;
+    let frame_size: usize = (yplane_size + 2 * uvplane_size) as usize;
+
+    if border & 0x1f != 0 {
+        return Err(crate::api::AllocError::UnsupportedAlignment);
+    }
+
+    let req = crate::api::BufferAllocation {
+        planes: [
+            Some(crate::api::PlaneAllocation {
+                plane: crate::api::VideoPlane::Y,
+                size_bytes: yplane_size as usize,
+                alignment: 32,
+            }),
+            Some(crate::api::PlaneAllocation {
+                plane: crate::api::VideoPlane::U,
+                size_bytes: uvplane_size as usize,
+                alignment: 32,
+            }),
+            Some(crate::api::PlaneAllocation {
+                plane: crate::api::VideoPlane::V,
+                size_bytes: uvplane_size as usize,
+                alignment: 32,
+            }),
+            None,
+        ],
+    };
+
+    let buffer = allocator.alloc_frame(&req)?;
+    let ext_buffer: std::sync::Arc<dyn crate::api::FrameBuffer> = std::sync::Arc::from(buffer);
+
+    ybf.y_crop_width = width;
+    ybf.y_crop_height = height;
+    ybf.y_width = aligned_width;
+    ybf.y_height = aligned_height;
+    ybf.y_stride = y_stride;
+
+    ybf.uv_crop_width = (width + 1) / 2;
+    ybf.uv_crop_height = (height + 1) / 2;
+    ybf.uv_width = uv_width;
+    ybf.uv_height = uv_height;
+    ybf.uv_stride = uv_stride;
+
+    ybf.alpha_width = 0;
+    ybf.alpha_height = 0;
+    ybf.alpha_stride = 0;
+
+    ybf.border = border;
+    ybf.frame_size = frame_size;
+
+    let y_ptr = ext_buffer.plane_ptr(crate::api::VideoPlane::Y).ok_or(crate::api::AllocError::OutOfMemory)?;
+    let u_ptr = ext_buffer.plane_ptr(crate::api::VideoPlane::U).ok_or(crate::api::AllocError::OutOfMemory)?;
+    let v_ptr = ext_buffer.plane_ptr(crate::api::VideoPlane::V).ok_or(crate::api::AllocError::OutOfMemory)?;
+
+    // SAFETY: the allocator guarantees that the returned pointers are valid and aligned.
+    unsafe {
+        ybf.y_region = Some(NonNull::new(std::slice::from_raw_parts_mut(y_ptr.as_ptr(), yplane_size as usize)).unwrap());
+        ybf.u_region = Some(NonNull::new(std::slice::from_raw_parts_mut(u_ptr.as_ptr(), uvplane_size as usize)).unwrap());
+        ybf.v_region = Some(NonNull::new(std::slice::from_raw_parts_mut(v_ptr.as_ptr(), uvplane_size as usize)).unwrap());
+    }
+    ybf.alpha_region = None;
+    ybf.ext_buffer = Some(ext_buffer);
+
+    ybf.corrupted = 0;
+    Ok(())
+}
+
